@@ -10,28 +10,23 @@ pip3 install -r requirements.txt
 ```
 
 2. 環境変数の設定:
-`.env.example`を`.env`にコピーして、必要な情報を入力:
+`.env.example`を`.env`にコピー:
 ```bash
 cp .env.example .env
 ```
 
-3. APIキーの設定方法:
+3. APIキーの設定:
 
-### 方法1: ウォレットの秘密鍵を直接使用
-`.env`ファイルを編集:
-- `HYPERLIQUID_ACCOUNT_ADDRESS`: あなたのウォレットアドレス（公開鍵）
-- `HYPERLIQUID_SECRET_KEY`: あなたのウォレットの秘密鍵
+`.env`ファイルに以下の情報を設定します：
+- `HYPERLIQUID_ACCOUNT_ADDRESS`: ウォレットアドレス
+- `HYPERLIQUID_SECRET_KEY`: 秘密鍵
 - `USE_TESTNET`: テストネットを使用する場合は`true`
 
-### 方法2: APIウォレットを使用（推奨）
-より安全な方法として、APIウォレットを使用することができます：
+### 方法1: ウォレットの秘密鍵を直接使用
+自分のウォレットの秘密鍵を直接設定します。
 
-1. [https://app.hyperliquid.xyz/API](https://app.hyperliquid.xyz/API) にアクセス
-2. 新しいAPIキーを生成
-3. `.env`ファイルを編集:
-   - `HYPERLIQUID_ACCOUNT_ADDRESS`: メインウォレットの公開鍵
-   - `HYPERLIQUID_SECRET_KEY`: 生成されたAPIウォレットの秘密鍵
-   - `USE_TESTNET`: テストネットを使用する場合は`true`
+### 方法2: APIウォレットを使用（推奨）
+より安全な方法として、[https://app.hyperliquid.xyz/API](https://app.hyperliquid.xyz/API) にアクセスしてAPIウォレットを生成
 
 **注意**: APIウォレットを使用する場合、取引に必要な資金をAPIウォレットに転送する必要があります。
 
