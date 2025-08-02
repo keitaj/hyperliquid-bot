@@ -1,0 +1,128 @@
+import logging
+from typing import Dict, List, Optional
+from dataclasses import dataclass
+from datetime import datetime
+import pandas as pd
+from hyperliquid.info import Info
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class MarketData:
+    symbol: str
+    mid_price: float
+    bid: float
+    ask: float
+    spread: float
+    timestamp: datetime
+
+
+class MarketDataManager:
+    def __init__(self, info: Info):
+        self.info = info
+        self._cache = {}
+        
+    def get_all_mids(self) -> Dict[str, float]:
+        try:
+            return self.info.all_mids()
+        except Exception as e:
+            logger.error(f"Error fetching mid prices: {e}")
+            return {}
+    
+    def get_l2_snapshot(self, coin: str) -> Dict:
+        try:
+            return self.info.l2_snapshot(coin)
+        except Exception as e:
+            logger.error(f"Error fetching L2 snapshot for {coin}: {e}")
+            return {}
+    
+    def get_market_data(self, coin: str) -> Optional[MarketData]:
+        try:
+            l2_data = self.get_l2_snapshot(coin)
+            if not l2_data or 'levels' not in l2_data:
+                return None
+                
+            levels = l2_data['levels']
+            if len(levels) < 2 or not levels[0] or not levels[1]:
+                return None
+            
+            bids = levels[0]
+            asks = levels[1]
+            
+            if not bids or not asks:
+                return None
+                
+            best_bid = float(bids[0]['px'])
+            best_ask = float(asks[0]['px'])
+            mid_price = (best_bid + best_ask) / 2
+            spread = best_ask - best_bid
+            
+            market_data = MarketData(
+                symbol=coin,
+                mid_price=mid_price,
+                bid=best_bid,
+                ask=best_ask,
+                spread=spread,
+                timestamp=datetime.now()
+            )
+            
+            self._cache[coin] = market_data
+            return market_data
+            
+        except Exception as e:
+            logger.error(f"Error getting market data for {coin}: {e}")
+            return None
+    
+    def get_candles(self, coin: str, interval: str, lookback: int = 100) -> pd.DataFrame:
+        try:
+            candles = self.info.candles_snapshot(
+                coin=coin,
+                interval=interval,
+                lookback=lookback
+            )
+            
+            if not candles:
+                return pd.DataFrame()
+            
+            df = pd.DataFrame(candles)
+            df['timestamp'] = pd.to_datetime(df['t'], unit='ms')
+            df.set_index('timestamp', inplace=True)
+            
+            for col in ['o', 'h', 'l', 'c', 'v']:
+                if col in df.columns:
+                    df[col] = df[col].astype(float)
+                    
+            df.rename(columns={
+                'o': 'open',
+                'h': 'high',
+                'l': 'low',
+                'c': 'close',
+                'v': 'volume'
+            }, inplace=True)
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"Error fetching candles for {coin}: {e}")
+            return pd.DataFrame()
+    
+    def get_funding_rate(self, coin: str) -> Optional[float]:
+        try:
+            funding_data = self.info.funding_rates()
+            if coin in funding_data:
+                return float(funding_data[coin])
+            return None
+        except Exception as e:
+            logger.error(f"Error fetching funding rate for {coin}: {e}")
+            return None
+    
+    def get_open_interest(self, coin: str) -> Optional[float]:
+        try:
+            oi_data = self.info.open_interest()
+            if coin in oi_data:
+                return float(oi_data[coin])
+            return None
+        except Exception as e:
+            logger.error(f"Error fetching open interest for {coin}: {e}")
+            return None

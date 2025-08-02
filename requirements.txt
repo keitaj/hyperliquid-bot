@@ -1,0 +1,4 @@
+hyperliquid-python-sdk
+python-dotenv
+pandas
+numpy
