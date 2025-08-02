@@ -76,10 +76,28 @@ class MarketDataManager:
     
     def get_candles(self, coin: str, interval: str, lookback: int = 100) -> pd.DataFrame:
         try:
+            # Calculate time range
+            import time
+            end_time = int(time.time() * 1000)  # Current time in milliseconds
+            
+            # Calculate start time based on interval and lookback
+            interval_ms = {
+                '1m': 60 * 1000,
+                '5m': 5 * 60 * 1000,
+                '15m': 15 * 60 * 1000,
+                '1h': 60 * 60 * 1000,
+                '4h': 4 * 60 * 60 * 1000,
+                '1d': 24 * 60 * 60 * 1000
+            }.get(interval, 60 * 1000)  # Default to 1m
+            
+            start_time = end_time - (lookback * interval_ms)
+            
+            # Use the correct API call format with positional arguments
             candles = self.info.candles_snapshot(
-                coin=coin,
-                interval=interval,
-                lookback=lookback
+                coin,
+                interval,
+                start_time,
+                end_time
             )
             
             if not candles:

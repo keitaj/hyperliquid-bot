@@ -43,15 +43,29 @@ class RiskManager:
                 
             margin_summary = user_state['marginSummary']
             
+            # Debug: Print available keys
+            logger.debug(f"Available keys in margin_summary: {list(margin_summary.keys())}")
+            
+            # Use .get() with defaults to handle missing keys
+            # Based on available keys: ['accountValue', 'totalNtlPos', 'totalRawUsd', 'totalMarginUsed']
+            account_value = float(margin_summary.get('accountValue', 0))
+            total_margin_used = float(margin_summary.get('totalMarginUsed', 0))
+            total_position_value = float(margin_summary.get('totalNtlPos', 0))
+            
+            # Calculate derived values
+            available_balance = account_value - total_margin_used
+            leverage = total_position_value / account_value if account_value > 0 else 0
+            margin_ratio = total_margin_used / account_value if account_value > 0 else 0
+            
             metrics = RiskMetrics(
-                total_balance=float(margin_summary['accountValue']),
-                available_balance=float(margin_summary['availableBalance']),
-                margin_used=float(margin_summary['marginUsed']),
-                total_position_value=float(margin_summary['totalPositionValue']),
-                unrealized_pnl=float(margin_summary['unrealizedPnl']),
-                realized_pnl=float(margin_summary.get('realizedPnl', 0)),
-                leverage=float(margin_summary['leverage']),
-                margin_ratio=float(margin_summary['marginRatio']),
+                total_balance=account_value,
+                available_balance=available_balance,
+                margin_used=total_margin_used,
+                total_position_value=total_position_value,
+                unrealized_pnl=0.0,  # Not available in current response
+                realized_pnl=0.0,  # Not available in current response
+                leverage=leverage,
+                margin_ratio=margin_ratio,
                 num_positions=len(user_state.get('assetPositions', [])),
                 timestamp=datetime.now()
             )

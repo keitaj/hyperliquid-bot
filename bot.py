@@ -133,13 +133,13 @@ class HyperliquidBot:
         while self.running:
             try:
                 self._trading_loop()
-                time.sleep(1)
+                time.sleep(5)  # Increased delay to avoid rate limits
             except KeyboardInterrupt:
                 logger.info("Stopping bot...")
                 self.running = False
             except Exception as e:
                 logger.error(f"Error in main loop: {e}")
-                time.sleep(5)
+                time.sleep(10)  # Longer delay on error
     
     def _trading_loop(self):
         risk_checks = self.risk_manager.check_risk_limits()
