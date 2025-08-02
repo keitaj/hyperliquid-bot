@@ -37,8 +37,19 @@ cp .env.example .env
 
 ## 使い方
 
+### 基本的な使い方
 ```bash
+# デフォルト戦略（Simple MA）で起動
 python3 bot.py
+
+# 特定の戦略を指定して起動
+python3 bot.py --strategy rsi
+
+# 取引対象通貨を指定
+python3 bot.py --strategy macd --coins BTC ETH
+
+# ヘルプを表示
+python3 bot.py --help
 ```
 
 ## 機能
@@ -46,7 +57,40 @@ python3 bot.py
 - **Market Data**: リアルタイム価格、オーダーブック、ローソク足データの取得
 - **Order Management**: 指値注文、成行注文の発注とキャンセル
 - **Risk Management**: レバレッジ制限、最大ドローダウン、日次損失制限
-- **Strategy**: シンプルな移動平均クロスオーバー戦略
+- **Multiple Strategies**: 6つの異なる取引戦略から選択可能
+
+## 取引戦略
+
+### 1. Simple MA Strategy (`simple_ma`)
+- 短期・長期移動平均のクロスオーバー
+- ゴールデンクロスで買い、デッドクロスで売り
+- パラメータ: `fast_ma_period=10`, `slow_ma_period=30`
+
+### 2. RSI Strategy (`rsi`)
+- 相対力指数による買われすぎ・売られすぎの判断
+- RSI < 30で買い、RSI > 70で売り
+- パラメータ: `rsi_period=14`, `oversold=30`, `overbought=70`
+
+### 3. Bollinger Bands Strategy (`bollinger_bands`)
+- ボリンジャーバンドによる価格の乖離を利用
+- 下限バンドタッチで買い、上限バンドタッチで売り
+- ボラティリティ拡大時のブレイクアウト検出
+- パラメータ: `bb_period=20`, `std_dev=2`
+
+### 4. MACD Strategy (`macd`)
+- MACD線とシグナル線のクロスオーバー
+- ダイバージェンス（逆行現象）の検出機能
+- パラメータ: `fast_ema=12`, `slow_ema=26`, `signal_ema=9`
+
+### 5. Grid Trading Strategy (`grid_trading`)
+- レンジ相場で一定間隔の買い・売り注文を配置
+- 価格が上下するたびに利益を積み重ねる
+- パラメータ: `grid_levels=10`, `grid_spacing_pct=0.5%`
+
+### 6. Breakout Strategy (`breakout`)
+- サポート・レジスタンスラインのブレイクアウトを検出
+- 出来高確認とATRによるストップロス管理
+- パラメータ: `lookback_period=20`, `volume_multiplier=1.5`
 
 ## ファイル構成
 
@@ -58,6 +102,11 @@ python3 bot.py
 - `strategies/`: 取引戦略
   - `base_strategy.py`: 戦略の基底クラス
   - `simple_ma_strategy.py`: 移動平均戦略
+  - `rsi_strategy.py`: RSI戦略
+  - `bollinger_bands_strategy.py`: ボリンジャーバンド戦略
+  - `macd_strategy.py`: MACD戦略
+  - `grid_trading_strategy.py`: グリッド取引戦略
+  - `breakout_strategy.py`: ブレイクアウト戦略
 
 ## 注意事項
 

@@ -8,7 +8,14 @@ from config import Config
 from market_data import MarketDataManager
 from order_manager import OrderManager
 from risk_manager import RiskManager
-from strategies import SimpleMAStrategy
+from strategies import (
+    SimpleMAStrategy,
+    RSIStrategy,
+    BollingerBandsStrategy,
+    MACDStrategy,
+    GridTradingStrategy,
+    BreakoutStrategy
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -18,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 class HyperliquidBot:
-    def __init__(self, strategy_name: str = "simple_ma", coins: List[str] = None):
+    def __init__(self, strategy_name: str = "simple_ma", coins: List[str] = None, strategy_config: Dict = None):
         Config.validate()
         self.account_address = Config.ACCOUNT_ADDRESS
         self.info = Info(Config.API_URL, skip_ws=True)
@@ -37,23 +44,87 @@ class HyperliquidBot:
             'daily_loss_limit_pct': 0.05
         })
         
-        strategy_config = {
-            'fast_ma_period': 10,
-            'slow_ma_period': 30,
-            'position_size_usd': 100,
-            'max_positions': 3,
-            'take_profit_percent': 5,
-            'stop_loss_percent': 2
+        # Default strategy configurations
+        default_configs = {
+            'simple_ma': {
+                'fast_ma_period': 10,
+                'slow_ma_period': 30,
+                'position_size_usd': 100,
+                'max_positions': 3,
+                'take_profit_percent': 5,
+                'stop_loss_percent': 2
+            },
+            'rsi': {
+                'rsi_period': 14,
+                'oversold_threshold': 30,
+                'overbought_threshold': 70,
+                'position_size_usd': 100,
+                'max_positions': 3,
+                'take_profit_percent': 5,
+                'stop_loss_percent': 2
+            },
+            'bollinger_bands': {
+                'bb_period': 20,
+                'std_dev': 2,
+                'squeeze_threshold': 0.02,
+                'position_size_usd': 100,
+                'max_positions': 3,
+                'take_profit_percent': 5,
+                'stop_loss_percent': 2
+            },
+            'macd': {
+                'fast_ema': 12,
+                'slow_ema': 26,
+                'signal_ema': 9,
+                'position_size_usd': 100,
+                'max_positions': 3,
+                'take_profit_percent': 5,
+                'stop_loss_percent': 2
+            },
+            'grid_trading': {
+                'grid_levels': 10,
+                'grid_spacing_pct': 0.5,
+                'position_size_per_grid': 50,
+                'max_positions': 5,
+                'range_period': 100,
+                'take_profit_percent': 2,
+                'stop_loss_percent': 5
+            },
+            'breakout': {
+                'lookback_period': 20,
+                'volume_multiplier': 1.5,
+                'breakout_confirmation_bars': 2,
+                'atr_period': 14,
+                'position_size_usd': 100,
+                'max_positions': 3,
+                'take_profit_percent': 7,
+                'stop_loss_percent': 3
+            }
         }
         
-        if strategy_name == "simple_ma":
-            self.strategy = SimpleMAStrategy(
+        # Use provided config or default config for the strategy
+        config = strategy_config or default_configs.get(strategy_name, {})
+        
+        # Strategy factory
+        strategy_map = {
+            'simple_ma': SimpleMAStrategy,
+            'rsi': RSIStrategy,
+            'bollinger_bands': BollingerBandsStrategy,
+            'macd': MACDStrategy,
+            'grid_trading': GridTradingStrategy,
+            'breakout': BreakoutStrategy
+        }
+        
+        if strategy_name in strategy_map:
+            self.strategy = strategy_map[strategy_name](
                 self.market_data,
                 self.order_manager,
-                strategy_config
+                config
             )
+            logger.info(f"Initialized {strategy_name} strategy")
         else:
-            raise ValueError(f"Unknown strategy: {strategy_name}")
+            available_strategies = ', '.join(strategy_map.keys())
+            raise ValueError(f"Unknown strategy: {strategy_name}. Available strategies: {available_strategies}")
             
         self.coins = coins or ["BTC", "ETH", "SOL"]
         
@@ -162,5 +233,26 @@ class HyperliquidBot:
 
 
 if __name__ == "__main__":
-    bot = HyperliquidBot()
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Hyperliquid Trading Bot')
+    parser.add_argument(
+        '--strategy',
+        type=str,
+        default='simple_ma',
+        choices=['simple_ma', 'rsi', 'bollinger_bands', 'macd', 'grid_trading', 'breakout'],
+        help='Trading strategy to use'
+    )
+    parser.add_argument(
+        '--coins',
+        type=str,
+        nargs='+',
+        default=['BTC', 'ETH', 'SOL'],
+        help='Coins to trade'
+    )
+    
+    args = parser.parse_args()
+    
+    logger.info(f"Starting bot with {args.strategy} strategy for coins: {args.coins}")
+    bot = HyperliquidBot(strategy_name=args.strategy, coins=args.coins)
     bot.run()
