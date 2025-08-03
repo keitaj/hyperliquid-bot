@@ -1,0 +1,71 @@
+MIT License
+
+Copyright (c) 2025 Keita
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+IMPORTANT FINANCIAL DISCLAIMER
+================================================================================
+
+THIS SOFTWARE IS PROVIDED FOR EDUCATIONAL AND INFORMATIONAL PURPOSES ONLY.
+IT IS NOT FINANCIAL ADVICE AND SHOULD NOT BE RELIED UPON AS THE SOLE BASIS
+FOR ANY INVESTMENT OR TRADING DECISIONS.
+
+BY USING THIS SOFTWARE, YOU ACKNOWLEDGE AND AGREE THAT:
+
+1. NO INVESTMENT ADVICE: This software does not constitute investment, financial,
+   legal, or tax advice. You should consult with qualified professionals before
+   making any trading or investment decisions.
+
+2. USE AT YOUR OWN RISK: Trading cryptocurrencies and digital assets involves
+   substantial risk of loss and is not suitable for all investors. Past
+   performance is not indicative of future results.
+
+3. NO WARRANTY OF PROFITABILITY: The authors make no representations or
+   warranties about the profitability, success rate, or performance of any
+   trading strategies implemented by this software.
+
+4. YOUR RESPONSIBILITY: You are solely responsible for:
+   - Any financial losses incurred while using this software
+   - Ensuring compliance with all applicable laws and regulations
+   - Understanding the code and strategies before using them
+   - Testing thoroughly with small amounts or testnet before real trading
+
+5. NO LIABILITY: IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
+   FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+   DAMAGES (INCLUDING, BUT NOT LIMITED TO, FINANCIAL LOSSES, LOST PROFITS,
+   OR BUSINESS INTERRUPTION) ARISING IN ANY WAY OUT OF THE USE OF THIS
+   SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+6. MARKET RISKS: You acknowledge that:
+   - Cryptocurrency markets are highly volatile and unpredictable
+   - Technical issues, API failures, or bugs may cause unexpected losses
+   - Regulatory changes may affect the legality or viability of trading
+   - Exchange risks including insolvency, hacking, or fund freezing exist
+
+7. TESTING REQUIRED: This software is experimental. Always:
+   - Review and understand all code before use
+   - Test extensively on testnet or with minimal amounts
+   - Monitor actively when running with real funds
+   - Implement your own risk management controls
+
+BY USING THIS SOFTWARE, YOU ACKNOWLEDGE THAT YOU HAVE READ, UNDERSTOOD, AND
+AGREE TO BE BOUND BY THIS DISCLAIMER AND ACCEPT ALL RISKS ASSOCIATED WITH
+THE USE OF THIS SOFTWARE.
