@@ -235,6 +235,7 @@ class HyperliquidBot:
 
 if __name__ == "__main__":
     import argparse
+    import json
     
     parser = argparse.ArgumentParser(description='Hyperliquid Trading Bot')
     parser.add_argument(
@@ -252,8 +253,116 @@ if __name__ == "__main__":
         help='Coins to trade'
     )
     
+    # Common strategy parameters
+    parser.add_argument('--position-size-usd', type=float, help='Position size in USD')
+    parser.add_argument('--max-positions', type=int, help='Maximum number of positions')
+    parser.add_argument('--take-profit-percent', type=float, help='Take profit percentage')
+    parser.add_argument('--stop-loss-percent', type=float, help='Stop loss percentage')
+    
+    # Simple MA strategy parameters
+    parser.add_argument('--fast-ma-period', type=int, help='Fast MA period (simple_ma)')
+    parser.add_argument('--slow-ma-period', type=int, help='Slow MA period (simple_ma)')
+    
+    # RSI strategy parameters
+    parser.add_argument('--rsi-period', type=int, help='RSI period (rsi)')
+    parser.add_argument('--oversold-threshold', type=int, help='RSI oversold threshold (rsi)')
+    parser.add_argument('--overbought-threshold', type=int, help='RSI overbought threshold (rsi)')
+    
+    # Bollinger Bands parameters
+    parser.add_argument('--bb-period', type=int, help='Bollinger Bands period (bollinger_bands)')
+    parser.add_argument('--std-dev', type=float, help='Standard deviation (bollinger_bands)')
+    parser.add_argument('--squeeze-threshold', type=float, help='Squeeze threshold (bollinger_bands)')
+    
+    # MACD parameters
+    parser.add_argument('--fast-ema', type=int, help='Fast EMA period (macd)')
+    parser.add_argument('--slow-ema', type=int, help='Slow EMA period (macd)')
+    parser.add_argument('--signal-ema', type=int, help='Signal EMA period (macd)')
+    
+    # Grid Trading parameters
+    parser.add_argument('--grid-levels', type=int, help='Number of grid levels (grid_trading)')
+    parser.add_argument('--grid-spacing-pct', type=float, help='Grid spacing percentage (grid_trading)')
+    parser.add_argument('--position-size-per-grid', type=float, help='Position size per grid (grid_trading)')
+    parser.add_argument('--range-period', type=int, help='Range period (grid_trading)')
+    
+    # Breakout parameters
+    parser.add_argument('--lookback-period', type=int, help='Lookback period (breakout)')
+    parser.add_argument('--volume-multiplier', type=float, help='Volume multiplier (breakout)')
+    parser.add_argument('--breakout-confirmation-bars', type=int, help='Breakout confirmation bars (breakout)')
+    parser.add_argument('--atr-period', type=int, help='ATR period (breakout)')
+    
     args = parser.parse_args()
     
+    # Build strategy config from command line arguments
+    strategy_config = {}
+    
+    # Common parameters
+    if args.position_size_usd is not None:
+        strategy_config['position_size_usd'] = args.position_size_usd
+    if args.max_positions is not None:
+        strategy_config['max_positions'] = args.max_positions
+    if args.take_profit_percent is not None:
+        strategy_config['take_profit_percent'] = args.take_profit_percent
+    if args.stop_loss_percent is not None:
+        strategy_config['stop_loss_percent'] = args.stop_loss_percent
+    
+    # Strategy-specific parameters
+    if args.strategy == 'simple_ma':
+        if args.fast_ma_period is not None:
+            strategy_config['fast_ma_period'] = args.fast_ma_period
+        if args.slow_ma_period is not None:
+            strategy_config['slow_ma_period'] = args.slow_ma_period
+    
+    elif args.strategy == 'rsi':
+        if args.rsi_period is not None:
+            strategy_config['rsi_period'] = args.rsi_period
+        if args.oversold_threshold is not None:
+            strategy_config['oversold_threshold'] = args.oversold_threshold
+        if args.overbought_threshold is not None:
+            strategy_config['overbought_threshold'] = args.overbought_threshold
+    
+    elif args.strategy == 'bollinger_bands':
+        if args.bb_period is not None:
+            strategy_config['bb_period'] = args.bb_period
+        if args.std_dev is not None:
+            strategy_config['std_dev'] = args.std_dev
+        if args.squeeze_threshold is not None:
+            strategy_config['squeeze_threshold'] = args.squeeze_threshold
+    
+    elif args.strategy == 'macd':
+        if args.fast_ema is not None:
+            strategy_config['fast_ema'] = args.fast_ema
+        if args.slow_ema is not None:
+            strategy_config['slow_ema'] = args.slow_ema
+        if args.signal_ema is not None:
+            strategy_config['signal_ema'] = args.signal_ema
+    
+    elif args.strategy == 'grid_trading':
+        if args.grid_levels is not None:
+            strategy_config['grid_levels'] = args.grid_levels
+        if args.grid_spacing_pct is not None:
+            strategy_config['grid_spacing_pct'] = args.grid_spacing_pct
+        if args.position_size_per_grid is not None:
+            strategy_config['position_size_per_grid'] = args.position_size_per_grid
+        if args.range_period is not None:
+            strategy_config['range_period'] = args.range_period
+    
+    elif args.strategy == 'breakout':
+        if args.lookback_period is not None:
+            strategy_config['lookback_period'] = args.lookback_period
+        if args.volume_multiplier is not None:
+            strategy_config['volume_multiplier'] = args.volume_multiplier
+        if args.breakout_confirmation_bars is not None:
+            strategy_config['breakout_confirmation_bars'] = args.breakout_confirmation_bars
+        if args.atr_period is not None:
+            strategy_config['atr_period'] = args.atr_period
+    
     logger.info(f"Starting bot with {args.strategy} strategy for coins: {args.coins}")
-    bot = HyperliquidBot(strategy_name=args.strategy, coins=args.coins)
+    if strategy_config:
+        logger.info(f"Custom parameters: {json.dumps(strategy_config, indent=2)}")
+    
+    bot = HyperliquidBot(
+        strategy_name=args.strategy, 
+        coins=args.coins,
+        strategy_config=strategy_config if strategy_config else None
+    )
     bot.run()

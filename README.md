@@ -47,6 +47,51 @@ python3 bot.py --strategy macd --coins BTC ETH
 python3 bot.py --help
 ```
 
+### パラメーターのカスタマイズ
+各戦略のパラメーターをコマンドラインから指定できます：
+
+#### 共通パラメーター
+```bash
+# ポジションサイズと損益設定を変更
+python3 bot.py --position-size-usd 200 --take-profit-percent 10 --stop-loss-percent 3
+```
+
+#### Simple MA戦略
+```bash
+# 移動平均期間をカスタマイズ
+python3 bot.py --strategy simple_ma --fast-ma-period 5 --slow-ma-period 20
+```
+
+#### RSI戦略
+```bash
+# RSI閾値をカスタマイズ
+python3 bot.py --strategy rsi --rsi-period 21 --oversold-threshold 25 --overbought-threshold 75
+```
+
+#### Bollinger Bands戦略
+```bash
+# ボリンジャーバンド設定を変更
+python3 bot.py --strategy bollinger_bands --bb-period 25 --std-dev 2.5
+```
+
+#### MACD戦略
+```bash
+# MACD期間を調整
+python3 bot.py --strategy macd --fast-ema 10 --slow-ema 20 --signal-ema 7
+```
+
+#### Grid Trading戦略
+```bash
+# グリッド設定をカスタマイズ
+python3 bot.py --strategy grid_trading --grid-levels 15 --grid-spacing-pct 0.3 --position-size-per-grid 30
+```
+
+#### Breakout戦略
+```bash
+# ブレイクアウト検出パラメーター
+python3 bot.py --strategy breakout --lookback-period 30 --volume-multiplier 2.0 --atr-period 20
+```
+
 ### 残高・ポジション確認
 ```bash
 # アカウント残高とポジションを確認
@@ -82,33 +127,70 @@ No open positions
 ### 1. Simple MA Strategy (`simple_ma`)
 - 短期・長期移動平均のクロスオーバー
 - ゴールデンクロスで買い、デッドクロスで売り
-- パラメータ: `fast_ma_period=10`, `slow_ma_period=30`
+- デフォルトパラメータ: `fast_ma_period=10`, `slow_ma_period=30`
+
+#### コマンドラインパラメータ:
+- `--fast-ma-period`: 短期移動平均の期間（デフォルト: 10）
+- `--slow-ma-period`: 長期移動平均の期間（デフォルト: 30）
 
 ### 2. RSI Strategy (`rsi`)
 - 相対力指数による買われすぎ・売られすぎの判断
 - RSI < 30で買い、RSI > 70で売り
-- パラメータ: `rsi_period=14`, `oversold=30`, `overbought=70`
+- デフォルトパラメータ: `rsi_period=14`, `oversold=30`, `overbought=70`
+
+#### コマンドラインパラメータ:
+- `--rsi-period`: RSI計算期間（デフォルト: 14）
+- `--oversold-threshold`: 売られすぎ判定の閾値（デフォルト: 30）
+- `--overbought-threshold`: 買われすぎ判定の閾値（デフォルト: 70）
 
 ### 3. Bollinger Bands Strategy (`bollinger_bands`)
 - ボリンジャーバンドによる価格の乖離を利用
 - 下限バンドタッチで買い、上限バンドタッチで売り
 - ボラティリティ拡大時のブレイクアウト検出
-- パラメータ: `bb_period=20`, `std_dev=2`
+- デフォルトパラメータ: `bb_period=20`, `std_dev=2`, `squeeze_threshold=0.02`
+
+#### コマンドラインパラメータ:
+- `--bb-period`: ボリンジャーバンドの計算期間（デフォルト: 20）
+- `--std-dev`: 標準偏差の倍数（デフォルト: 2）
+- `--squeeze-threshold`: スクイーズ判定の閾値（デフォルト: 0.02）
 
 ### 4. MACD Strategy (`macd`)
 - MACD線とシグナル線のクロスオーバー
 - ダイバージェンス（逆行現象）の検出機能
-- パラメータ: `fast_ema=12`, `slow_ema=26`, `signal_ema=9`
+- デフォルトパラメータ: `fast_ema=12`, `slow_ema=26`, `signal_ema=9`
+
+#### コマンドラインパラメータ:
+- `--fast-ema`: 短期EMAの期間（デフォルト: 12）
+- `--slow-ema`: 長期EMAの期間（デフォルト: 26）
+- `--signal-ema`: シグナル線EMAの期間（デフォルト: 9）
 
 ### 5. Grid Trading Strategy (`grid_trading`)
 - レンジ相場で一定間隔の買い・売り注文を配置
 - 価格が上下するたびに利益を積み重ねる
-- パラメータ: `grid_levels=10`, `grid_spacing_pct=0.5%`
+- デフォルトパラメータ: `grid_levels=10`, `grid_spacing_pct=0.5%`, `range_period=100`
+
+#### コマンドラインパラメータ:
+- `--grid-levels`: グリッドのレベル数（デフォルト: 10）
+- `--grid-spacing-pct`: グリッド間隔のパーセンテージ（デフォルト: 0.5）
+- `--position-size-per-grid`: 各グリッドのポジションサイズ（デフォルト: 50）
+- `--range-period`: レンジ計算期間（デフォルト: 100）
 
 ### 6. Breakout Strategy (`breakout`)
 - サポート・レジスタンスラインのブレイクアウトを検出
 - 出来高確認とATRによるストップロス管理
-- パラメータ: `lookback_period=20`, `volume_multiplier=1.5`
+- デフォルトパラメータ: `lookback_period=20`, `volume_multiplier=1.5`, `atr_period=14`
+
+#### コマンドラインパラメータ:
+- `--lookback-period`: サポート・レジスタンス計算期間（デフォルト: 20）
+- `--volume-multiplier`: 出来高確認の倍率（デフォルト: 1.5）
+- `--breakout-confirmation-bars`: ブレイクアウト確認に必要なバー数（デフォルト: 2）
+- `--atr-period`: ATR計算期間（デフォルト: 14）
+
+## 技術ドキュメント
+
+より詳細な技術情報については、以下のドキュメントを参照してください：
+
+- [タイムフレームとパラメータの詳細](./docs/technical-notes/timeframes.md) - 各戦略のタイムフレームとパラメータ単位の説明
 
 ## ファイル構成
 
@@ -125,6 +207,8 @@ No open positions
   - `macd_strategy.py`: MACD戦略
   - `grid_trading_strategy.py`: グリッド取引戦略
   - `breakout_strategy.py`: ブレイクアウト戦略
+- `docs/`: ドキュメント
+  - `technical-notes/`: 技術的な詳細ドキュメント
 
 ## 注意事項
 
