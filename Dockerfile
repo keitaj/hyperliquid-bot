@@ -1,20 +1,27 @@
-FROM python:3.11-slim
+# Multi-stage build for smaller image size
+FROM python:3.11-slim as builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
-    git \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements first for better caching
+# Copy requirements and install Python dependencies
 COPY requirements.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Production stage
+FROM python:3.11-slim
+
+# Copy only necessary Python packages from builder
+COPY --from=builder /root/.local /home/botuser/.local
+
+# Set working directory
+WORKDIR /app
 
 # Copy application code
 COPY . .
@@ -26,7 +33,8 @@ RUN mkdir -p logs
 RUN useradd -m -u 1000 botuser && chown -R botuser:botuser /app
 USER botuser
 
-# Set environment variables
+# Add local bin to PATH for user-installed packages
+ENV PATH=/home/botuser/.local/bin:$PATH
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
