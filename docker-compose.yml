@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  hyperliquid-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hyperliquid-bot
+    restart: unless-stopped
+    # Runtime environment variables (not build-time)
+    # .env file contents are not included in the image, loaded only when container starts
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+      - ./strategies:/app/strategies:ro
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - bot-network
+
+networks:
+  bot-network:
+    driver: bridge
