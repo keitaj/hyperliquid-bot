@@ -5,6 +5,7 @@ from datetime import datetime
 from enum import Enum
 from hyperliquid.exchange import Exchange
 from hyperliquid.info import Info
+from rate_limiter import api_wrapper
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,8 @@ class OrderManager:
     
     def _place_order(self, order: Order) -> Optional[Order]:
         try:
-            result = self.exchange.order(
+            result = api_wrapper.call(
+                self.exchange.order,
                 coin=order.coin,
                 is_buy=(order.side == OrderSide.BUY),
                 sz=order.size,
@@ -123,7 +125,7 @@ class OrderManager:
     
     def cancel_order(self, order_id: int, coin: str) -> bool:
         try:
-            result = self.exchange.cancel(coin=coin, oid=order_id)
+            result = api_wrapper.call(self.exchange.cancel, coin=coin, oid=order_id)
             
             if result and 'status' in result and result['status'] == 'ok':
                 if order_id in self.active_orders:
@@ -143,7 +145,7 @@ class OrderManager:
         cancelled_count = 0
         
         try:
-            open_orders = self.info.open_orders(self.account_address)
+            open_orders = api_wrapper.call(self.info.open_orders, self.account_address)
             
             for order in open_orders:
                 if coin is None or order['coin'] == coin:
@@ -159,7 +161,7 @@ class OrderManager:
     
     def get_open_orders(self, coin: Optional[str] = None) -> List[Dict]:
         try:
-            open_orders = self.info.open_orders(self.account_address)
+            open_orders = api_wrapper.call(self.info.open_orders, self.account_address)
             
             if coin:
                 return [o for o in open_orders if o['coin'] == coin]
@@ -176,7 +178,7 @@ class OrderManager:
             
             for order_id, order in list(self.active_orders.items()):
                 if order_id not in open_order_ids:
-                    fills = self.info.user_fills(self.account_address)
+                    fills = api_wrapper.call(self.info.user_fills, self.account_address)
                     
                     for fill in fills:
                         if int(fill['oid']) == order_id:
@@ -193,7 +195,7 @@ class OrderManager:
     
     def get_position(self, coin: str) -> Optional[Dict]:
         try:
-            user_state = self.info.user_state(self.account_address)
+            user_state = api_wrapper.call(self.info.user_state, self.account_address)
             
             if 'assetPositions' in user_state:
                 for position in user_state['assetPositions']:
@@ -207,7 +209,7 @@ class OrderManager:
     
     def get_all_positions(self) -> List[Dict]:
         try:
-            user_state = self.info.user_state(self.account_address)
+            user_state = api_wrapper.call(self.info.user_state, self.account_address)
             
             if 'assetPositions' in user_state:
                 return [p['position'] for p in user_state['assetPositions']]

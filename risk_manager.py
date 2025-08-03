@@ -2,6 +2,7 @@ import logging
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from rate_limiter import api_wrapper
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,7 @@ class RiskManager:
         
     def get_current_metrics(self) -> Optional[RiskMetrics]:
         try:
-            user_state = self.info.user_state(self.account_address)
+            user_state = api_wrapper.call(self.info.user_state, self.account_address)
             
             if not user_state or 'marginSummary' not in user_state:
                 return None

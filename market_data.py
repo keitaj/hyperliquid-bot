@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import pandas as pd
 from hyperliquid.info import Info
+from rate_limiter import api_wrapper
 
 logger = logging.getLogger(__name__)
 
@@ -25,14 +26,14 @@ class MarketDataManager:
         
     def get_all_mids(self) -> Dict[str, float]:
         try:
-            return self.info.all_mids()
+            return api_wrapper.call(self.info.all_mids)
         except Exception as e:
             logger.error(f"Error fetching mid prices: {e}")
             return {}
     
     def get_l2_snapshot(self, coin: str) -> Dict:
         try:
-            return self.info.l2_snapshot(coin)
+            return api_wrapper.call(self.info.l2_snapshot, coin)
         except Exception as e:
             logger.error(f"Error fetching L2 snapshot for {coin}: {e}")
             return {}
@@ -93,7 +94,8 @@ class MarketDataManager:
             start_time = end_time - (lookback * interval_ms)
             
             # Use the correct API call format with positional arguments
-            candles = self.info.candles_snapshot(
+            candles = api_wrapper.call(
+                self.info.candles_snapshot,
                 coin,
                 interval,
                 start_time,
@@ -127,7 +129,7 @@ class MarketDataManager:
     
     def get_funding_rate(self, coin: str) -> Optional[float]:
         try:
-            funding_data = self.info.funding_rates()
+            funding_data = api_wrapper.call(self.info.funding_rates)
             if coin in funding_data:
                 return float(funding_data[coin])
             return None
@@ -137,7 +139,7 @@ class MarketDataManager:
     
     def get_open_interest(self, coin: str) -> Optional[float]:
         try:
-            oi_data = self.info.open_interest()
+            oi_data = api_wrapper.call(self.info.open_interest)
             if coin in oi_data:
                 return float(oi_data[coin])
             return None

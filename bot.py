@@ -134,7 +134,8 @@ class HyperliquidBot:
     
     def get_user_state(self) -> Dict:
         try:
-            user_state = self.info.user_state(self.account_address)
+            from rate_limiter import api_wrapper
+            user_state = api_wrapper.call(self.info.user_state, self.account_address)
             logger.info(f"User state retrieved successfully")
             return user_state
         except Exception as e:
@@ -204,7 +205,7 @@ class HyperliquidBot:
         while self.running:
             try:
                 self._trading_loop()
-                time.sleep(5)  # Increased delay to avoid rate limits
+                time.sleep(10)  # Increased delay to avoid rate limits
             except KeyboardInterrupt:
                 logger.info("Stopping bot...")
                 self.running = False
