@@ -2,22 +2,60 @@
 
 Hyperliquid DEX用の自動取引ボットです。
 
-## セットアップ
+## ⚠️ 重要な免責事項
 
-1. 依存関係のインストール:
+**このソフトウェアは教育および情報提供のみを目的としています。**
+
+本ソフトウェアの使用により生じるいかなる金銭的損失についても、作者は一切の責任を負いません。仮想通貨取引は大きなリスクを伴います。実際の取引を行う前に、必ず以下をご確認ください：
+
+- コードを十分に理解し、テストしてください
+- 少額またはテストネットで動作を確認してください
+- 自己の責任において使用してください
+- 投資判断の前に専門家に相談することをお勧めします
+
+詳細な免責事項は [LICENSE](./LICENSE) ファイルをご確認ください。
+
+---
+
+## 🚀 クイックスタート（Docker推奨）
+
 ```bash
-pip3 install -r requirements.txt
+# 1. 環境変数ファイルを作成
+cp .env.example .env
+# .envファイルを編集してAPIキーを設定
+
+# 2. ボットを起動
+docker run --env-file .env ghcr.io/keitaj/hyperliquid-bot:latest
+
+# 3. カスタム戦略で起動
+docker run --env-file .env ghcr.io/keitaj/hyperliquid-bot:latest \
+  python3 bot.py --strategy rsi --rsi-period 21
 ```
 
-2. 環境変数の設定:
-`.env.example`を`.env`にコピー:
+## 📋 目次
+
+- [セットアップ](#セットアップ)
+- [使い方](#使い方)
+  - [Docker での使い方（推奨）](#-docker-での使い方推奨)
+  - [Python での使い方](#-python-での使い方)
+- [取引戦略](#取引戦略)
+- [機能](#機能)
+- [技術ドキュメント](#技術ドキュメント)
+- [ファイル構成](#ファイル構成)
+
+## セットアップ
+
+### 環境変数ファイルの作成
+
 ```bash
 cp .env.example .env
 ```
 
-3. APIキーの設定:
+### APIキーの設定
 
-`.env`ファイルに以下の情報を設定します：
+`.env`ファイルを編集して以下の情報を設定します：
+
+**設定項目:**
 - `HYPERLIQUID_ACCOUNT_ADDRESS`: ウォレットアドレス
 - `HYPERLIQUID_PRIVATE_KEY`: Private key
 - `USE_TESTNET`: テストネットを使用する場合は`true`
@@ -38,7 +76,7 @@ cp .env.example .env
 ```bash
 # 環境変数ファイルを作成
 cp .env.example .env
-nano .env  # APIキーを設定
+# .envファイルを編集してAPIキーを設定
 ```
 
 #### 基本的な使い方
@@ -54,14 +92,23 @@ docker run --env-file .env ghcr.io/keitaj/hyperliquid-bot:latest \
 docker run -d --name hyperliquid-bot --env-file .env \
   -v $(pwd)/logs:/app/logs ghcr.io/keitaj/hyperliquid-bot:latest
 docker logs -f hyperliquid-bot
+
+# 残高確認
+docker run --rm --env-file .env ghcr.io/keitaj/hyperliquid-bot:latest \
+  python3 check_balance.py
 ```
 
 #### 利用可能なイメージタグ
 - `latest` - 最新安定版
-- `v1.0.0` - 特定バージョン
+- `v0.1.0` - 特定バージョン
 - `main` - 開発版（最新のmainブランチ）
 
 ### 🐍 Python での使い方
+
+#### 依存関係のインストール
+```bash
+pip3 install -r requirements.txt
+```
 
 #### 基本的な使い方
 ```bash
@@ -78,54 +125,37 @@ python3 bot.py --strategy macd --coins BTC ETH
 python3 bot.py --help
 ```
 
-### パラメーターのカスタマイズ
-各戦略のパラメーターをコマンドラインから指定できます：
+#### パラメーターのカスタマイズ
 
-#### 共通パラメーター
+**共通パラメーター**
 ```bash
 # ポジションサイズと損益設定を変更
 python3 bot.py --position-size-usd 200 --take-profit-percent 10 --stop-loss-percent 3
 ```
 
-#### Simple MA戦略
+**戦略別パラメーター**
 ```bash
-# 移動平均期間をカスタマイズ
+# Simple MA戦略
 python3 bot.py --strategy simple_ma --fast-ma-period 5 --slow-ma-period 20
-```
 
-#### RSI戦略
-```bash
-# RSI閾値をカスタマイズ
+# RSI戦略
 python3 bot.py --strategy rsi --rsi-period 21 --oversold-threshold 25 --overbought-threshold 75
-```
 
-#### Bollinger Bands戦略
-```bash
-# ボリンジャーバンド設定を変更
+# Bollinger Bands戦略
 python3 bot.py --strategy bollinger_bands --bb-period 25 --std-dev 2.5
-```
 
-#### MACD戦略
-```bash
-# MACD期間を調整
+# MACD戦略
 python3 bot.py --strategy macd --fast-ema 10 --slow-ema 20 --signal-ema 7
-```
 
-#### Grid Trading戦略
-```bash
-# グリッド設定をカスタマイズ
+# Grid Trading戦略
 python3 bot.py --strategy grid_trading --grid-levels 15 --grid-spacing-pct 0.3 --position-size-per-grid 30
-```
 
-#### Breakout戦略
-```bash
-# ブレイクアウト検出パラメーター
+# Breakout戦略
 python3 bot.py --strategy breakout --lookback-period 30 --volume-multiplier 2.0 --atr-period 20
 ```
 
-### 残高・ポジション確認
+#### 残高・ポジション確認
 ```bash
-# アカウント残高とポジションを確認
 python3 check_balance.py
 ```
 
@@ -160,7 +190,7 @@ No open positions
 - ゴールデンクロスで買い、デッドクロスで売り
 - デフォルトパラメータ: `fast_ma_period=10`, `slow_ma_period=30`
 
-#### コマンドラインパラメータ:
+**コマンドラインパラメータ:**
 - `--fast-ma-period`: 短期移動平均の期間（デフォルト: 10）
 - `--slow-ma-period`: 長期移動平均の期間（デフォルト: 30）
 
@@ -169,7 +199,7 @@ No open positions
 - RSI < 30で買い、RSI > 70で売り
 - デフォルトパラメータ: `rsi_period=14`, `oversold=30`, `overbought=70`
 
-#### コマンドラインパラメータ:
+**コマンドラインパラメータ:**
 - `--rsi-period`: RSI計算期間（デフォルト: 14）
 - `--oversold-threshold`: 売られすぎ判定の閾値（デフォルト: 30）
 - `--overbought-threshold`: 買われすぎ判定の閾値（デフォルト: 70）
@@ -180,7 +210,7 @@ No open positions
 - ボラティリティ拡大時のブレイクアウト検出
 - デフォルトパラメータ: `bb_period=20`, `std_dev=2`, `squeeze_threshold=0.02`
 
-#### コマンドラインパラメータ:
+**コマンドラインパラメータ:**
 - `--bb-period`: ボリンジャーバンドの計算期間（デフォルト: 20）
 - `--std-dev`: 標準偏差の倍数（デフォルト: 2）
 - `--squeeze-threshold`: スクイーズ判定の閾値（デフォルト: 0.02）
@@ -190,7 +220,7 @@ No open positions
 - ダイバージェンス（逆行現象）の検出機能
 - デフォルトパラメータ: `fast_ema=12`, `slow_ema=26`, `signal_ema=9`
 
-#### コマンドラインパラメータ:
+**コマンドラインパラメータ:**
 - `--fast-ema`: 短期EMAの期間（デフォルト: 12）
 - `--slow-ema`: 長期EMAの期間（デフォルト: 26）
 - `--signal-ema`: シグナル線EMAの期間（デフォルト: 9）
@@ -200,7 +230,7 @@ No open positions
 - 価格が上下するたびに利益を積み重ねる
 - デフォルトパラメータ: `grid_levels=10`, `grid_spacing_pct=0.5%`, `range_period=100`
 
-#### コマンドラインパラメータ:
+**コマンドラインパラメータ:**
 - `--grid-levels`: グリッドのレベル数（デフォルト: 10）
 - `--grid-spacing-pct`: グリッド間隔のパーセンテージ（デフォルト: 0.5）
 - `--position-size-per-grid`: 各グリッドのポジションサイズ（デフォルト: 50）
@@ -211,7 +241,7 @@ No open positions
 - 出来高確認とATRによるストップロス管理
 - デフォルトパラメータ: `lookback_period=20`, `volume_multiplier=1.5`, `atr_period=14`
 
-#### コマンドラインパラメータ:
+**コマンドラインパラメータ:**
 - `--lookback-period`: サポート・レジスタンス計算期間（デフォルト: 20）
 - `--volume-multiplier`: 出来高確認の倍率（デフォルト: 1.5）
 - `--breakout-confirmation-bars`: ブレイクアウト確認に必要なバー数（デフォルト: 2）
@@ -222,6 +252,7 @@ No open positions
 より詳細な技術情報については、以下のドキュメントを参照してください：
 
 - [タイムフレームとパラメータの詳細](./docs/technical-notes/timeframes.md) - 各戦略のタイムフレームとパラメータ単位の説明
+- [Docker リリースプロセス](./docs/docker-release.md) - Dockerイメージの自動リリースについて
 
 ## ファイル構成
 
@@ -246,16 +277,3 @@ No open positions
 - 本番環境で使用する前に、必ずテストネットで動作確認してください
 - 秘密鍵は安全に管理してください
 - リスク管理パラメータは慎重に設定してください
-
-## ⚠️ 重要な免責事項
-
-**このソフトウェアは教育および情報提供のみを目的としています。**
-
-本ソフトウェアの使用により生じるいかなる金銭的損失についても、作者は一切の責任を負いません。仮想通貨取引は大きなリスクを伴います。実際の取引を行う前に、必ず以下をご確認ください：
-
-- コードを十分に理解し、テストしてください
-- 少額またはテストネットで動作を確認してください
-- 自己の責任において使用してください
-- 投資判断の前に専門家に相談することをお勧めします
-
-詳細な免責事項は [LICENSE](./LICENSE) ファイルをご確認ください。

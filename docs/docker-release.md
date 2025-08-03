@@ -13,13 +13,13 @@ git push origin main
 ### 2. 安定版のリリース
 ```bash
 # バージョンタグを作成
-git tag v1.0.0
-git push origin v1.0.0
+git tag v0.1.0
+git push origin v0.1.0
 ```
 **結果**: 以下のイメージが作成される
-- `ghcr.io/keitaj/hyperliquid-bot:v1.0.0`
-- `ghcr.io/keitaj/hyperliquid-bot:v1.0`
-- `ghcr.io/keitaj/hyperliquid-bot:v1`
+- `ghcr.io/keitaj/hyperliquid-bot:v0.1.0`
+- `ghcr.io/keitaj/hyperliquid-bot:v0.1`
+- `ghcr.io/keitaj/hyperliquid-bot:v0`
 - `ghcr.io/keitaj/hyperliquid-bot:latest`
 
 ## 📦 イメージの使用方法
@@ -32,8 +32,8 @@ docker run --env-file .env ghcr.io/keitaj/hyperliquid-bot:latest
 
 ### 特定バージョンを使用
 ```bash
-docker pull ghcr.io/keitaj/hyperliquid-bot:v1.0.0
-docker run --env-file .env ghcr.io/keitaj/hyperliquid-bot:v1.0.0
+docker pull ghcr.io/keitaj/hyperliquid-bot:v0.1.0
+docker run --env-file .env ghcr.io/keitaj/hyperliquid-bot:v0.1.0
 ```
 
 ### 開発版を使用（最新のmainブランチ）
@@ -56,23 +56,28 @@ docker run --env-file .env ghcr.io/keitaj/hyperliquid-bot:main
 ## 📋 バージョン管理のベストプラクティス
 
 ### セマンティックバージョニング
-- `v1.0.0` - メジャーリリース（破壊的変更）
-- `v1.1.0` - マイナーリリース（機能追加）
-- `v1.1.1` - パッチリリース（バグ修正）
+- `v0.1.0` - 初期リリース
+- `v0.2.0` - マイナーリリース（機能追加）
+- `v0.1.1` - パッチリリース（バグ修正）
+- `v1.0.0` - メジャーリリース（安定版）
 
 ### リリース例
 ```bash
+# 初期リリース
+git tag v0.1.0
+git push origin v0.1.0
+
 # 機能追加
-git tag v1.1.0
-git push origin v1.1.0
+git tag v0.2.0
+git push origin v0.2.0
 
 # バグ修正
-git tag v1.1.1
-git push origin v1.1.1
+git tag v0.1.1
+git push origin v0.1.1
 
-# 破壊的変更
-git tag v2.0.0
-git push origin v2.0.0
+# 安定版リリース
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
 ## ⚡ 自動化機能
