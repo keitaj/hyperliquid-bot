@@ -90,7 +90,6 @@ docker run --rm --env-file .env ghcr.io/keitaj/hyperliquid-bot:latest \
 #### 利用可能なイメージタグ
 - `latest` - 最新安定版
 - `v0.1.0` - 特定バージョン
-- `main` - 開発版（最新のmainブランチ）
 
 ### 🐍 Python での使い方
 
