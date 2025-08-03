@@ -17,21 +17,6 @@ Hyperliquid DEX用の自動取引ボットです。
 
 ---
 
-## 🚀 クイックスタート（Docker推奨）
-
-```bash
-# 1. 環境変数ファイルを作成
-cp .env.example .env
-# .envファイルを編集してAPIキーを設定
-
-# 2. ボットを起動
-docker run --env-file .env ghcr.io/keitaj/hyperliquid-bot:latest
-
-# 3. カスタム戦略で起動
-docker run --env-file .env ghcr.io/keitaj/hyperliquid-bot:latest \
-  python3 bot.py --strategy rsi --rsi-period 21
-```
-
 ## 📋 目次
 
 - [セットアップ](#セットアップ)
@@ -88,7 +73,11 @@ docker run --env-file .env ghcr.io/keitaj/hyperliquid-bot:latest
 docker run --env-file .env ghcr.io/keitaj/hyperliquid-bot:latest \
   python3 bot.py --strategy rsi --rsi-period 21 --oversold-threshold 25
 
-# ログを確認したい場合
+# 取引対象通貨を指定して実行
+docker run --env-file .env ghcr.io/keitaj/hyperliquid-bot:latest \
+  python3 bot.py --strategy macd --coins BTC ETH
+
+# デーモン実行（バックグラウンドで継続動作）
 docker run -d --name hyperliquid-bot --env-file .env \
   -v $(pwd)/logs:/app/logs ghcr.io/keitaj/hyperliquid-bot:latest
 docker logs -f hyperliquid-bot
