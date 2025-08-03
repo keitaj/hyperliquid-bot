@@ -130,7 +130,7 @@ class HyperliquidBot:
         
     def _load_wallet(self):
         from eth_account import Account
-        return Account.from_key(Config.SECRET_KEY)
+        return Account.from_key(Config.PRIVATE_KEY)
     
     def get_user_state(self) -> Dict:
         try:

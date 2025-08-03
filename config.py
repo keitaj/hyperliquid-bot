@@ -6,7 +6,7 @@ load_dotenv()
 
 class Config:
     ACCOUNT_ADDRESS = os.getenv("HYPERLIQUID_ACCOUNT_ADDRESS")
-    SECRET_KEY = os.getenv("HYPERLIQUID_SECRET_KEY")
+    PRIVATE_KEY = os.getenv("HYPERLIQUID_PRIVATE_KEY")
     USE_TESTNET = os.getenv("USE_TESTNET", "true").lower() == "true"
     
     API_URL = constants.TESTNET_API_URL if USE_TESTNET else constants.MAINNET_API_URL
@@ -18,5 +18,5 @@ class Config:
     def validate(cls):
         if not cls.ACCOUNT_ADDRESS:
             raise ValueError("HYPERLIQUID_ACCOUNT_ADDRESS not found in environment")
-        if not cls.SECRET_KEY:
-            raise ValueError("HYPERLIQUID_SECRET_KEY not found in environment")
+        if not cls.PRIVATE_KEY:
+            raise ValueError("HYPERLIQUID_PRIVATE_KEY not found in environment")

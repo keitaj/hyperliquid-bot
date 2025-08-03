@@ -19,11 +19,11 @@ cp .env.example .env
 
 `.env`ファイルに以下の情報を設定します：
 - `HYPERLIQUID_ACCOUNT_ADDRESS`: ウォレットアドレス
-- `HYPERLIQUID_SECRET_KEY`: 秘密鍵
+- `HYPERLIQUID_PRIVATE_KEY`: Private key
 - `USE_TESTNET`: テストネットを使用する場合は`true`
 
-### 方法1: ウォレットの秘密鍵を直接使用
-自分のウォレットの秘密鍵を直接設定します。
+### 方法1: ウォレットのprivate keyを直接使用
+自分のウォレットのprivate keyを直接設定します。
 
 ### 方法2: APIウォレットを使用（推奨）
 より安全な方法として、[https://app.hyperliquid.xyz/API](https://app.hyperliquid.xyz/API) にアクセスしてAPIウォレットを生成
