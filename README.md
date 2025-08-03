@@ -32,7 +32,38 @@ cp .env.example .env
 
 ## 使い方
 
-### 基本的な使い方
+### 🐳 Docker での使い方（推奨）
+
+#### 事前準備
+```bash
+# 環境変数ファイルを作成
+cp .env.example .env
+nano .env  # APIキーを設定
+```
+
+#### 基本的な使い方
+```bash
+# 最新安定版を使用
+docker run --env-file .env ghcr.io/keitaj/hyperliquid-bot:latest
+
+# 特定の戦略とパラメーターで実行
+docker run --env-file .env ghcr.io/keitaj/hyperliquid-bot:latest \
+  python3 bot.py --strategy rsi --rsi-period 21 --oversold-threshold 25
+
+# ログを確認したい場合
+docker run -d --name hyperliquid-bot --env-file .env \
+  -v $(pwd)/logs:/app/logs ghcr.io/keitaj/hyperliquid-bot:latest
+docker logs -f hyperliquid-bot
+```
+
+#### 利用可能なイメージタグ
+- `latest` - 最新安定版
+- `v1.0.0` - 特定バージョン
+- `main` - 開発版（最新のmainブランチ）
+
+### 🐍 Python での使い方
+
+#### 基本的な使い方
 ```bash
 # デフォルト戦略（Simple MA）で起動
 python3 bot.py
