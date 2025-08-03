@@ -95,12 +95,12 @@ class OrderManager:
         try:
             result = api_wrapper.call(
                 self.exchange.order,
-                coin=order.coin,
-                is_buy=(order.side == OrderSide.BUY),
-                sz=order.size,
-                limit_px=order.price,
-                order_type=order.order_type,
-                reduce_only=order.reduce_only
+                order.coin,
+                (order.side == OrderSide.BUY),
+                order.size,
+                order.price,
+                order.order_type,
+                order.reduce_only
             )
             
             if result and 'status' in result and result['status'] == 'ok':
@@ -125,7 +125,7 @@ class OrderManager:
     
     def cancel_order(self, order_id: int, coin: str) -> bool:
         try:
-            result = api_wrapper.call(self.exchange.cancel, coin=coin, oid=order_id)
+            result = api_wrapper.call(self.exchange.cancel, coin, order_id)
             
             if result and 'status' in result and result['status'] == 'ok':
                 if order_id in self.active_orders:
