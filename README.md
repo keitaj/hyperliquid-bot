@@ -1,153 +1,155 @@
 # Hyperliquid Trading Bot
 
-Hyperliquid DEX用の自動取引ボットです。
+**English** | [日本語](README_ja.md)
 
-## ⚠️ 重要な免責事項
+Automated trading bot for Hyperliquid DEX.
 
-**このソフトウェアは教育および情報提供のみを目的としています。**
+## ⚠️ Important Disclaimer
 
-本ソフトウェアの使用により生じるいかなる金銭的損失についても、作者は一切の責任を負いません。仮想通貨取引は大きなリスクを伴います。実際の取引を行う前に、必ず以下をご確認ください：
+**This software is for educational and informational purposes only.**
 
-- コードを十分に理解し、テストしてください
-- 少額またはテストネットで動作を確認してください
-- 自己の責任において使用してください
-- 投資判断の前に専門家に相談することをお勧めします
+The author assumes no responsibility for any financial losses resulting from the use of this software. Cryptocurrency trading involves significant risks. Before engaging in actual trading, please ensure the following:
 
-詳細な免責事項は [LICENSE](./LICENSE) ファイルをご確認ください。
+- Understand and thoroughly test the code
+- Verify operation with small amounts or on testnet
+- Use at your own risk
+- Consult with experts before making investment decisions
+
+Please refer to the [LICENSE](./LICENSE) file for detailed disclaimer.
 
 ---
 
-## 📋 目次
+## 📋 Table of Contents
 
-- [セットアップ](#セットアップ)
-- [使い方](#使い方)
-  - [Docker での使い方（推奨）](#-docker-での使い方推奨)
-  - [Python での使い方](#-python-での使い方)
-- [取引戦略](#取引戦略)
-- [機能](#機能)
-- [技術ドキュメント](#技術ドキュメント)
-- [ファイル構成](#ファイル構成)
+- [Setup](#setup)
+- [Usage](#usage)
+  - [Docker Usage (Recommended)](#-docker-usage-recommended)
+  - [Python Usage](#-python-usage)
+- [Trading Strategies](#trading-strategies)
+- [Features](#features)
+- [Technical Documentation](#technical-documentation)
+- [File Structure](#file-structure)
 
-## セットアップ
+## Setup
 
-### 環境変数ファイルの作成
+### Create Environment File
 
 ```bash
 cp .env.example .env
 ```
 
-### APIキーの設定
+### API Key Configuration
 
-`.env`ファイルを編集して以下の情報を設定します：
+Edit the `.env` file and configure the following information:
 
-**設定項目:**
-- `HYPERLIQUID_ACCOUNT_ADDRESS`: ウォレットアドレス
+**Configuration Items:**
+- `HYPERLIQUID_ACCOUNT_ADDRESS`: Wallet address
 - `HYPERLIQUID_PRIVATE_KEY`: Private key
-- `USE_TESTNET`: テストネットを使用する場合は`true`
+- `USE_TESTNET`: Set to `true` to use testnet
 
-### 方法1: ウォレットのprivate keyを直接使用
-自分のウォレットのprivate keyを直接設定します。
+### Method 1: Direct Private Key Usage
+Set your wallet's private key directly.
 
-### 方法2: APIウォレットを使用（推奨）
-より安全な方法として、[https://app.hyperliquid.xyz/API](https://app.hyperliquid.xyz/API) にアクセスしてAPIウォレットを生成
+### Method 2: API Wallet Usage (Recommended)
+For a more secure approach, visit [https://app.hyperliquid.xyz/API](https://app.hyperliquid.xyz/API) to generate an API wallet.
 
-**注意**: APIウォレットを使用する場合、取引に必要な資金をAPIウォレットに転送する必要があります。
+**Note**: When using an API wallet, you need to transfer the necessary funds for trading to the API wallet.
 
-## 使い方
+## Usage
 
-### 🐳 Docker での使い方（推奨）
+### 🐳 Docker Usage (Recommended)
 
-#### 事前準備
+#### Prerequisites
 ```bash
-# 環境変数ファイルを作成
+# Create environment file
 cp .env.example .env
-# .envファイルを編集してAPIキーを設定
+# Edit .env file to set API keys
 ```
 
-#### 基本的な使い方
+#### Basic Usage
 ```bash
-# 最新安定版を使用
+# Use latest stable version
 docker run --env-file .env ghcr.io/keitaj/hyperliquid-bot:latest
 
-# 特定の戦略とパラメーターで実行
+# Run with specific strategy and parameters
 docker run --env-file .env ghcr.io/keitaj/hyperliquid-bot:latest \
   python3 bot.py --strategy rsi --rsi-period 21 --oversold-threshold 25
 
-# 取引対象通貨を指定して実行
+# Run with specific trading coins
 docker run --env-file .env ghcr.io/keitaj/hyperliquid-bot:latest \
   python3 bot.py --strategy macd --coins BTC ETH
 
-# デーモン実行（バックグラウンドで継続動作）
+# Daemon execution (continuous background operation)
 docker run -d --name hyperliquid-bot --env-file .env \
   -v $(pwd)/logs:/app/logs ghcr.io/keitaj/hyperliquid-bot:latest
 docker logs -f hyperliquid-bot
 
-# 残高確認
+# Check balance
 docker run --rm --env-file .env ghcr.io/keitaj/hyperliquid-bot:latest \
   python3 check_balance.py
 ```
 
-#### 利用可能なイメージタグ
-- `latest` - 最新安定版
-- `v0.1.0` - 特定バージョン
+#### Available Image Tags
+- `latest` - Latest stable version
+- `v0.1.0` - Specific version
 
-### 🐍 Python での使い方
+### 🐍 Python Usage
 
-#### 依存関係のインストール
+#### Install Dependencies
 ```bash
 pip3 install -r requirements.txt
 ```
 
-#### 基本的な使い方
+#### Basic Usage
 ```bash
-# デフォルト戦略（Simple MA）で起動
+# Start with default strategy (Simple MA)
 python3 bot.py
 
-# 特定の戦略を指定して起動
+# Start with specific strategy
 python3 bot.py --strategy rsi
 
-# 取引対象通貨を指定
+# Specify trading coins
 python3 bot.py --strategy macd --coins BTC ETH
 
-# ヘルプを表示
+# Show help
 python3 bot.py --help
 ```
 
-#### パラメーターのカスタマイズ
+#### Parameter Customization
 
-**共通パラメーター**
+**Common Parameters**
 ```bash
-# ポジションサイズと損益設定を変更
+# Change position size and profit/loss settings
 python3 bot.py --position-size-usd 200 --take-profit-percent 10 --stop-loss-percent 3
 ```
 
-**戦略別パラメーター**
+**Strategy-Specific Parameters**
 ```bash
-# Simple MA戦略
+# Simple MA Strategy
 python3 bot.py --strategy simple_ma --fast-ma-period 5 --slow-ma-period 20
 
-# RSI戦略
+# RSI Strategy
 python3 bot.py --strategy rsi --rsi-period 21 --oversold-threshold 25 --overbought-threshold 75
 
-# Bollinger Bands戦略
+# Bollinger Bands Strategy
 python3 bot.py --strategy bollinger_bands --bb-period 25 --std-dev 2.5
 
-# MACD戦略
+# MACD Strategy
 python3 bot.py --strategy macd --fast-ema 10 --slow-ema 20 --signal-ema 7
 
-# Grid Trading戦略
+# Grid Trading Strategy
 python3 bot.py --strategy grid_trading --grid-levels 15 --grid-spacing-pct 0.3 --position-size-per-grid 30
 
-# Breakout戦略
+# Breakout Strategy
 python3 bot.py --strategy breakout --lookback-period 30 --volume-multiplier 2.0 --atr-period 20
 ```
 
-#### 残高・ポジション確認
+#### Balance & Position Check
 ```bash
 python3 check_balance.py
 ```
 
-実行例:
+Example output:
 ```
 ==================================================
 🏦 HYPERLIQUID ACCOUNT BALANCE
@@ -164,104 +166,104 @@ No open positions
 ==================================================
 ```
 
-## 機能
+## Features
 
-- **Market Data**: リアルタイム価格、オーダーブック、ローソク足データの取得
-- **Order Management**: 指値注文、成行注文の発注とキャンセル
-- **Risk Management**: レバレッジ制限、最大ドローダウン、日次損失制限
-- **Multiple Strategies**: 6つの異なる取引戦略から選択可能
+- **Market Data**: Real-time price, order book, and candlestick data retrieval
+- **Order Management**: Limit and market order placement and cancellation
+- **Risk Management**: Leverage limits, maximum drawdown, daily loss limits
+- **Multiple Strategies**: Choose from 6 different trading strategies
 
-## 取引戦略
+## Trading Strategies
 
 ### 1. Simple MA Strategy (`simple_ma`)
-- 短期・長期移動平均のクロスオーバー
-- ゴールデンクロスで買い、デッドクロスで売り
-- デフォルトパラメータ: `fast_ma_period=10`, `slow_ma_period=30`
+- Short-term and long-term moving average crossover
+- Buy on golden cross, sell on death cross
+- Default parameters: `fast_ma_period=10`, `slow_ma_period=30`
 
-**コマンドラインパラメータ:**
-- `--fast-ma-period`: 短期移動平均の期間（デフォルト: 10）
-- `--slow-ma-period`: 長期移動平均の期間（デフォルト: 30）
+**Command-line Parameters:**
+- `--fast-ma-period`: Fast moving average period (default: 10)
+- `--slow-ma-period`: Slow moving average period (default: 30)
 
 ### 2. RSI Strategy (`rsi`)
-- 相対力指数による買われすぎ・売られすぎの判断
-- RSI < 30で買い、RSI > 70で売り
-- デフォルトパラメータ: `rsi_period=14`, `oversold=30`, `overbought=70`
+- Relative Strength Index for overbought/oversold conditions
+- Buy when RSI < 30, sell when RSI > 70
+- Default parameters: `rsi_period=14`, `oversold=30`, `overbought=70`
 
-**コマンドラインパラメータ:**
-- `--rsi-period`: RSI計算期間（デフォルト: 14）
-- `--oversold-threshold`: 売られすぎ判定の閾値（デフォルト: 30）
-- `--overbought-threshold`: 買われすぎ判定の閾値（デフォルト: 70）
+**Command-line Parameters:**
+- `--rsi-period`: RSI calculation period (default: 14)
+- `--oversold-threshold`: Oversold threshold (default: 30)
+- `--overbought-threshold`: Overbought threshold (default: 70)
 
 ### 3. Bollinger Bands Strategy (`bollinger_bands`)
-- ボリンジャーバンドによる価格の乖離を利用
-- 下限バンドタッチで買い、上限バンドタッチで売り
-- ボラティリティ拡大時のブレイクアウト検出
-- デフォルトパラメータ: `bb_period=20`, `std_dev=2`, `squeeze_threshold=0.02`
+- Uses price deviation from Bollinger Bands
+- Buy on lower band touch, sell on upper band touch
+- Breakout detection during volatility expansion
+- Default parameters: `bb_period=20`, `std_dev=2`, `squeeze_threshold=0.02`
 
-**コマンドラインパラメータ:**
-- `--bb-period`: ボリンジャーバンドの計算期間（デフォルト: 20）
-- `--std-dev`: 標準偏差の倍数（デフォルト: 2）
-- `--squeeze-threshold`: スクイーズ判定の閾値（デフォルト: 0.02）
+**Command-line Parameters:**
+- `--bb-period`: Bollinger Bands calculation period (default: 20)
+- `--std-dev`: Standard deviation multiplier (default: 2)
+- `--squeeze-threshold`: Squeeze detection threshold (default: 0.02)
 
 ### 4. MACD Strategy (`macd`)
-- MACD線とシグナル線のクロスオーバー
-- ダイバージェンス（逆行現象）の検出機能
-- デフォルトパラメータ: `fast_ema=12`, `slow_ema=26`, `signal_ema=9`
+- MACD line and signal line crossover
+- Divergence detection capability
+- Default parameters: `fast_ema=12`, `slow_ema=26`, `signal_ema=9`
 
-**コマンドラインパラメータ:**
-- `--fast-ema`: 短期EMAの期間（デフォルト: 12）
-- `--slow-ema`: 長期EMAの期間（デフォルト: 26）
-- `--signal-ema`: シグナル線EMAの期間（デフォルト: 9）
+**Command-line Parameters:**
+- `--fast-ema`: Fast EMA period (default: 12)
+- `--slow-ema`: Slow EMA period (default: 26)
+- `--signal-ema`: Signal line EMA period (default: 9)
 
 ### 5. Grid Trading Strategy (`grid_trading`)
-- レンジ相場で一定間隔の買い・売り注文を配置
-- 価格が上下するたびに利益を積み重ねる
-- デフォルトパラメータ: `grid_levels=10`, `grid_spacing_pct=0.5%`, `range_period=100`
+- Places buy and sell orders at regular intervals in ranging markets
+- Accumulates profits as price moves up and down
+- Default parameters: `grid_levels=10`, `grid_spacing_pct=0.5%`, `range_period=100`
 
-**コマンドラインパラメータ:**
-- `--grid-levels`: グリッドのレベル数（デフォルト: 10）
-- `--grid-spacing-pct`: グリッド間隔のパーセンテージ（デフォルト: 0.5）
-- `--position-size-per-grid`: 各グリッドのポジションサイズ（デフォルト: 50）
-- `--range-period`: レンジ計算期間（デフォルト: 100）
+**Command-line Parameters:**
+- `--grid-levels`: Number of grid levels (default: 10)
+- `--grid-spacing-pct`: Grid spacing percentage (default: 0.5)
+- `--position-size-per-grid`: Position size per grid (default: 50)
+- `--range-period`: Range calculation period (default: 100)
 
 ### 6. Breakout Strategy (`breakout`)
-- サポート・レジスタンスラインのブレイクアウトを検出
-- 出来高確認とATRによるストップロス管理
-- デフォルトパラメータ: `lookback_period=20`, `volume_multiplier=1.5`, `atr_period=14`
+- Detects support and resistance line breakouts
+- Volume confirmation and ATR-based stop loss management
+- Default parameters: `lookback_period=20`, `volume_multiplier=1.5`, `atr_period=14`
 
-**コマンドラインパラメータ:**
-- `--lookback-period`: サポート・レジスタンス計算期間（デフォルト: 20）
-- `--volume-multiplier`: 出来高確認の倍率（デフォルト: 1.5）
-- `--breakout-confirmation-bars`: ブレイクアウト確認に必要なバー数（デフォルト: 2）
-- `--atr-period`: ATR計算期間（デフォルト: 14）
+**Command-line Parameters:**
+- `--lookback-period`: Support/resistance calculation period (default: 20)
+- `--volume-multiplier`: Volume confirmation multiplier (default: 1.5)
+- `--breakout-confirmation-bars`: Bars required for breakout confirmation (default: 2)
+- `--atr-period`: ATR calculation period (default: 14)
 
-## 技術ドキュメント
+## Technical Documentation
 
-より詳細な技術情報については、以下のドキュメントを参照してください：
+For more detailed technical information, please refer to the following documents:
 
-- [タイムフレームとパラメータの詳細](./docs/technical-notes/timeframes.md) - 各戦略のタイムフレームとパラメータ単位の説明
-- [Docker リリースプロセス](./docs/docker-release.md) - Dockerイメージの自動リリースについて
+- [Timeframes and Parameters Details](./docs/technical-notes/timeframes.md) - Explanation of timeframes and parameter units for each strategy
+- [Docker Release Process](./docs/docker-release.md) - About automatic Docker image releases
 
-## ファイル構成
+## File Structure
 
-- `bot.py`: メインのボットクラス
-- `config.py`: 設定管理
-- `market_data.py`: マーケットデータの取得
-- `order_manager.py`: 注文管理
-- `risk_manager.py`: リスク管理
-- `strategies/`: 取引戦略
-  - `base_strategy.py`: 戦略の基底クラス
-  - `simple_ma_strategy.py`: 移動平均戦略
-  - `rsi_strategy.py`: RSI戦略
-  - `bollinger_bands_strategy.py`: ボリンジャーバンド戦略
-  - `macd_strategy.py`: MACD戦略
-  - `grid_trading_strategy.py`: グリッド取引戦略
-  - `breakout_strategy.py`: ブレイクアウト戦略
-- `docs/`: ドキュメント
-  - `technical-notes/`: 技術的な詳細ドキュメント
+- `bot.py`: Main bot class
+- `config.py`: Configuration management
+- `market_data.py`: Market data retrieval
+- `order_manager.py`: Order management
+- `risk_manager.py`: Risk management
+- `strategies/`: Trading strategies
+  - `base_strategy.py`: Base strategy class
+  - `simple_ma_strategy.py`: Moving average strategy
+  - `rsi_strategy.py`: RSI strategy
+  - `bollinger_bands_strategy.py`: Bollinger Bands strategy
+  - `macd_strategy.py`: MACD strategy
+  - `grid_trading_strategy.py`: Grid trading strategy
+  - `breakout_strategy.py`: Breakout strategy
+- `docs/`: Documentation
+  - `technical-notes/`: Technical detail documents
 
-## 注意事項
+## Notes
 
-- 本番環境で使用する前に、必ずテストネットで動作確認してください
-- 秘密鍵は安全に管理してください
-- リスク管理パラメータは慎重に設定してください
+- Before using in production, always test on testnet first
+- Keep your private keys secure
+- Set risk management parameters carefully
