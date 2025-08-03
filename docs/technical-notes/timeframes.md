@@ -1,129 +1,131 @@
-# タイムフレームとパラメータの詳細
+# Timeframes and Parameters Details
 
-## 概要
+**English** | [日本語](timeframes_ja.md)
 
-このドキュメントでは、各取引戦略で使用されるタイムフレーム（時間足）と、パラメータの単位について説明します。
+## Overview
 
-## パラメータの単位
+This document explains the timeframes (candlestick intervals) used by each trading strategy and the units of parameters.
 
-**重要**: すべての期間パラメータ（period, ma_period, ema等）は「ローソク足の本数」を表します。実際の時間は、各戦略が使用するタイムフレームによって決まります。
+## Parameter Units
 
-## 各戦略のタイムフレーム
+**Important**: All period parameters (period, ma_period, ema, etc.) represent "number of candlesticks". The actual time is determined by the timeframe used by each strategy.
 
-### 1. Simple MA Strategy - 5分足
+## Timeframes for Each Strategy
 
-- **使用タイムフレーム**: 5分足（5m）
-- **パラメータと実時間の関係**:
-  - `fast_ma_period=10` → 10本 × 5分 = 50分
-  - `slow_ma_period=30` → 30本 × 5分 = 150分（2.5時間）
+### 1. Simple MA Strategy - 5-minute timeframe
 
-**選択理由**:
-- 移動平均クロスオーバーはシンプルな戦略のため、高頻度な売買シグナルに対応
-- 短期的なトレンド変化を素早くキャッチ
-- デイトレードやスキャルピングに適している
+- **Timeframe**: 5-minute (5m)
+- **Parameter to actual time relationship**:
+  - `fast_ma_period=10` → 10 candles × 5 minutes = 50 minutes
+  - `slow_ma_period=30` → 30 candles × 5 minutes = 150 minutes (2.5 hours)
 
-### 2. RSI Strategy - 15分足
+**Rationale**:
+- Moving average crossover is a simple strategy, suitable for high-frequency trading signals
+- Quickly catches short-term trend changes
+- Suitable for day trading and scalping
 
-- **使用タイムフレーム**: 15分足（15m）
-- **パラメータと実時間の関係**:
-  - `rsi_period=14` → 14本 × 15分 = 210分（3.5時間）
+### 2. RSI Strategy - 15-minute timeframe
 
-**選択理由**:
-- RSIは相対的な強弱を測るため、ある程度の期間が必要
-- 15分足により市場ノイズを軽減し、信頼性の高いシグナルを生成
-- 過度な売買を避けつつ、適度な取引機会を提供
+- **Timeframe**: 15-minute (15m)
+- **Parameter to actual time relationship**:
+  - `rsi_period=14` → 14 candles × 15 minutes = 210 minutes (3.5 hours)
 
-### 3. Bollinger Bands Strategy - 15分足
+**Rationale**:
+- RSI measures relative strength, requiring a reasonable period
+- 15-minute timeframe reduces market noise and generates reliable signals
+- Provides adequate trading opportunities while avoiding excessive trading
 
-- **使用タイムフレーム**: 15分足（15m）
-- **パラメータと実時間の関係**:
-  - `bb_period=20` → 20本 × 15分 = 300分（5時間）
+### 3. Bollinger Bands Strategy - 15-minute timeframe
 
-**選択理由**:
-- ボラティリティを正確に測定するには適度な期間が必要
-- 15分足は価格のばらつきを平滑化し、バンドの信頼性を向上
-- スクイーズやブレイクアウトの検出に適している
+- **Timeframe**: 15-minute (15m)
+- **Parameter to actual time relationship**:
+  - `bb_period=20` → 20 candles × 15 minutes = 300 minutes (5 hours)
 
-### 4. MACD Strategy - 15分足
+**Rationale**:
+- Accurate volatility measurement requires an adequate period
+- 15-minute timeframe smooths price fluctuations and improves band reliability
+- Suitable for detecting squeezes and breakouts
 
-- **使用タイムフレーム**: 15分足（15m）
-- **パラメータと実時間の関係**:
-  - `fast_ema=12` → 12本 × 15分 = 180分（3時間）
-  - `slow_ema=26` → 26本 × 15分 = 390分（6.5時間）
-  - `signal_ema=9` → 9本 × 15分 = 135分（2.25時間）
+### 4. MACD Strategy - 15-minute timeframe
 
-**選択理由**:
-- MACDは中期的なトレンドとモメンタムを捉える指標
-- 15分足により適度な反応速度と信頼性のバランスを実現
-- ダイバージェンスの検出に十分な期間を確保
+- **Timeframe**: 15-minute (15m)
+- **Parameter to actual time relationship**:
+  - `fast_ema=12` → 12 candles × 15 minutes = 180 minutes (3 hours)
+  - `slow_ema=26` → 26 candles × 15 minutes = 390 minutes (6.5 hours)
+  - `signal_ema=9` → 9 candles × 15 minutes = 135 minutes (2.25 hours)
+
+**Rationale**:
+- MACD captures medium-term trends and momentum
+- 15-minute timeframe achieves a balance between responsiveness and reliability
+- Provides sufficient period for divergence detection
 
 ### 5. Grid Trading Strategy
 
-- **使用タイムフレーム**: 戦略の実装により可変
-- **パラメータ**: `range_period`はレンジ計算のための期間
+- **Timeframe**: Variable depending on strategy implementation
+- **Parameters**: `range_period` is the period for range calculation
 
-**選択理由**:
-- グリッド取引はレンジ相場で機能するため、市場状況に応じて調整可能
-- 長期的な価格レンジを把握する必要がある
+**Rationale**:
+- Grid trading functions in ranging markets, adjustable according to market conditions
+- Requires understanding of long-term price ranges
 
 ### 6. Breakout Strategy
 
-- **使用タイムフレーム**: 戦略の実装により可変
-- **パラメータと用途**:
-  - `lookback_period=20` → サポート/レジスタンスライン計算期間
-  - `atr_period=14` → ボラティリティ測定期間
+- **Timeframe**: Variable depending on strategy implementation
+- **Parameters and usage**:
+  - `lookback_period=20` → Support/resistance line calculation period
+  - `atr_period=14` → Volatility measurement period
 
-**選択理由**:
-- ブレイクアウトは様々なタイムフレームで発生
-- 市場の状況に応じて最適なタイムフレームを選択
+**Rationale**:
+- Breakouts occur across various timeframes
+- Optimal timeframe selection depends on market conditions
 
-## タイムフレーム選択の一般原則
+## General Principles of Timeframe Selection
 
-### 短いタイムフレーム（1分〜5分）
-- **メリット**: 
-  - 素早い反応
-  - 多くの取引機会
-  - 小さな価格変動も捕捉
-- **デメリット**: 
-  - ノイズが多い
-  - 誤シグナルが増える
-  - 取引コストが高くなる
+### Short Timeframes (1-5 minutes)
+- **Advantages**: 
+  - Quick response
+  - Many trading opportunities
+  - Captures small price movements
+- **Disadvantages**: 
+  - High noise
+  - Increased false signals
+  - Higher trading costs
 
-### 中間のタイムフレーム（15分〜1時間）
-- **メリット**: 
-  - ノイズとシグナルのバランスが良い
-  - 適度な取引頻度
-  - トレンドの信頼性が高い
-- **デメリット**: 
-  - 反応がやや遅い
-  - 短期的な機会を逃す可能性
+### Medium Timeframes (15 minutes - 1 hour)
+- **Advantages**: 
+  - Good balance between noise and signals
+  - Moderate trading frequency
+  - Higher trend reliability
+- **Disadvantages**: 
+  - Somewhat slower response
+  - May miss short-term opportunities
 
-### 長いタイムフレーム（4時間〜日足）
-- **メリット**: 
-  - 非常に信頼性の高いシグナル
-  - 大きなトレンドを捕捉
-  - 取引コストが低い
-- **デメリット**: 
-  - 反応が遅い
-  - 取引機会が少ない
-  - 大きなドローダウンの可能性
+### Long Timeframes (4 hours - daily)
+- **Advantages**: 
+  - Very reliable signals
+  - Captures major trends
+  - Lower trading costs
+- **Disadvantages**: 
+  - Slow response
+  - Fewer trading opportunities
+  - Potential for large drawdowns
 
-## カスタマイズの推奨事項
+## Customization Recommendations
 
-1. **取引スタイルに応じた調整**:
-   - スキャルピング: より短いタイムフレームを検討
-   - スイングトレード: より長いタイムフレームを検討
+1. **Adjustment based on trading style**:
+   - Scalping: Consider shorter timeframes
+   - Swing trading: Consider longer timeframes
 
-2. **市場状況に応じた調整**:
-   - 高ボラティリティ: 長めのタイムフレームでノイズを軽減
-   - 低ボラティリティ: 短めのタイムフレームで小さな動きも捕捉
+2. **Adjustment based on market conditions**:
+   - High volatility: Longer timeframes to reduce noise
+   - Low volatility: Shorter timeframes to capture small movements
 
-3. **リスク許容度に応じた調整**:
-   - 低リスク: 長いタイムフレーム、少ない取引
-   - 高リスク: 短いタイムフレーム、頻繁な取引
+3. **Adjustment based on risk tolerance**:
+   - Low risk: Long timeframes, fewer trades
+   - High risk: Short timeframes, frequent trades
 
-## 注意事項
+## Important Notes
 
-- パラメータを変更する際は、実際の時間への変換を意識すること
-- バックテストで最適なパラメータを検証することを推奨
-- 市場環境の変化に応じて定期的に見直すこと
+- When changing parameters, be aware of the conversion to actual time
+- Recommend validating optimal parameters through backtesting
+- Regularly review parameters according to changing market conditions
