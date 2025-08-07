@@ -39,7 +39,11 @@ class BaseStrategy(ABC):
             position_size = self.calculate_position_size(coin, signal)
             if position_size <= 0:
                 return
-                
+            
+            # Round position size to correct decimals
+            sz_decimals = self.market_data.get_sz_decimals(coin)
+            position_size = round(position_size, sz_decimals)
+            
             market_data = self.market_data.get_market_data(coin)
             if not market_data:
                 logger.warning(f"No market data available for {coin}")
@@ -64,7 +68,7 @@ class BaseStrategy(ABC):
                 )
                 
             if order:
-                logger.info(f"Executed {side} order for {coin}: {order}")
+                logger.info(f"Executed {side} order for {coin}: size={position_size} (rounded to {sz_decimals} decimals)")
                 
         except Exception as e:
             logger.error(f"Error executing signal for {coin}: {e}")
@@ -118,6 +122,10 @@ class BaseStrategy(ABC):
         size = abs(position['size'])
         side = OrderSide.SELL if position['size'] > 0 else OrderSide.BUY
         
+        # Round position size to correct decimals
+        sz_decimals = self.market_data.get_sz_decimals(coin)
+        size = round(size, sz_decimals)
+        
         order = self.order_manager.create_market_order(
             coin=coin,
             side=side,
@@ -126,7 +134,7 @@ class BaseStrategy(ABC):
         )
         
         if order:
-            logger.info(f"Closed position for {coin}")
+            logger.info(f"Closed position for {coin}: size={size} (rounded to {sz_decimals} decimals)")
             
     def run(self, coins: List[str]):
         self.update_positions()

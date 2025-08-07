@@ -163,9 +163,8 @@ class GridTradingStrategy(BaseStrategy):
                 
                 if base_size_usd > max_size_usd:
                     position_size = max_size_usd / market_data.mid_price
-                    
-            position_size = round(position_size, 4)
             
+            # Don't round here since BaseStrategy.execute_signal will handle it
             logger.info(f"Grid position size for {coin}: {position_size}")
             return position_size
             

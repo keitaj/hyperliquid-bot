@@ -23,6 +23,8 @@ class MarketDataManager:
     def __init__(self, info: Info):
         self.info = info
         self._cache = {}
+        self._meta_cache = None
+        self._meta_cache_time = None
         
     def get_all_mids(self) -> Dict[str, float]:
         try:
@@ -30,6 +32,36 @@ class MarketDataManager:
         except Exception as e:
             logger.error(f"Error fetching mid prices: {e}")
             return {}
+    
+    def get_meta(self) -> Dict:
+        """Get meta information including sz_decimals for all assets"""
+        try:
+            # Cache meta data for 1 hour
+            if self._meta_cache and self._meta_cache_time:
+                if (datetime.now() - self._meta_cache_time).seconds < 3600:
+                    return self._meta_cache
+            
+            meta = api_wrapper.call(self.info.meta)
+            self._meta_cache = meta
+            self._meta_cache_time = datetime.now()
+            return meta
+        except Exception as e:
+            logger.error(f"Error fetching meta data: {e}")
+            return {}
+    
+    def get_sz_decimals(self, coin: str) -> int:
+        """Get the number of decimal places allowed for order size"""
+        try:
+            meta = self.get_meta()
+            if 'universe' in meta:
+                for asset in meta['universe']:
+                    if asset['name'] == coin:
+                        return asset['szDecimals']
+            # Default to 3 if not found
+            return 3
+        except Exception as e:
+            logger.error(f"Error getting sz_decimals for {coin}: {e}")
+            return 3
     
     def get_l2_snapshot(self, coin: str) -> Dict:
         try:

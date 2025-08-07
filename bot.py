@@ -1,5 +1,6 @@
 import logging
 import time
+import signal
 from typing import Dict, List, Optional
 from hyperliquid.info import Info
 from hyperliquid.exchange import Exchange
@@ -34,6 +35,8 @@ class HyperliquidBot:
             base_url=Config.API_URL
         )
         self.running = False
+        self.connection_retry_count = 0
+        self.last_connection_reset = time.time()
         
         self.market_data = MarketDataManager(self.info)
         self.order_manager = OrderManager(self.exchange, self.info, self.account_address)
@@ -201,16 +204,39 @@ class HyperliquidBot:
         user_state = self.get_user_state()
         if user_state:
             logger.info(f"Account: {self.account_address}")
-            
+        
+        # Setup signal handlers
+        signal.signal(signal.SIGINT, self._signal_handler)
+        signal.signal(signal.SIGTERM, self._signal_handler)
+        
+        consecutive_errors = 0
+        
         while self.running:
             try:
+                # Check if we should reset connections due to too many errors
+                current_time = time.time()
+                if consecutive_errors > 10:
+                    if current_time - self.last_connection_reset > 300:  # 5 minutes
+                        self._reset_connections()
+                        self.last_connection_reset = current_time
+                        consecutive_errors = 0
+                
                 self._trading_loop()
+                consecutive_errors = 0  # Reset on successful iteration
                 time.sleep(10)  # Increased delay to avoid rate limits
+                
+            except ConnectionError as e:
+                consecutive_errors += 1
+                logger.error(f"Connection error (#{consecutive_errors}): {e}")
+                time.sleep(min(consecutive_errors * 5, 60))  # Exponential backoff
+                
             except KeyboardInterrupt:
                 logger.info("Stopping bot...")
                 self.running = False
+                
             except Exception as e:
-                logger.error(f"Error in main loop: {e}")
+                consecutive_errors += 1
+                logger.error(f"Error in main loop (#{consecutive_errors}): {e}")
                 time.sleep(10)  # Longer delay on error
     
     def _trading_loop(self):
@@ -227,6 +253,49 @@ class HyperliquidBot:
         if int(time.time()) % 60 == 0:
             risk_summary = self.risk_manager.get_risk_summary()
             logger.info(f"Risk summary: {risk_summary}")
+    
+    def _signal_handler(self, signum, frame):
+        logger.info("Received shutdown signal")
+        self.running = False
+        self.order_manager.cancel_all_orders()
+        logger.info("All orders cancelled")
+    
+    def _reset_connections(self):
+        """Reset connections when encountering persistent errors"""
+        try:
+            logger.info("Resetting connections due to persistent errors...")
+            time.sleep(5)  # Give some time before reconnecting
+            
+            # Re-initialize connections
+            self.info = Info(Config.API_URL, skip_ws=True)
+            self.exchange = Exchange(
+                wallet=self._load_wallet(),
+                base_url=Config.API_URL
+            )
+            
+            # Re-initialize managers with new connections
+            self.market_data = MarketDataManager(self.info)
+            self.order_manager = OrderManager(self.exchange, self.info, self.account_address)
+            self.risk_manager = RiskManager(self.info, self.account_address, {
+                'max_leverage': 3.0,
+                'max_position_size_pct': 0.2,
+                'max_drawdown_pct': 0.1,
+                'daily_loss_limit_pct': 0.05
+            })
+            
+            # Re-initialize strategy with new connections
+            strategy_config = self.strategy.config if hasattr(self.strategy, 'config') else {}
+            self.strategy.__init__(self.market_data, self.order_manager, strategy_config)
+            
+            logger.info("Connections reset successfully")
+            self.connection_retry_count = 0
+            
+        except Exception as e:
+            logger.error(f"Failed to reset connections: {e}")
+            self.connection_retry_count += 1
+            if self.connection_retry_count > 5:
+                logger.critical("Max connection retry attempts reached. Exiting...")
+                self.running = False
     
     def stop(self):
         self.running = False
