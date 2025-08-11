@@ -269,8 +269,29 @@ class HyperliquidBot:
     def _signal_handler(self, signum, frame):
         logger.info("Received shutdown signal")
         self.running = False
-        self.order_manager.cancel_all_orders()
-        logger.info("All orders cancelled")
+        try:
+            # Set a timeout for order cancellation to avoid hanging
+            import threading
+            def cancel_orders():
+                self.order_manager.cancel_all_orders()
+                logger.info("All orders cancelled")
+            
+            cancel_thread = threading.Thread(target=cancel_orders, daemon=True)
+            cancel_thread.start()
+            cancel_thread.join(timeout=5)  # 5 second timeout
+            
+            if cancel_thread.is_alive():
+                logger.warning("Order cancellation timed out, forcing shutdown")
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
+        
+        # Force exit if still running after a short delay
+        import sys
+        import time
+        time.sleep(1)
+        if self.running:
+            logger.info("Forcing immediate shutdown")
+            sys.exit(0)
 
     def _validate_trading_configuration(self) -> bool:
         """Validate trading configuration and margin requirements"""
