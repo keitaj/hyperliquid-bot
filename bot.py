@@ -10,6 +10,7 @@ from order_manager import OrderManager
 from risk_manager import RiskManager
 from validation import MarginValidator
 from hip3 import DEXRegistry, MultiDexMarketData, MultiDexOrderManager
+from order_manager import OrderSide
 from strategies import (
     SimpleMAStrategy,
     RSIStrategy,
@@ -323,10 +324,10 @@ class HyperliquidBot:
 
         if not risk_checks['all_checks_passed']:
             logger.warning(f"Risk limits exceeded: {risk_checks.get('reason')}")
+            self.order_manager.cancel_all_orders()
 
             if action == 'stop_bot':
                 logger.critical("Daily loss limit exceeded – stopping bot")
-                self.order_manager.cancel_all_orders()
                 self._close_all_positions()
                 self.risk_manager.record_emergency_stop()
                 self.running = False
@@ -334,26 +335,17 @@ class HyperliquidBot:
 
             if action == 'force_close':
                 logger.warning("Force-close margin threshold breached – closing all positions")
-                self.order_manager.cancel_all_orders()
                 self._close_all_positions()
                 self.risk_manager.record_emergency_stop()
                 return
 
             if action == 'close_all':
                 logger.warning("RISK_LEVEL=black – closing all positions")
-                self.order_manager.cancel_all_orders()
                 self._close_all_positions()
                 return
 
-            if action in ('pause', 'cooldown'):
-                logger.info("Trading paused (action=%s) – cancelling open orders", action)
-                self.order_manager.cancel_all_orders()
-                return
-
-            if action == 'block_new_orders':
-                logger.info("Blocking new orders – cancelling open orders")
-                self.order_manager.cancel_all_orders()
-                return
+            # pause, cooldown, block_new_orders: orders already cancelled above
+            return
 
         self.order_manager.update_order_status()
 
@@ -372,7 +364,6 @@ class HyperliquidBot:
 
     def _close_position(self, pos: Dict, reason: str = "") -> bool:
         """Market-close a single position. Returns True on success."""
-        from order_manager import OrderSide
         coin = pos.get('coin', '')
         size = float(pos.get('szi', 0))
         if size == 0:

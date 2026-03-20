@@ -100,8 +100,14 @@ class Config:
             raise ValueError(f"MAX_POSITION_PCT must be 0.0–1.0, got {cls.MAX_POSITION_PCT}")
         if not 0.0 <= cls.MAX_MARGIN_USAGE <= 1.0:
             raise ValueError(f"MAX_MARGIN_USAGE must be 0.0–1.0, got {cls.MAX_MARGIN_USAGE}")
-        if cls.FORCE_CLOSE_MARGIN is not None and not 0.0 <= cls.FORCE_CLOSE_MARGIN <= 1.0:
-            raise ValueError(f"FORCE_CLOSE_MARGIN must be 0.0–1.0, got {cls.FORCE_CLOSE_MARGIN}")
+        if cls.FORCE_CLOSE_MARGIN is not None:
+            if not 0.0 <= cls.FORCE_CLOSE_MARGIN <= 1.0:
+                raise ValueError(f"FORCE_CLOSE_MARGIN must be 0.0–1.0, got {cls.FORCE_CLOSE_MARGIN}")
+            if cls.FORCE_CLOSE_MARGIN < cls.MAX_MARGIN_USAGE:
+                raise ValueError(
+                    f"FORCE_CLOSE_MARGIN ({cls.FORCE_CLOSE_MARGIN}) must be >= "
+                    f"MAX_MARGIN_USAGE ({cls.MAX_MARGIN_USAGE})"
+                )
         if cls.DAILY_LOSS_LIMIT is not None and cls.DAILY_LOSS_LIMIT < 0:
             raise ValueError(f"DAILY_LOSS_LIMIT must be >= 0, got {cls.DAILY_LOSS_LIMIT}")
         if cls.PER_TRADE_STOP_LOSS is not None and not 0.0 <= cls.PER_TRADE_STOP_LOSS <= 1.0:
