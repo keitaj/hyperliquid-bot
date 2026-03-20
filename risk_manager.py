@@ -144,6 +144,23 @@ class RiskManager:
             total_margin_used = float(margin_summary.get('totalMarginUsed', 0))
             total_position_value = float(margin_summary.get('totalNtlPos', 0))
 
+            # Portfolio Margin: include spot stablecoin balances when perp
+            # account is empty so that position sizing works correctly.
+            if account_value == 0:
+                try:
+                    spot_state = api_wrapper.call(
+                        self.info.spot_user_state, self.account_address
+                    )
+                    for bal in spot_state.get('balances', []):
+                        if bal.get('coin', '') in ('USDC', 'USDH', 'USDT0'):
+                            account_value += float(bal.get('total', 0))
+                    if account_value > 0:
+                        logger.debug(
+                            "Using spot balance as collateral: $%.2f", account_value
+                        )
+                except Exception as e:
+                    logger.debug("Could not fetch spot state: %s", e)
+
             available_balance = account_value - total_margin_used
             leverage = total_position_value / account_value if account_value > 0 else 0
             margin_ratio = total_margin_used / account_value if account_value > 0 else 0
