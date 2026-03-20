@@ -44,8 +44,8 @@ cp .env.example .env
 Edit the `.env` file and configure the following information:
 
 **Configuration Items:**
-- `HYPERLIQUID_ACCOUNT_ADDRESS`: Wallet address
-- `HYPERLIQUID_PRIVATE_KEY`: Private key
+- `HYPERLIQUID_ACCOUNT_ADDRESS`: Your main wallet address (the address that holds your funds)
+- `HYPERLIQUID_PRIVATE_KEY`: Private key for signing transactions
 - `USE_TESTNET`: Set to `true` to use testnet
 
 ### Method 1: Direct Private Key Usage
@@ -54,7 +54,7 @@ Set your wallet's private key directly.
 ### Method 2: API Wallet Usage (Recommended)
 For a more secure approach, visit [https://app.hyperliquid.xyz/API](https://app.hyperliquid.xyz/API) to generate an API wallet.
 
-**Note**: When using an API wallet, you need to transfer the necessary funds for trading to the API wallet.
+Set `HYPERLIQUID_ACCOUNT_ADDRESS` to your main wallet address and `HYPERLIQUID_PRIVATE_KEY` to the API wallet's private key. The API wallet is used only for signing transactions — no fund transfer to the API wallet is required.
 
 ## Usage
 

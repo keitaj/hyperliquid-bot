@@ -44,17 +44,17 @@ cp .env.example .env
 `.env`ファイルを編集して以下の情報を設定します：
 
 **設定項目:**
-- `HYPERLIQUID_ACCOUNT_ADDRESS`: ウォレットアドレス
-- `HYPERLIQUID_PRIVATE_KEY`: Private key
+- `HYPERLIQUID_ACCOUNT_ADDRESS`: メインウォレットアドレス（資金を保有するアドレス）
+- `HYPERLIQUID_PRIVATE_KEY`: トランザクション署名用のPrivate key
 - `USE_TESTNET`: テストネットを使用する場合は`true`
 
 ### 方法1: ウォレットのprivate keyを直接使用
 自分のウォレットのprivate keyを直接設定します。
 
 ### 方法2: APIウォレットを使用（推奨）
-より安全な方法として、[https://app.hyperliquid.xyz/API](https://app.hyperliquid.xyz/API) にアクセスしてAPIウォレットを生成
+より安全な方法として、[https://app.hyperliquid.xyz/API](https://app.hyperliquid.xyz/API) にアクセスしてAPIウォレットを生成します。
 
-**注意**: APIウォレットを使用する場合、取引に必要な資金をAPIウォレットに転送する必要があります。
+`HYPERLIQUID_ACCOUNT_ADDRESS` にはメインウォレットのアドレスを、`HYPERLIQUID_PRIVATE_KEY` にはAPIウォレットのPrivate keyを設定します。APIウォレットは署名専用のため、資金を転送する必要はありません。
 
 ## 使い方
 
