@@ -2,7 +2,6 @@ import logging
 import time
 import signal
 from typing import Dict, List, Optional
-from hyperliquid.info import Info
 from hyperliquid.exchange import Exchange
 from hyperliquid.utils import constants
 from config import Config
@@ -31,11 +30,6 @@ class HyperliquidBot:
     def __init__(self, strategy_name: str = "simple_ma", coins: List[str] = None, strategy_config: Dict = None):
         Config.validate()
         self.account_address = Config.ACCOUNT_ADDRESS
-        self.info = Info(Config.API_URL, skip_ws=True)
-        self.exchange = Exchange(
-            wallet=self._load_wallet(),
-            base_url=Config.API_URL
-        )
         self.running = False
         self.connection_retry_count = 0
         self.last_connection_reset = time.time()
@@ -47,8 +41,23 @@ class HyperliquidBot:
         self.registry = DEXRegistry(Config.API_URL)
 
         if self.hip3_dexes:
-            logger.info(f"Discovering HIP-3 DEXes: {self.hip3_dexes}")
+            # Discover coins for each DEX (used to build trading_coins list)
             self.registry.discover(self.hip3_dexes)
+
+            # Build perp_dexs list for SDK:
+            #   "" = standard Hyperliquid perps (BTC, ETH, ...)
+            #   "xyz", "flx", ... = HIP-3 DEXes
+            # SDK loads meta for each entry; omitting "" skips standard HL coins.
+            perp_dexs_for_sdk = ([""] if Config.ENABLE_STANDARD_HL else []) + self.hip3_dexes
+
+            self.exchange = Exchange(
+                wallet=self._load_wallet(),
+                base_url=Config.API_URL,
+                perp_dexs=perp_dexs_for_sdk,
+            )
+            # Reuse the Info object created inside Exchange to avoid duplicate API calls.
+            self.info = self.exchange.info
+
             logger.info("Registered DEXes:\n" + self.registry.summary())
             self.market_data = MultiDexMarketData(self.info, self.registry, Config.API_URL)
             self.order_manager = MultiDexOrderManager(
@@ -60,6 +69,11 @@ class HyperliquidBot:
                 hip3_dexes=self.hip3_dexes,
             )
         else:
+            self.exchange = Exchange(
+                wallet=self._load_wallet(),
+                base_url=Config.API_URL,
+            )
+            self.info = self.exchange.info
             self.market_data = MarketDataManager(self.info)
             self.order_manager = OrderManager(self.exchange, self.info, self.account_address)
 
@@ -417,16 +431,16 @@ class HyperliquidBot:
             time.sleep(5)  # Give some time before reconnecting
 
             # Re-initialize connections
-            self.info = Info(Config.API_URL, skip_ws=True)
-            self.exchange = Exchange(
-                wallet=self._load_wallet(),
-                base_url=Config.API_URL
-            )
-
-            # Re-initialize managers with new connections
             if self.hip3_dexes:
                 self.registry = DEXRegistry(Config.API_URL)
                 self.registry.discover(self.hip3_dexes)
+                perp_dexs_for_sdk = ([""] if Config.ENABLE_STANDARD_HL else []) + self.hip3_dexes
+                self.exchange = Exchange(
+                    wallet=self._load_wallet(),
+                    base_url=Config.API_URL,
+                    perp_dexs=perp_dexs_for_sdk,
+                )
+                self.info = self.exchange.info
                 self.market_data = MultiDexMarketData(self.info, self.registry, Config.API_URL)
                 self.order_manager = MultiDexOrderManager(
                     exchange=self.exchange,
@@ -437,6 +451,11 @@ class HyperliquidBot:
                     hip3_dexes=self.hip3_dexes,
                 )
             else:
+                self.exchange = Exchange(
+                    wallet=self._load_wallet(),
+                    base_url=Config.API_URL,
+                )
+                self.info = self.exchange.info
                 self.market_data = MarketDataManager(self.info)
                 self.order_manager = OrderManager(self.exchange, self.info, self.account_address)
 
