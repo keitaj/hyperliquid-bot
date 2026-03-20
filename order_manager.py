@@ -87,10 +87,7 @@ class OrderManager:
         slippage-adjusted price to simulate market execution.
         """
         try:
-            market_data = api_wrapper.call(self.info.all_mids)
-            # Handle HIP-3 "dex:coin" format -- all_mids uses base coin name
-            lookup_coin = coin.split(":")[-1] if ":" in coin else coin
-            mid_price = float(market_data.get(lookup_coin, 0))
+            mid_price = self._get_mid_price(coin)
             if mid_price <= 0:
                 logger.error(f"Cannot determine mid price for {coin}")
                 return None
@@ -169,6 +166,39 @@ class OrderManager:
             order.status = OrderStatus.REJECTED
             return None
     
+    def _get_mid_price(self, coin: str) -> float:
+        """Get mid price for a coin. Works with both standard and HIP-3 coins.
+
+        Tries ``all_mids`` first (standard coins), then falls back to
+        ``info.all_mids(dex)`` for HIP-3 "dex:coin" format.
+        """
+        try:
+            all_mids = api_wrapper.call(self.info.all_mids)
+
+            # Direct lookup (standard coins)
+            if coin in all_mids:
+                return float(all_mids[coin])
+
+            # HIP-3 "dex:coin" -- try base coin name
+            if ":" in coin:
+                base_coin = coin.split(":")[-1]
+                if base_coin in all_mids:
+                    return float(all_mids[base_coin])
+
+                # Try DEX-scoped all_mids
+                dex = coin.split(":")[0]
+                try:
+                    dex_mids = api_wrapper.call(self.info.all_mids, dex=dex)
+                    if base_coin in dex_mids:
+                        return float(dex_mids[base_coin])
+                except Exception:
+                    pass
+
+            return 0.0
+        except Exception as e:
+            logger.error(f"Error fetching mid price for {coin}: {e}")
+            return 0.0
+
     def cancel_order(self, order_id: int, coin: str) -> bool:
         try:
             result = api_wrapper.call(self.exchange.cancel, coin, order_id)
