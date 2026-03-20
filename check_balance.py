@@ -11,7 +11,7 @@ import requests
 from config import Config
 
 DISPLAY_COINS = {"USDC", "USDH"}
-KNOWN_HIP3_DEXES = ["xyz", "flx", "cash"]
+KNOWN_HIP3_DEXES = ["xyz", "flx", "cash", "km", "vntl", "hyna"]
 
 
 def _api_post(req_type: str, address: str, **extra) -> dict:

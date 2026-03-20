@@ -26,7 +26,7 @@ class Config:
     # ------------------------------------------------------------------ #
 
     # Comma-separated list of HIP-3 DEX names to trade on.
-    # Known names: xyz (trade.xyz), flx (Felix), cash (DreamCash)
+    # Known names: xyz (trade.xyz), flx (Felix), cash (DreamCash), km (Markets by Kinetiq), vntl (Ventuals), hyna (HyENA)
     # Leave empty to trade only on standard Hyperliquid.
     # Example: TRADING_DEXES=xyz,flx
     TRADING_DEXES: list = _parse_list(os.getenv("TRADING_DEXES", ""))
