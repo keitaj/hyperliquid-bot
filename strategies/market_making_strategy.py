@@ -216,11 +216,19 @@ class MarketMakingStrategy(BaseStrategy):
 
         ``spread_bps`` is the one-sided spread in basis points, so the
         full bid/ask spread is ``2 * spread_bps`` bps.
+
+        Prices are rounded to 5 significant figures and 6 decimal places
+        to match Hyperliquid's perp price format.
         """
         offset = mid_price * (self.spread_bps / 10_000)
-        buy_price = round(mid_price - offset, 8)
-        sell_price = round(mid_price + offset, 8)
+        buy_price = self._round_price(mid_price - offset)
+        sell_price = self._round_price(mid_price + offset)
         return buy_price, sell_price
+
+    @staticmethod
+    def _round_price(px: float) -> float:
+        """Round price to 5 significant figures and 6 decimal places (Hyperliquid perp format)."""
+        return round(float(f"{px:.5g}"), 6)
 
     # ------------------------------------------------------------------ #
     #  Helpers
