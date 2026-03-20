@@ -169,26 +169,27 @@ class OrderManager:
     def _get_mid_price(self, coin: str) -> float:
         """Get mid price for a coin. Works with both standard and HIP-3 coins.
 
-        Tries ``all_mids`` first (standard coins), then falls back to
-        ``info.all_mids(dex)`` for HIP-3 "dex:coin" format.
+        Tries standard ``all_mids`` first.  For HIP-3 "dex:coin" format,
+        falls back to ``all_mids(dex=...)`` which returns keys as
+        "dex:coin" (e.g. "xyz:GOLD").
         """
         try:
             all_mids = api_wrapper.call(self.info.all_mids)
 
-            # Direct lookup (standard coins)
+            # Direct lookup (standard coins or if already in mids)
             if coin in all_mids:
                 return float(all_mids[coin])
 
-            # HIP-3 "dex:coin" -- try base coin name
+            # HIP-3 "dex:coin" -- try DEX-scoped all_mids
             if ":" in coin:
-                base_coin = coin.split(":")[-1]
-                if base_coin in all_mids:
-                    return float(all_mids[base_coin])
-
-                # Try DEX-scoped all_mids
                 dex = coin.split(":")[0]
                 try:
                     dex_mids = api_wrapper.call(self.info.all_mids, dex=dex)
+                    # DEX mids keys are "dex:coin" format (e.g. "xyz:GOLD")
+                    if coin in dex_mids:
+                        return float(dex_mids[coin])
+                    # Also try base coin name as fallback
+                    base_coin = coin.split(":")[-1]
                     if base_coin in dex_mids:
                         return float(dex_mids[base_coin])
                 except Exception:
