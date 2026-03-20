@@ -166,15 +166,31 @@ class OrderManager:
             order.status = OrderStatus.REJECTED
             return None
     
+    # Short-lived cache for all_mids to avoid redundant API calls within a cycle.
+    # Key: dex name ('' for standard), Value: (timestamp, mids_dict)
+    _mids_cache: Dict[str, tuple] = {}
+    _MIDS_CACHE_TTL = 5.0  # seconds
+
+    def _get_cached_mids(self, dex: str = '') -> Dict:
+        """Return all_mids for a DEX, using a short-lived cache."""
+        import time as _time
+        now = _time.time()
+        cached = self._mids_cache.get(dex)
+        if cached and (now - cached[0]) < self._MIDS_CACHE_TTL:
+            return cached[1]
+
+        mids = api_wrapper.call(self.info.all_mids, dex=dex) if dex else api_wrapper.call(self.info.all_mids)
+        self._mids_cache[dex] = (now, mids)
+        return mids
+
     def _get_mid_price(self, coin: str) -> float:
         """Get mid price for a coin. Works with both standard and HIP-3 coins.
 
-        Tries standard ``all_mids`` first.  For HIP-3 "dex:coin" format,
-        falls back to ``all_mids(dex=...)`` which returns keys as
-        "dex:coin" (e.g. "xyz:GOLD").
+        Uses a short-lived cache to avoid redundant API calls when
+        multiple coins from the same DEX are queried in the same cycle.
         """
         try:
-            all_mids = api_wrapper.call(self.info.all_mids)
+            all_mids = self._get_cached_mids()
 
             # Direct lookup (standard coins or if already in mids)
             if coin in all_mids:
@@ -184,11 +200,9 @@ class OrderManager:
             if ":" in coin:
                 dex = coin.split(":")[0]
                 try:
-                    dex_mids = api_wrapper.call(self.info.all_mids, dex=dex)
-                    # DEX mids keys are "dex:coin" format (e.g. "xyz:GOLD")
+                    dex_mids = self._get_cached_mids(dex=dex)
                     if coin in dex_mids:
                         return float(dex_mids[coin])
-                    # Also try base coin name as fallback
                     base_coin = coin.split(":")[-1]
                     if base_coin in dex_mids:
                         return float(dex_mids[base_coin])
