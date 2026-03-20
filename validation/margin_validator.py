@@ -5,7 +5,7 @@ Validates margin requirements based on strategy and parameters
 
 import logging
 from typing import Dict, List, Tuple, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +15,7 @@ class ValidationResult:
     """Result of validation check"""
     is_valid: bool
     message: str
-    recommendations: List[str] = None
+    recommendations: Optional[List[str]] = field(default=None)
 
 
 

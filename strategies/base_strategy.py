@@ -3,6 +3,7 @@ from typing import Dict, List, Optional, Tuple
 import logging
 from market_data import MarketDataManager, MarketData
 from order_manager import OrderManager, OrderSide
+from rate_limiter import api_wrapper
 
 logger = logging.getLogger(__name__)
 
@@ -22,10 +23,41 @@ class BaseStrategy(ABC):
     @abstractmethod
     def generate_signals(self, coin: str) -> Optional[Dict]:
         pass
-    
+
     @abstractmethod
     def calculate_position_size(self, coin: str, signal: Dict) -> float:
         pass
+
+    # ------------------------------------------------------------------ #
+    # Shared position-sizing helpers
+    # ------------------------------------------------------------------ #
+
+    def _check_max_positions(self, coin: str) -> bool:
+        """Returns True (and logs) if already at max open positions for a new coin."""
+        max_pos = getattr(self, 'max_positions', None)
+        if max_pos is not None and len(self.positions) >= max_pos and coin not in self.positions:
+            logger.info(f"Max positions reached, skipping {coin}")
+            return True
+        return False
+
+    def _apply_account_cap(self, base_size_usd: float, mid_price: float, cap_pct: float = 0.1) -> float:
+        """
+        Convert a USD size to coin units, capping at cap_pct of account value.
+        Uses the rate-limited api_wrapper so we don't bypass the rate limiter.
+        """
+        try:
+            user_state = api_wrapper.call(
+                self.order_manager.info.user_state,
+                self.order_manager.account_address,
+            )
+            if 'marginSummary' in user_state:
+                account_value = float(user_state['marginSummary']['accountValue'])
+                max_size_usd = account_value * cap_pct
+                if base_size_usd > max_size_usd:
+                    return max_size_usd / mid_price
+        except Exception as e:
+            logger.warning(f"Could not apply account cap: {e}")
+        return base_size_usd / mid_price
     
     def execute_signal(self, coin: str, signal: Dict):
         if not signal:

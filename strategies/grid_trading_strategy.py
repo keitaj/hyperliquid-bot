@@ -65,7 +65,7 @@ class GridTradingStrategy(BaseStrategy):
             if len(candles) < 50:
                 return None
                 
-            df = pd.DataFrame(candles)
+            df = candles
             price_range = self.calculate_price_range(df)
             
             if not price_range['is_ranging']:
@@ -143,31 +143,18 @@ class GridTradingStrategy(BaseStrategy):
             market_data = self.market_data.get_market_data(coin)
             if not market_data:
                 return 0
-                
+
             base_size_usd = self.position_size_per_grid
-            
             if coin in self.active_grids:
                 filled_count = len(self.active_grids[coin]['filled_orders'])
                 if filled_count > self.grid_levels * 0.7:
                     base_size_usd *= 0.5
-                    
-            position_size = base_size_usd / market_data.mid_price
-            
-            user_state = self.order_manager.info.user_state(
-                self.order_manager.account_address
-            )
-            
-            if 'marginSummary' in user_state:
-                account_value = float(user_state['marginSummary']['accountValue'])
-                max_size_usd = account_value * 0.05
-                
-                if base_size_usd > max_size_usd:
-                    position_size = max_size_usd / market_data.mid_price
-            
-            # Don't round here since BaseStrategy.execute_signal will handle it
+
+            position_size = self._apply_account_cap(base_size_usd, market_data.mid_price, cap_pct=0.05)
+
             logger.info(f"Grid position size for {coin}: {position_size}")
             return position_size
-            
+
         except Exception as e:
             logger.error(f"Error calculating grid position size for {coin}: {e}")
             return 0

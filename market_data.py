@@ -38,7 +38,7 @@ class MarketDataManager:
         try:
             # Cache meta data for 1 hour
             if self._meta_cache and self._meta_cache_time:
-                if (datetime.now() - self._meta_cache_time).seconds < 3600:
+                if (datetime.now() - self._meta_cache_time).total_seconds() < 3600:
                     return self._meta_cache
             
             meta = api_wrapper.call(self.info.meta)

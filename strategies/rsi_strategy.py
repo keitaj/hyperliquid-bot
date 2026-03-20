@@ -81,44 +81,30 @@ class RSIStrategy(BaseStrategy):
     
     def calculate_position_size(self, coin: str, signal: Dict) -> float:
         try:
-            if len(self.positions) >= self.max_positions and coin not in self.positions:
-                logger.info(f"Max positions reached, skipping {coin}")
+            if self._check_max_positions(coin):
                 return 0
-                
+
             market_data = self.market_data.get_market_data(coin)
             if not market_data:
                 return 0
-                
+
             confidence = signal.get('confidence', 0.5)
             base_size_usd = self.position_size_usd * confidence
-            
+
             candles = self.market_data.get_candles(coin, '15m', 20)
             df = self.calculate_rsi(candles)
             current_rsi = df['rsi'].iloc[-1]
-            
+
             if signal['side'] == 'buy' and current_rsi < 25:
                 base_size_usd *= 1.5
             elif signal['side'] == 'buy' and current_rsi < 35:
                 base_size_usd *= 1.2
-                
-            position_size = base_size_usd / market_data.mid_price
-            
-            user_state = self.order_manager.info.user_state(
-                self.order_manager.account_address
-            )
-            
-            if 'marginSummary' in user_state:
-                account_value = float(user_state['marginSummary']['accountValue'])
-                max_size_usd = account_value * 0.1
-                
-                if base_size_usd > max_size_usd:
-                    position_size = max_size_usd / market_data.mid_price
-                    
-            position_size = round(position_size, 4)
-            
+
+            position_size = self._apply_account_cap(base_size_usd, market_data.mid_price)
+
             logger.info(f"Calculated position size for {coin}: {position_size} (RSI: {current_rsi:.2f})")
             return position_size
-            
+
         except Exception as e:
             logger.error(f"Error calculating position size for {coin}: {e}")
             return 0

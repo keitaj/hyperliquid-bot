@@ -44,16 +44,10 @@ class HyperliquidBot:
             # Discover coins for each DEX (used to build trading_coins list)
             self.registry.discover(self.hip3_dexes)
 
-            # Build perp_dexs list for SDK:
-            #   "" = standard Hyperliquid perps (BTC, ETH, ...)
-            #   "xyz", "flx", ... = HIP-3 DEXes
-            # SDK loads meta for each entry; omitting "" skips standard HL coins.
-            perp_dexs_for_sdk = ([""] if Config.ENABLE_STANDARD_HL else []) + self.hip3_dexes
-
             self.exchange = Exchange(
                 wallet=self._load_wallet(),
                 base_url=Config.API_URL,
-                perp_dexs=perp_dexs_for_sdk,
+                perp_dexs=self._build_perp_dexs(),
             )
             # Reuse the Info object created inside Exchange to avoid duplicate API calls.
             self.info = self.exchange.info
@@ -193,6 +187,10 @@ class HyperliquidBot:
     def _load_wallet(self):
         from eth_account import Account
         return Account.from_key(Config.PRIVATE_KEY)
+
+    def _build_perp_dexs(self) -> list:
+        """Build the perp_dexs list expected by the SDK: '' for standard HL, named strings for HIP-3."""
+        return ([""] if Config.ENABLE_STANDARD_HL else []) + self.hip3_dexes
 
     def get_user_state(self) -> Dict:
         try:
@@ -434,11 +432,10 @@ class HyperliquidBot:
             if self.hip3_dexes:
                 self.registry = DEXRegistry(Config.API_URL)
                 self.registry.discover(self.hip3_dexes)
-                perp_dexs_for_sdk = ([""] if Config.ENABLE_STANDARD_HL else []) + self.hip3_dexes
                 self.exchange = Exchange(
                     wallet=self._load_wallet(),
                     base_url=Config.API_URL,
-                    perp_dexs=perp_dexs_for_sdk,
+                    perp_dexs=self._build_perp_dexs(),
                 )
                 self.info = self.exchange.info
                 self.market_data = MultiDexMarketData(self.info, self.registry, Config.API_URL)
