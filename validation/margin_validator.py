@@ -51,7 +51,12 @@ class MarginValidator:
         self.account_address = account_address
 
     def get_account_info(self) -> Tuple[float, float]:
-        """Get account value and available balance"""
+        """Get account value and available balance.
+
+        With Portfolio Margin, spot balances (USDC, USDH, etc.) count as
+        collateral for perp trading.  If the perp ``accountValue`` is zero
+        we fall back to the spot clearinghouse to capture available capital.
+        """
         try:
             user_state = self.info.user_state(self.account_address)
 
@@ -62,6 +67,26 @@ class MarginValidator:
             margin_summary = user_state['marginSummary']
             account_value = float(margin_summary.get('accountValue', 0))
             margin_used = float(margin_summary.get('totalMarginUsed', 0))
+
+            # Portfolio Margin: include spot balances when perp account is empty
+            if account_value == 0:
+                try:
+                    from rate_limiter import api_wrapper
+                    spot_state = api_wrapper.call(
+                        self.info.spot_user_state, self.account_address
+                    )
+                    for bal in spot_state.get('balances', []):
+                        coin = bal.get('coin', '')
+                        if coin in ('USDC', 'USDH', 'USDT0'):
+                            account_value += float(bal.get('total', 0))
+                    if account_value > 0:
+                        logger.info(
+                            "Perp account empty but spot balance found: $%.2f "
+                            "(Portfolio Margin)", account_value
+                        )
+                except Exception as e:
+                    logger.debug("Could not fetch spot state: %s", e)
+
             available_balance = account_value - margin_used
 
             return account_value, available_balance
