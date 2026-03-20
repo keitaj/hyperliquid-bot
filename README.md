@@ -2,7 +2,7 @@
 
 **English** | [日本語](README_ja.md)
 
-Automated trading bot for Hyperliquid DEX.
+Automated trading bot for Hyperliquid DEX with **HIP-3 multi-DEX support** (trade.xyz, Felix, Markets by Kinetiq, Based, and more).
 
 ## ⚠️ Important Disclaimer
 
@@ -25,6 +25,7 @@ Please refer to the [LICENSE](./LICENSE) file for detailed disclaimer.
 - [Usage](#usage)
   - [Docker Usage (Recommended)](#-docker-usage-recommended)
   - [Python Usage](#-python-usage)
+- [HIP-3 Multi-DEX Trading](#hip-3-multi-dex-trading)
 - [Trading Strategies](#trading-strategies)
 - [Features](#features)
 - [Technical Documentation](#technical-documentation)
@@ -166,12 +167,89 @@ No open positions
 ==================================================
 ```
 
+---
+
+## HIP-3 Multi-DEX Trading
+
+[HIP-3](https://hyperliquid.gitbook.io/hyperliquid-docs/hyperliquid-improvement-proposals-hips/hip-3-builder-deployed-perpetuals) is Hyperliquid's standard for builder-deployed perpetuals DEXes. All HIP-3 DEXes share the same underlying Hyperliquid L1 infrastructure and API, differing only in their listed assets and oracle configurations.
+
+### Supported Platforms
+
+| Platform | DEX Name | Asset Types |
+|---|---|---|
+| Standard Hyperliquid | (none) | Crypto perps (BTC, ETH, SOL...) |
+| [trade.xyz](https://trade.xyz) | `xyz` | Equity & commodity perps (AAPL, GOLD, CL...) |
+| [Felix](https://trade.usefelix.xyz) | `flx` | Equity & commodity perps |
+| [Markets by Kinetiq](https://markets.xyz) | `km` | Various (collateral: USDH) |
+| [Based](https://basedapp.xyz) | (none) | Standard HL frontend — use `ENABLE_STANDARD_HL=true` |
+| [Ventuals](https://app.ventuals.com) | `vntl` | — |
+| [HyENA](https://app.hyena.trade) | `hyna` | — |
+| [dreamcash](https://trade.dreamcash.xyz) | `cash` | — |
+
+> **Note**: DEX names are assigned on-chain. Run `{"type": "perpDexs"}` against the Hyperliquid API to see the current full list.
+
+### Configuration
+
+Add the following to your `.env` file:
+
+```bash
+# Comma-separated HIP-3 DEX names to trade on
+TRADING_DEXES=xyz,flx
+
+# Set to false to trade only on HIP-3 DEXes (disable standard HL perps)
+ENABLE_STANDARD_HL=true
+
+# Per-DEX coin lists (optional — defaults to all available coins on that DEX)
+XYZ_COINS=XYZ100,XYZ200
+FLX_COINS=NVDA,AAPL,WTI
+```
+
+### HIP-3 Command-Line Options
+
+```bash
+# Trade only on trade.xyz with RSI strategy
+python3 bot.py --strategy rsi --dex xyz --no-hl
+
+# Trade Felix equity perps (NVDA, AAPL) + standard HL BTC/ETH simultaneously
+FLX_COINS=NVDA,AAPL python3 bot.py --strategy simple_ma --coins BTC ETH --dex flx
+
+# Trade across all configured DEXes (set TRADING_DEXES in .env)
+python3 bot.py --strategy macd
+```
+
+| Flag | Description |
+|---|---|
+| `--dex DEX [DEX ...]` | HIP-3 DEX names to trade (overrides `TRADING_DEXES` env var) |
+| `--no-hl` | Disable standard Hyperliquid perps, trade only HIP-3 DEXes |
+
+### How HIP-3 Works Internally
+
+HIP-3 assets use a special integer asset ID scheme:
+
+```
+asset_id = 100000 + (perp_dex_index × 10000) + index_in_meta
+```
+
+For example, if `xyz` is the 2nd DEX (index 1) and `XYZ100` is its first asset (index 0):
+```
+asset_id = 100000 + (1 × 10000) + 0 = 110000
+```
+
+The bot handles this automatically at startup:
+1. Calls `perpDexs` API to discover all registered DEXes and their indices
+2. Calls `meta` for each configured DEX to get its asset list
+3. Computes asset IDs and injects them into the SDK's lookup table
+4. Represents HIP-3 coins as `"dex:coin"` strings (e.g. `"xyz:XYZ100"`, `"flx:NVDA"`)
+
+---
+
 ## Features
 
 - **Market Data**: Real-time price, order book, and candlestick data retrieval
 - **Order Management**: Limit and market order placement and cancellation
 - **Risk Management**: Leverage limits, maximum drawdown, daily loss limits
 - **Multiple Strategies**: Choose from 6 different trading strategies
+- **HIP-3 Multi-DEX**: Trade across Hyperliquid, trade.xyz, Felix, and other HIP-3 DEXes simultaneously
 
 ## Trading Strategies
 
@@ -251,6 +329,10 @@ For more detailed technical information, please refer to the following documents
 - `market_data.py`: Market data retrieval
 - `order_manager.py`: Order management
 - `risk_manager.py`: Risk management
+- `hip3/`: HIP-3 multi-DEX support
+  - `dex_registry.py`: DEX discovery and asset ID resolution
+  - `multi_dex_market_data.py`: DEX-aware market data
+  - `multi_dex_order_manager.py`: DEX-aware order management
 - `strategies/`: Trading strategies
   - `base_strategy.py`: Base strategy class
   - `simple_ma_strategy.py`: Moving average strategy
@@ -259,6 +341,8 @@ For more detailed technical information, please refer to the following documents
   - `macd_strategy.py`: MACD strategy
   - `grid_trading_strategy.py`: Grid trading strategy
   - `breakout_strategy.py`: Breakout strategy
+- `validation/`: Pre-trade validation
+  - `margin_validator.py`: Margin and configuration validation
 - `docs/`: Documentation
   - `technical-notes/`: Technical detail documents
 
@@ -267,3 +351,5 @@ For more detailed technical information, please refer to the following documents
 - Before using in production, always test on testnet first
 - Keep your private keys secure
 - Set risk management parameters carefully
+- HIP-3 DEXes may charge higher fees than standard Hyperliquid (typically 2x, with 50% going to the DEX deployer)
+- HIP-3 DEXes currently support isolated margin only (cross-margin not available)

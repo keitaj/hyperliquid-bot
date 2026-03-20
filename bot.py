@@ -10,6 +10,7 @@ from market_data import MarketDataManager
 from order_manager import OrderManager
 from risk_manager import RiskManager
 from validation import MarginValidator
+from hip3 import DEXRegistry, MultiDexMarketData, MultiDexOrderManager
 from strategies import (
     SimpleMAStrategy,
     RSIStrategy,
@@ -39,8 +40,29 @@ class HyperliquidBot:
         self.connection_retry_count = 0
         self.last_connection_reset = time.time()
 
-        self.market_data = MarketDataManager(self.info)
-        self.order_manager = OrderManager(self.exchange, self.info, self.account_address)
+        # ------------------------------------------------------------------ #
+        # HIP-3 Multi-DEX setup
+        # ------------------------------------------------------------------ #
+        self.hip3_dexes: List[str] = Config.TRADING_DEXES
+        self.registry = DEXRegistry(Config.API_URL)
+
+        if self.hip3_dexes:
+            logger.info(f"Discovering HIP-3 DEXes: {self.hip3_dexes}")
+            self.registry.discover(self.hip3_dexes)
+            logger.info("Registered DEXes:\n" + self.registry.summary())
+            self.market_data = MultiDexMarketData(self.info, self.registry, Config.API_URL)
+            self.order_manager = MultiDexOrderManager(
+                exchange=self.exchange,
+                info=self.info,
+                account_address=self.account_address,
+                registry=self.registry,
+                market_data=self.market_data,
+                hip3_dexes=self.hip3_dexes,
+            )
+        else:
+            self.market_data = MarketDataManager(self.info)
+            self.order_manager = OrderManager(self.exchange, self.info, self.account_address)
+
         self.risk_manager = RiskManager(self.info, self.account_address, {
             'max_leverage': 3.0,
             'max_position_size_pct': 0.2,
@@ -111,8 +133,25 @@ class HyperliquidBot:
 
         # Store strategy name and coins for validation
         self.strategy_name = strategy_name
-        self.trading_coins = coins or ['BTC', 'ETH']
         self.strategy_config = config
+
+        # Build full coin list: standard HL coins + HIP-3 "dex:coin" coins
+        hl_coins = coins or ['BTC', 'ETH'] if Config.ENABLE_STANDARD_HL else []
+        hip3_coins: List[str] = []
+        for dex in self.hip3_dexes:
+            # Use per-DEX override if configured, else use discovered coins
+            if dex in Config.DEX_COINS:
+                dex_coin_names = Config.DEX_COINS[dex]
+            else:
+                dex_coin_names = self.registry.list_coins(dex)
+            hip3_coins.extend(f"{dex}:{c}" for c in dex_coin_names)
+
+        all_coins = (hl_coins if Config.ENABLE_STANDARD_HL else []) + hip3_coins
+        self.trading_coins = all_coins or ['BTC', 'ETH']
+
+        if hip3_coins:
+            logger.info(f"HIP-3 coins: {hip3_coins}")
+        logger.info(f"All trading coins: {self.trading_coins}")
 
         # Strategy factory
         strategy_map = {
@@ -135,7 +174,7 @@ class HyperliquidBot:
             available_strategies = ', '.join(strategy_map.keys())
             raise ValueError(f"Unknown strategy: {strategy_name}. Available strategies: {available_strategies}")
 
-        self.coins = coins or ["BTC", "ETH", "SOL"]
+        self.coins = self.trading_coins
 
     def _load_wallet(self):
         from eth_account import Account
@@ -385,8 +424,22 @@ class HyperliquidBot:
             )
 
             # Re-initialize managers with new connections
-            self.market_data = MarketDataManager(self.info)
-            self.order_manager = OrderManager(self.exchange, self.info, self.account_address)
+            if self.hip3_dexes:
+                self.registry = DEXRegistry(Config.API_URL)
+                self.registry.discover(self.hip3_dexes)
+                self.market_data = MultiDexMarketData(self.info, self.registry, Config.API_URL)
+                self.order_manager = MultiDexOrderManager(
+                    exchange=self.exchange,
+                    info=self.info,
+                    account_address=self.account_address,
+                    registry=self.registry,
+                    market_data=self.market_data,
+                    hip3_dexes=self.hip3_dexes,
+                )
+            else:
+                self.market_data = MarketDataManager(self.info)
+                self.order_manager = OrderManager(self.exchange, self.info, self.account_address)
+
             self.risk_manager = RiskManager(self.info, self.account_address, {
                 'max_leverage': 3.0,
                 'max_position_size_pct': 0.2,
@@ -430,7 +483,24 @@ if __name__ == "__main__":
         type=str,
         nargs='+',
         default=['BTC', 'ETH', 'SOL'],
-        help='Coins to trade'
+        help='Coins to trade on standard Hyperliquid (e.g. BTC ETH SOL)'
+    )
+    parser.add_argument(
+        '--dex',
+        type=str,
+        nargs='+',
+        default=None,
+        help=(
+            'HIP-3 DEX names to trade on (e.g. xyz flx). '
+            'Overrides TRADING_DEXES env var. '
+            'Use XYZ_COINS / FLX_COINS env vars to set per-DEX coin lists.'
+        )
+    )
+    parser.add_argument(
+        '--no-hl',
+        action='store_true',
+        default=False,
+        help='Disable trading on standard Hyperliquid perps (trade only HIP-3 DEXes)'
     )
 
     # Common strategy parameters
@@ -536,13 +606,25 @@ if __name__ == "__main__":
         if args.atr_period is not None:
             strategy_config['atr_period'] = args.atr_period
 
-    logger.info(f"Starting bot with {args.strategy} strategy for coins: {args.coins}")
+    # Apply CLI overrides for DEX settings
+    if args.dex is not None:
+        import os
+        os.environ["TRADING_DEXES"] = ",".join(args.dex)
+        # Reload config after env change
+        Config.TRADING_DEXES = args.dex
+    if args.no_hl:
+        Config.ENABLE_STANDARD_HL = False
+
+    logger.info(f"Starting bot with {args.strategy} strategy")
+    logger.info(f"Standard HL coins: {args.coins if Config.ENABLE_STANDARD_HL else '(disabled)'}")
+    if Config.TRADING_DEXES:
+        logger.info(f"HIP-3 DEXes: {Config.TRADING_DEXES}")
     if strategy_config:
         logger.info(f"Custom parameters: {json.dumps(strategy_config, indent=2)}")
 
     bot = HyperliquidBot(
         strategy_name=args.strategy,
-        coins=args.coins,
+        coins=args.coins if Config.ENABLE_STANDARD_HL else [],
         strategy_config=strategy_config if strategy_config else None
     )
     bot.run()

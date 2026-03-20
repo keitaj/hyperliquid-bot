@@ -2,7 +2,7 @@
 
 [English](README.md) | **日本語**
 
-Hyperliquid DEX用の自動取引ボットです。
+Hyperliquid DEX用の自動取引ボットです。**HIP-3マルチDEX対応**（trade.xyz、Felix、Markets by Kinetiq、Basedなど）。
 
 ## ⚠️ 重要な免責事項
 
@@ -25,6 +25,7 @@ Hyperliquid DEX用の自動取引ボットです。
 - [使い方](#使い方)
   - [Docker での使い方（推奨）](#-docker-での使い方推奨)
   - [Python での使い方](#-python-での使い方)
+- [HIP-3 マルチDEX取引](#hip-3-マルチdex取引)
 - [取引戦略](#取引戦略)
 - [機能](#機能)
 - [技術ドキュメント](#技術ドキュメント)
@@ -166,12 +167,89 @@ No open positions
 ==================================================
 ```
 
+---
+
+## HIP-3 マルチDEX取引
+
+[HIP-3](https://hyperliquid.gitbook.io/hyperliquid-docs/hyperliquid-improvement-proposals-hips/hip-3-builder-deployed-perpetuals) は、Hyperliquid L1上にビルダーが独自のPerpsDEXをデプロイできる仕様です。すべてのHIP-3 DEXは同じHyperliquid APIを共有しており、上場銘柄とオラクル設定が異なるだけです。
+
+### 対応プラットフォーム
+
+| プラットフォーム | DEX名 | 取引対象 |
+|---|---|---|
+| 標準 Hyperliquid | (なし) | 暗号資産Perps（BTC、ETH、SOLなど） |
+| [trade.xyz](https://trade.xyz) | `xyz` | 株式・コモディティPerps（AAPL、GOLD、CLなど） |
+| [Felix](https://trade.usefelix.xyz) | `flx` | 株式・コモディティPerps |
+| [Markets by Kinetiq](https://markets.xyz) | `km` | 各種（担保: USDH） |
+| [Based](https://basedapp.xyz) | (なし) | 標準HLのフロントエンド — `ENABLE_STANDARD_HL=true` で対応 |
+| [Ventuals](https://app.ventuals.com) | `vntl` | — |
+| [HyENA](https://app.hyena.trade) | `hyna` | — |
+| [dreamcash](https://trade.dreamcash.xyz) | `cash` | — |
+
+> **注意**: DEX名はオンチェーンで割り当てられます。現在の完全なリストはHyperliquid APIの `{"type": "perpDexs"}` で確認できます。
+
+### 設定
+
+`.env`ファイルに以下を追加します：
+
+```bash
+# 取引対象のHIP-3 DEX名（カンマ区切り）
+TRADING_DEXES=xyz,flx
+
+# falseにするとHIP-3 DEXのみで取引（標準HL Perpsを無効化）
+ENABLE_STANDARD_HL=true
+
+# DEXごとの取引通貨リスト（省略時はそのDEXの全通貨）
+XYZ_COINS=XYZ100,XYZ200
+FLX_COINS=NVDA,AAPL,WTI
+```
+
+### HIP-3 コマンドラインオプション
+
+```bash
+# trade.xyzのみでRSI戦略を実行
+python3 bot.py --strategy rsi --dex xyz --no-hl
+
+# Felix株式Perps（NVDA、AAPL）と標準HL（BTC/ETH）を同時に取引
+FLX_COINS=NVDA,AAPL python3 bot.py --strategy simple_ma --coins BTC ETH --dex flx
+
+# .envに設定した全DEXで取引
+python3 bot.py --strategy macd
+```
+
+| オプション | 説明 |
+|---|---|
+| `--dex DEX [DEX ...]` | 取引するHIP-3 DEX名（`TRADING_DEXES`環境変数を上書き） |
+| `--no-hl` | 標準Hyperliquid Perpsを無効化し、HIP-3 DEXのみで取引 |
+
+### HIP-3の仕組み
+
+HIP-3資産には専用の整数アセットIDが使用されます：
+
+```
+asset_id = 100000 + (perp_dex_index × 10000) + index_in_meta
+```
+
+例：`xyz`が2番目のDEX（index=1）で、`XYZ100`がその最初の資産（index=0）の場合：
+```
+asset_id = 100000 + (1 × 10000) + 0 = 110000
+```
+
+ボットは起動時に以下を自動処理します：
+1. `perpDexs` APIで全登録DEXとそのインデックスを取得
+2. 設定された各DEXの `meta` を取得して資産リストを把握
+3. アセットIDを計算しSDKのルックアップテーブルに注入
+4. HIP-3コインを `"dex:coin"` 形式（例：`"xyz:XYZ100"`、`"flx:NVDA"`）で統一管理
+
+---
+
 ## 機能
 
 - **Market Data**: リアルタイム価格、オーダーブック、ローソク足データの取得
 - **Order Management**: 指値注文、成行注文の発注とキャンセル
 - **Risk Management**: レバレッジ制限、最大ドローダウン、日次損失制限
 - **Multiple Strategies**: 6つの異なる取引戦略から選択可能
+- **HIP-3 Multi-DEX**: Hyperliquid、trade.xyz、Felix等のHIP-3 DEXを横断して同時取引
 
 ## 取引戦略
 
@@ -251,6 +329,10 @@ No open positions
 - `market_data.py`: マーケットデータの取得
 - `order_manager.py`: 注文管理
 - `risk_manager.py`: リスク管理
+- `hip3/`: HIP-3マルチDEXサポート
+  - `dex_registry.py`: DEX探索・アセットID解決
+  - `multi_dex_market_data.py`: DEX対応マーケットデータ管理
+  - `multi_dex_order_manager.py`: DEX対応注文管理
 - `strategies/`: 取引戦略
   - `base_strategy.py`: 戦略の基底クラス
   - `simple_ma_strategy.py`: 移動平均戦略
@@ -259,6 +341,8 @@ No open positions
   - `macd_strategy.py`: MACD戦略
   - `grid_trading_strategy.py`: グリッド取引戦略
   - `breakout_strategy.py`: ブレイクアウト戦略
+- `validation/`: 事前バリデーション
+  - `margin_validator.py`: マージン・設定バリデーション
 - `docs/`: ドキュメント
   - `technical-notes/`: 技術的な詳細ドキュメント
 
@@ -267,3 +351,5 @@ No open positions
 - 本番環境で使用する前に、必ずテストネットで動作確認してください
 - 秘密鍵は安全に管理してください
 - リスク管理パラメータは慎重に設定してください
+- HIP-3 DEXは標準Hyperliquidより手数料が高い場合があります（通常2倍、50%がDEXデプロイヤーに配分）
+- HIP-3 DEXは現在、アイソレートマージンのみ対応（クロスマージン未対応）
