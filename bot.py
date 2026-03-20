@@ -344,7 +344,13 @@ class HyperliquidBot:
                 self._close_all_positions()
                 return
 
-            # pause, cooldown, block_new_orders: orders already cancelled above
+            if action == 'block_new_orders':
+                # Block new orders but continue managing existing positions
+                self.order_manager.update_order_status()
+                self._check_per_trade_stops()
+                return
+
+            # pause, cooldown: orders already cancelled above
             return
 
         self.order_manager.update_order_status()
@@ -552,7 +558,12 @@ class HyperliquidBot:
                 self.market_data = MarketDataManager(self.info)
                 self.order_manager = OrderManager(self.exchange, self.info, self.account_address)
 
+            # Preserve cooldown state across connection resets
+            prev_emergency_stop_time = self.risk_manager._emergency_stop_time
+            prev_daily_starting_balance = self.risk_manager.daily_starting_balance
             self.risk_manager = RiskManager(self.info, self.account_address, self.risk_config)
+            self.risk_manager._emergency_stop_time = prev_emergency_stop_time
+            self.risk_manager.daily_starting_balance = prev_daily_starting_balance
 
             # Re-initialize strategy with new connections
             strategy_config = self.strategy.config if hasattr(self.strategy, 'config') else {}
