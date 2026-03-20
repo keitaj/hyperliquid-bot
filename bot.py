@@ -678,6 +678,8 @@ if __name__ == "__main__":
     parser.add_argument('--refresh-interval', type=float, help='Seconds before cancelling stale orders (market_making, default: 30)')
     parser.add_argument('--no-close-immediately', action='store_true', default=False,
                         help='Disable immediate position closing (market_making)')
+    parser.add_argument('--max-position-age', type=float,
+                        help='Max seconds to hold a position before force-closing (market_making, default: 120)')
 
     # Risk guardrail parameters
     parser.add_argument('--max-position-pct', type=float,
@@ -775,6 +777,8 @@ if __name__ == "__main__":
             strategy_config['refresh_interval_seconds'] = args.refresh_interval
         if args.no_close_immediately:
             strategy_config['close_immediately'] = False
+        if hasattr(args, 'max_position_age') and args.max_position_age is not None:
+            strategy_config['max_position_age_seconds'] = args.max_position_age
 
     # Apply CLI overrides for DEX settings
     if args.dex is not None:

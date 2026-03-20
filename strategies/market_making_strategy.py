@@ -1,7 +1,7 @@
 import logging
 import os
 import time
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from strategies.base_strategy import BaseStrategy
 from order_manager import OrderSide
@@ -17,6 +17,11 @@ class MarketMakingStrategy(BaseStrategy):
     price, optionally closes filled positions immediately, and periodically
     refreshes stale orders.  Works in any market condition.
 
+    When ``close_immediately`` is False, filled positions are closed via a
+    take-profit limit order at entry ± spread.  If the take-profit is not
+    filled within ``max_position_age_seconds``, the position is closed at
+    the current mid price to prevent indefinite holding.
+
     All parameters are configurable via the strategy config dict (populated
     from CLI flags or environment variables).
     """
@@ -31,10 +36,14 @@ class MarketMakingStrategy(BaseStrategy):
         self.refresh_interval_seconds: float = config.get('refresh_interval_seconds', 30)
         self.close_immediately: bool = config.get('close_immediately', True)
         self.max_positions: int = config.get('max_positions', 3)
+        self.max_position_age_seconds: float = config.get('max_position_age_seconds', 120)
 
         # ---- Internal state ---- #
         self._last_order_time: Dict[str, float] = {}
+        # coin -> list of (oid, side, place_time)
         self._tracked_orders: Dict[str, list] = {}
+        # coin -> (entry_time, close_oid or None)
+        self._open_positions: Dict[str, Tuple[float, Optional[int]]] = {}
 
     # ------------------------------------------------------------------ #
     #  Main loop override
@@ -44,35 +53,134 @@ class MarketMakingStrategy(BaseStrategy):
         """Override the default signal-based loop with a market-making loop.
 
         Flow per coin:
-        1. Close any existing position immediately (if configured).
-        2. Cancel stale orders if the refresh interval has elapsed.
-        3. Place buy + sell limit orders around mid price.
+        1. If position exists and close_immediately: market-close it.
+        2. If position exists and not close_immediately: manage take-profit.
+        3. Cancel stale orders.
+        4. Place new buy + sell limit orders if no position and capacity.
         """
         self.update_positions()
 
         for coin in coins:
             try:
-                # Step 1: close existing positions if configured
-                if coin in self.positions and self.close_immediately:
-                    pos = self.positions[coin]
-                    if abs(pos['size']) > 0:
+                has_position = coin in self.positions and abs(self.positions[coin]['size']) > 0
+
+                if has_position:
+                    if self.close_immediately:
                         logger.info(
                             f"[mm] Closing position for {coin}: "
-                            f"size={pos['size']:.6f}"
+                            f"size={self.positions[coin]['size']:.6f}"
                         )
                         self.close_position(coin)
+                        self._open_positions.pop(coin, None)
                         continue
+                    else:
+                        # Manage take-profit close for existing position
+                        self._manage_position_close(coin)
+                        continue
+                else:
+                    # Position was closed — clean up tracking
+                    if coin in self._open_positions:
+                        close_oid = self._open_positions[coin][1]
+                        if close_oid is not None:
+                            # Cancel leftover close order if position is gone
+                            try:
+                                self.order_manager.cancel_order(close_oid, coin)
+                            except Exception:
+                                pass
+                        self._open_positions.pop(coin, None)
 
-                # Step 2: cancel stale orders
+                # No position — normal MM flow
                 self._cancel_stale_orders(coin)
 
-                # Step 3: place new orders if we have capacity
                 current_orders = self._tracked_orders.get(coin, [])
                 if len(current_orders) < self.max_open_orders:
                     self._place_orders(coin)
 
             except Exception as e:
                 logger.error(f"[mm] Error processing {coin}: {e}")
+
+    # ------------------------------------------------------------------ #
+    #  Position close management (no-close-immediately mode)
+    # ------------------------------------------------------------------ #
+
+    def _manage_position_close(self, coin: str):
+        """Ensure a take-profit close order exists for an open position.
+
+        If the position has been held longer than ``max_position_age_seconds``,
+        close it at mid price to prevent indefinite holding.
+        """
+        pos = self.positions[coin]
+        size = pos['size']
+        entry_price = pos['entry_price']
+        now = time.time()
+
+        # Register position if not tracked
+        if coin not in self._open_positions:
+            self._open_positions[coin] = (now, None)
+            logger.info(f"[mm] Tracking position for {coin}: size={size:.6f} entry={entry_price:.4f}")
+
+        entry_time, close_oid = self._open_positions[coin]
+        age = now - entry_time
+
+        # Check if max age exceeded — force close at mid price
+        if age >= self.max_position_age_seconds:
+            logger.info(
+                f"[mm] Position {coin} held for {age:.0f}s (max {self.max_position_age_seconds:.0f}s) "
+                f"— closing at mid price"
+            )
+            # Cancel existing close order if any
+            if close_oid is not None:
+                try:
+                    self.order_manager.cancel_order(close_oid, coin)
+                except Exception:
+                    pass
+            self.close_position(coin)
+            self._open_positions.pop(coin, None)
+            return
+
+        # Check if close order is still alive
+        if close_oid is not None:
+            try:
+                open_orders = self.order_manager.get_open_orders(coin)
+                open_oids = {int(o['oid']) for o in open_orders}
+                if close_oid in open_oids:
+                    return  # Close order still active, wait
+            except Exception:
+                pass
+            # Close order was filled or cancelled — position should be gone next cycle
+            self._open_positions[coin] = (entry_time, None)
+
+        # Place take-profit close order at entry ± spread
+        close_side = OrderSide.SELL if size > 0 else OrderSide.BUY
+        if size > 0:
+            close_price = self._round_price(entry_price * (1 + self.spread_bps / 10_000))
+        else:
+            close_price = self._round_price(entry_price * (1 - self.spread_bps / 10_000))
+
+        abs_size = abs(size)
+        sz_decimals = self.market_data.get_sz_decimals(coin)
+        abs_size = round(abs_size, sz_decimals)
+
+        if abs_size <= 0:
+            return
+
+        try:
+            order = self.order_manager.create_limit_order(
+                coin=coin,
+                side=close_side,
+                size=abs_size,
+                price=close_price,
+                reduce_only=True,
+                post_only=False,  # Allow crossing to ensure fill
+            )
+            if order and order.id is not None:
+                self._open_positions[coin] = (entry_time, order.id)
+                logger.info(
+                    f"[mm] Placed take-profit {close_side.value} for {coin} "
+                    f"size={abs_size} price={close_price:.6f} (oid={order.id})"
+                )
+        except Exception as e:
+            logger.error(f"[mm] Failed to place close order for {coin}: {e}")
 
     # ------------------------------------------------------------------ #
     #  Stub implementations for abstract methods (not used in run())
@@ -103,7 +211,13 @@ class MarketMakingStrategy(BaseStrategy):
     # ------------------------------------------------------------------ #
 
     def _place_orders(self, coin: str):
-        """Place a buy and a sell limit order symmetrically around mid price."""
+        """Place a buy and a sell limit order symmetrically around mid price.
+
+        Skip placing new orders if we already have a position in this coin
+        (position is managed by _manage_position_close instead).
+        """
+        if coin in self._open_positions:
+            return
 
         if self._check_max_positions(coin):
             return
@@ -170,14 +284,21 @@ class MarketMakingStrategy(BaseStrategy):
 
     def _cancel_stale_orders(self, coin: str):
         """Cancel orders older than ``refresh_interval_seconds`` and
-        remove filled/cancelled orders from tracking."""
+        remove filled/cancelled orders from tracking.
 
+        Does NOT cancel close orders managed by _manage_position_close.
+        """
         tracked = self._tracked_orders.get(coin, [])
         if not tracked:
             return
 
         now = time.time()
         still_active = []
+
+        # Protect close order OIDs from cancellation
+        close_oid = None
+        if coin in self._open_positions:
+            close_oid = self._open_positions[coin][1]
 
         try:
             open_orders = self.order_manager.get_open_orders(coin)
@@ -191,6 +312,11 @@ class MarketMakingStrategy(BaseStrategy):
                 logger.debug(
                     f"[mm] Order {oid} ({side} {coin}) no longer open"
                 )
+                continue
+
+            # Never cancel a close order from here
+            if close_oid is not None and oid == close_oid:
+                still_active.append((oid, side, place_time))
                 continue
 
             age = now - place_time
@@ -212,14 +338,7 @@ class MarketMakingStrategy(BaseStrategy):
         self._tracked_orders[coin] = still_active
 
     def _get_spread_prices(self, mid_price: float) -> tuple:
-        """Return ``(buy_price, sell_price)`` based on ``spread_bps``.
-
-        ``spread_bps`` is the one-sided spread in basis points, so the
-        full bid/ask spread is ``2 * spread_bps`` bps.
-
-        Prices are rounded to 5 significant figures and 6 decimal places
-        to match Hyperliquid's perp price format.
-        """
+        """Return ``(buy_price, sell_price)`` based on ``spread_bps``."""
         offset = mid_price * (self.spread_bps / 10_000)
         buy_price = self._round_price(mid_price - offset)
         sell_price = self._round_price(mid_price + offset)
