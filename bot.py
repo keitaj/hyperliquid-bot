@@ -71,12 +71,8 @@ class HyperliquidBot:
             self.market_data = MarketDataManager(self.info)
             self.order_manager = OrderManager(self.exchange, self.info, self.account_address)
 
-        self.risk_manager = RiskManager(self.info, self.account_address, {
-            'max_leverage': 3.0,
-            'max_position_size_pct': 0.2,
-            'max_drawdown_pct': 0.1,
-            'daily_loss_limit_pct': 0.05
-        })
+        self.risk_config = self._build_risk_config()
+        self.risk_manager = RiskManager(self.info, self.account_address, self.risk_config)
 
         # Default strategy configurations
         default_configs = {
@@ -187,6 +183,24 @@ class HyperliquidBot:
     def _load_wallet(self):
         from eth_account import Account
         return Account.from_key(Config.PRIVATE_KEY)
+
+    @staticmethod
+    def _build_risk_config() -> Dict:
+        """Build a risk-manager config dict from :class:`Config` class attrs."""
+        return {
+            'max_leverage': 3.0,
+            'max_position_size_pct': Config.MAX_POSITION_PCT,
+            'max_drawdown_pct': 0.1,
+            'daily_loss_limit_pct': 0.05,
+            # New guardrails
+            'max_position_pct': Config.MAX_POSITION_PCT,
+            'max_margin_usage': Config.MAX_MARGIN_USAGE,
+            'force_close_margin': Config.FORCE_CLOSE_MARGIN,
+            'daily_loss_limit': Config.DAILY_LOSS_LIMIT,
+            'per_trade_stop_loss': Config.PER_TRADE_STOP_LOSS,
+            'max_open_positions': Config.MAX_OPEN_POSITIONS,
+            'cooldown_after_stop': Config.COOLDOWN_AFTER_STOP,
+        }
 
     def _build_perp_dexs(self) -> list:
         """Build the perp_dexs list expected by the SDK: '' for standard HL, named strings for HIP-3."""
@@ -304,18 +318,123 @@ class HyperliquidBot:
 
     def _trading_loop(self):
         risk_checks = self.risk_manager.check_risk_limits()
+        action = risk_checks.get('action', 'none')
+
         if not risk_checks['all_checks_passed']:
             logger.warning(f"Risk limits exceeded: {risk_checks.get('reason')}")
-            self.order_manager.cancel_all_orders()
-            return
+
+            if action == 'stop_bot':
+                logger.critical("Daily loss limit exceeded – stopping bot")
+                self.order_manager.cancel_all_orders()
+                self._close_all_positions()
+                self.risk_manager.record_emergency_stop()
+                self.running = False
+                return
+
+            if action == 'force_close':
+                logger.warning("Force-close margin threshold breached – closing all positions")
+                self.order_manager.cancel_all_orders()
+                self._close_all_positions()
+                self.risk_manager.record_emergency_stop()
+                return
+
+            if action == 'close_all':
+                logger.warning("RISK_LEVEL=black – closing all positions")
+                self.order_manager.cancel_all_orders()
+                self._close_all_positions()
+                return
+
+            if action in ('pause', 'cooldown'):
+                logger.info("Trading paused (action=%s) – cancelling open orders", action)
+                self.order_manager.cancel_all_orders()
+                return
+
+            if action == 'block_new_orders':
+                logger.info("Blocking new orders – cancelling open orders")
+                self.order_manager.cancel_all_orders()
+                return
 
         self.order_manager.update_order_status()
+
+        # Per-trade stop loss check (every cycle, if enabled)
+        self._check_per_trade_stops()
 
         self.strategy.run(self.coins)
 
         if int(time.time()) % 60 == 0:
             risk_summary = self.risk_manager.get_risk_summary()
             logger.info(f"Risk summary: {risk_summary}")
+
+    # ------------------------------------------------------------------ #
+    #  Position management helpers
+    # ------------------------------------------------------------------ #
+
+    def _close_all_positions(self):
+        """Market-close every open position."""
+        from order_manager import OrderSide
+        try:
+            positions = self.order_manager.get_all_positions()
+            if not positions:
+                logger.info("No open positions to close")
+                return
+
+            for pos in positions:
+                coin = pos.get('coin', '')
+                size = float(pos.get('szi', 0))
+                if size == 0:
+                    continue
+
+                close_side = OrderSide.SELL if size > 0 else OrderSide.BUY
+                abs_size = abs(size)
+
+                # Round to correct decimals
+                sz_decimals = self.market_data.get_sz_decimals(coin)
+                abs_size = round(abs_size, sz_decimals)
+
+                order = self.order_manager.create_market_order(
+                    coin=coin,
+                    side=close_side,
+                    size=abs_size,
+                    reduce_only=True,
+                )
+                if order:
+                    logger.info("Closed position for %s: size=%s", coin, abs_size)
+                else:
+                    logger.error("Failed to close position for %s", coin)
+        except Exception as e:
+            logger.error("Error closing all positions: %s", e)
+
+    def _check_per_trade_stops(self):
+        """Close individual positions that exceed the per-trade stop loss."""
+        from order_manager import OrderSide
+        if self.risk_manager.per_trade_stop_loss is None:
+            return
+
+        try:
+            positions = self.order_manager.get_all_positions()
+            to_close = self.risk_manager.check_per_trade_stop_loss(positions)
+            for pos in to_close:
+                coin = pos.get('coin', '')
+                size = float(pos.get('szi', 0))
+                if size == 0:
+                    continue
+
+                close_side = OrderSide.SELL if size > 0 else OrderSide.BUY
+                abs_size = abs(size)
+
+                sz_decimals = self.market_data.get_sz_decimals(coin)
+                abs_size = round(abs_size, sz_decimals)
+
+                order = self.order_manager.create_market_order(
+                    coin=coin,
+                    side=close_side,
+                    size=abs_size,
+                    reduce_only=True,
+                )
+                if order:
+                    logger.info("Per-trade stop loss: closed %s (size=%s)", coin, abs_size)
+        except Exception as e:
+            logger.error("Error in per-trade stop loss check: %s", e)
 
     def _signal_handler(self, signum, frame):
         logger.info("Received shutdown signal")
@@ -456,12 +575,7 @@ class HyperliquidBot:
                 self.market_data = MarketDataManager(self.info)
                 self.order_manager = OrderManager(self.exchange, self.info, self.account_address)
 
-            self.risk_manager = RiskManager(self.info, self.account_address, {
-                'max_leverage': 3.0,
-                'max_position_size_pct': 0.2,
-                'max_drawdown_pct': 0.1,
-                'daily_loss_limit_pct': 0.05
-            })
+            self.risk_manager = RiskManager(self.info, self.account_address, self.risk_config)
 
             # Re-initialize strategy with new connections
             strategy_config = self.strategy.config if hasattr(self.strategy, 'config') else {}
@@ -556,6 +670,25 @@ if __name__ == "__main__":
     parser.add_argument('--breakout-confirmation-bars', type=int, help='Breakout confirmation bars (breakout)')
     parser.add_argument('--atr-period', type=int, help='ATR period (breakout)')
 
+    # Risk guardrail parameters
+    parser.add_argument('--max-position-pct', type=float,
+                        help='Max single position as %% of account (default: 0.2)')
+    parser.add_argument('--max-margin-usage', type=float,
+                        help='Stop new orders above this margin usage (default: 0.8)')
+    parser.add_argument('--force-close-margin', type=float,
+                        help='Force close ALL positions above this margin ratio (disabled by default)')
+    parser.add_argument('--daily-loss-limit', type=float,
+                        help='Absolute $ daily loss to auto-stop the bot (disabled by default)')
+    parser.add_argument('--per-trade-stop-loss', type=float,
+                        help='Cut losing trades at this %% loss (e.g. 0.05 = 5%%, disabled by default)')
+    parser.add_argument('--max-open-positions', type=int,
+                        help='Max concurrent open positions (default: 5)')
+    parser.add_argument('--cooldown-after-stop', type=int,
+                        help='Seconds to wait after emergency stop (default: 3600)')
+    parser.add_argument('--risk-level', type=str,
+                        choices=['green', 'yellow', 'red', 'black'],
+                        help='Dynamic risk level: green=100%%, yellow=50%%, red=pause, black=close all')
+
     args = parser.parse_args()
 
     # Build strategy config from command line arguments
@@ -630,6 +763,26 @@ if __name__ == "__main__":
         Config.TRADING_DEXES = args.dex
     if args.no_hl:
         Config.ENABLE_STANDARD_HL = False
+
+    # Apply CLI overrides for risk guardrails (CLI > env > default)
+    if args.max_position_pct is not None:
+        Config.MAX_POSITION_PCT = args.max_position_pct
+    if args.max_margin_usage is not None:
+        Config.MAX_MARGIN_USAGE = args.max_margin_usage
+    if args.force_close_margin is not None:
+        Config.FORCE_CLOSE_MARGIN = args.force_close_margin
+    if args.daily_loss_limit is not None:
+        Config.DAILY_LOSS_LIMIT = args.daily_loss_limit
+    if args.per_trade_stop_loss is not None:
+        Config.PER_TRADE_STOP_LOSS = args.per_trade_stop_loss
+    if args.max_open_positions is not None:
+        Config.MAX_OPEN_POSITIONS = args.max_open_positions
+    if args.cooldown_after_stop is not None:
+        Config.COOLDOWN_AFTER_STOP = args.cooldown_after_stop
+    if args.risk_level is not None:
+        import os
+        os.environ["RISK_LEVEL"] = args.risk_level
+        Config.RISK_LEVEL = args.risk_level
 
     logger.info(f"Starting bot with {args.strategy} strategy")
     logger.info(f"Standard HL coins: {args.coins if Config.ENABLE_STANDARD_HL else '(disabled)'}")

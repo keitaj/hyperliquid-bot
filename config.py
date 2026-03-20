@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 from dotenv import load_dotenv
 from hyperliquid.utils import constants
 
@@ -42,6 +43,50 @@ class Config:
         _val = os.getenv(_env_key, "")
         if _val:
             DEX_COINS[_dex] = _parse_list(_val)
+
+    # ------------------------------------------------------------------ #
+    # Risk guardrail configuration
+    # ------------------------------------------------------------------ #
+
+    # Max single position as a fraction of account value (0.0–1.0).
+    MAX_POSITION_PCT: float = float(os.getenv("MAX_POSITION_PCT", "0.2"))
+
+    # Stop opening new orders when margin usage exceeds this fraction.
+    MAX_MARGIN_USAGE: float = float(os.getenv("MAX_MARGIN_USAGE", "0.8"))
+
+    # Force close ALL positions when margin usage exceeds this fraction.
+    # Disabled by default – set explicitly to enable.
+    FORCE_CLOSE_MARGIN: Optional[float] = (
+        float(os.getenv("FORCE_CLOSE_MARGIN"))
+        if os.getenv("FORCE_CLOSE_MARGIN") is not None
+        else None
+    )
+
+    # Absolute dollar daily loss that triggers an automatic bot stop.
+    # Disabled by default – set explicitly to enable.
+    DAILY_LOSS_LIMIT: Optional[float] = (
+        float(os.getenv("DAILY_LOSS_LIMIT"))
+        if os.getenv("DAILY_LOSS_LIMIT") is not None
+        else None
+    )
+
+    # Cut losing trades at this percentage (0.0–1.0, e.g. 0.05 = 5%).
+    # Disabled by default – set explicitly to enable.
+    PER_TRADE_STOP_LOSS: Optional[float] = (
+        float(os.getenv("PER_TRADE_STOP_LOSS"))
+        if os.getenv("PER_TRADE_STOP_LOSS") is not None
+        else None
+    )
+
+    # Maximum number of concurrent open positions.
+    MAX_OPEN_POSITIONS: int = int(os.getenv("MAX_OPEN_POSITIONS", "5"))
+
+    # Seconds to wait after an emergency stop before resuming trading.
+    COOLDOWN_AFTER_STOP: int = int(os.getenv("COOLDOWN_AFTER_STOP", "3600"))
+
+    # Dynamic risk level: green (100%), yellow (50%), red (pause), black (close all).
+    # Can be changed at runtime via the environment variable.
+    RISK_LEVEL: str = os.getenv("RISK_LEVEL", "green")
 
     @classmethod
     def validate(cls):
