@@ -77,18 +77,45 @@ class OrderManager:
         coin: str,
         side: OrderSide,
         size: float,
-        reduce_only: bool = False
+        reduce_only: bool = False,
+        slippage: float = 0.01
     ) -> Optional[Order]:
+        """Place a market order using an aggressive IOC limit order.
+
+        The SDK's ``exchange.order`` does not accept ``{"market": {}}``.
+        Instead we use an IOC (Immediate-or-Cancel) limit order with a
+        slippage-adjusted price to simulate market execution.
+        """
+        try:
+            market_data = api_wrapper.call(self.info.all_mids)
+            # Handle HIP-3 "dex:coin" format -- all_mids uses base coin name
+            lookup_coin = coin.split(":")[-1] if ":" in coin else coin
+            mid_price = float(market_data.get(lookup_coin, 0))
+            if mid_price <= 0:
+                logger.error(f"Cannot determine mid price for {coin}")
+                return None
+
+            if side == OrderSide.BUY:
+                limit_price = mid_price * (1 + slippage)
+            else:
+                limit_price = mid_price * (1 - slippage)
+
+            # Round to 5 sig figs + 6 decimals (Hyperliquid perp format)
+            limit_price = round(float(f"{limit_price:.5g}"), 6)
+        except Exception as e:
+            logger.error(f"Error calculating market price for {coin}: {e}")
+            return None
+
         order = Order(
             id=None,
             coin=coin,
             side=side,
             size=size,
-            price=0,
-            order_type={"market": {}},
+            price=limit_price,
+            order_type={"limit": {"tif": "Ioc"}},
             reduce_only=reduce_only
         )
-        
+
         return self._place_order(order)
     
     def _place_order(self, order: Order) -> Optional[Order]:
@@ -108,12 +135,31 @@ class OrderManager:
                     order_data = result['response']['data']
                     if 'statuses' in order_data and order_data['statuses']:
                         status_info = order_data['statuses'][0]
+
+                        # Extract oid from various response formats:
+                        # - {'oid': 123}           (immediately filled)
+                        # - {'resting': {'oid': 123}}  (limit order on book)
+                        # - {'filled': {'oid': 123}}   (IOC filled)
+                        oid = None
                         if 'oid' in status_info:
-                            order.id = int(status_info['oid'])
+                            oid = int(status_info['oid'])
+                        elif 'resting' in status_info:
+                            oid = int(status_info['resting']['oid'])
+                        elif 'filled' in status_info:
+                            oid = int(status_info['filled']['oid'])
+
+                        if oid is not None:
+                            order.id = oid
                             self.active_orders[order.id] = order
                             logger.info(f"Order placed successfully: {order.id}")
                             return order
-                            
+
+                        # Check for error in status
+                        if 'error' in status_info:
+                            logger.error(f"Order rejected: {status_info['error']}")
+                            order.status = OrderStatus.REJECTED
+                            return None
+
             logger.error(f"Failed to place order: {result}")
             order.status = OrderStatus.REJECTED
             return None
