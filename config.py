@@ -85,8 +85,8 @@ class Config:
     COOLDOWN_AFTER_STOP: int = int(os.getenv("COOLDOWN_AFTER_STOP", "3600"))
 
     # Dynamic risk level: green (100%), yellow (50%), red (pause), black (close all).
-    # Can be changed at runtime via the environment variable.
-    RISK_LEVEL: str = os.getenv("RISK_LEVEL", "green")
+    # Read at runtime directly from os.getenv("RISK_LEVEL") by RiskManager,
+    # so it can be changed without restarting the bot.
 
     @classmethod
     def validate(cls):
@@ -94,3 +94,17 @@ class Config:
             raise ValueError("HYPERLIQUID_ACCOUNT_ADDRESS not found in environment")
         if not cls.PRIVATE_KEY:
             raise ValueError("HYPERLIQUID_PRIVATE_KEY not found in environment")
+
+        # Validate risk guardrail ranges
+        if not 0.0 <= cls.MAX_POSITION_PCT <= 1.0:
+            raise ValueError(f"MAX_POSITION_PCT must be 0.0–1.0, got {cls.MAX_POSITION_PCT}")
+        if not 0.0 <= cls.MAX_MARGIN_USAGE <= 1.0:
+            raise ValueError(f"MAX_MARGIN_USAGE must be 0.0–1.0, got {cls.MAX_MARGIN_USAGE}")
+        if cls.FORCE_CLOSE_MARGIN is not None and not 0.0 <= cls.FORCE_CLOSE_MARGIN <= 1.0:
+            raise ValueError(f"FORCE_CLOSE_MARGIN must be 0.0–1.0, got {cls.FORCE_CLOSE_MARGIN}")
+        if cls.DAILY_LOSS_LIMIT is not None and cls.DAILY_LOSS_LIMIT < 0:
+            raise ValueError(f"DAILY_LOSS_LIMIT must be >= 0, got {cls.DAILY_LOSS_LIMIT}")
+        if cls.PER_TRADE_STOP_LOSS is not None and not 0.0 <= cls.PER_TRADE_STOP_LOSS <= 1.0:
+            raise ValueError(f"PER_TRADE_STOP_LOSS must be 0.0–1.0, got {cls.PER_TRADE_STOP_LOSS}")
+        if cls.MAX_OPEN_POSITIONS < 1:
+            raise ValueError(f"MAX_OPEN_POSITIONS must be >= 1, got {cls.MAX_OPEN_POSITIONS}")

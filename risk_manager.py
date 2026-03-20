@@ -1,7 +1,7 @@
 import logging
 import os
 from typing import Dict, List, Optional
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from rate_limiter import api_wrapper
 
@@ -25,30 +25,16 @@ class RiskMetrics:
     timestamp: datetime
 
 
-@dataclass
-class RiskCheckResult:
-    """Actionable result returned by :meth:`RiskManager.check_risk_limits`.
-
-    Fields
-    ------
-    all_checks_passed : bool
-        ``True`` when no limits are breached.
-    action : str
-        One of ``'none'``, ``'block_new_orders'``, ``'force_close'``,
-        ``'stop_bot'``, ``'pause'``, ``'cooldown'``, ``'close_all'``.
-    force_close_all : bool
-        ``True`` when margin usage exceeds the *force_close_margin* threshold.
-    stop_bot : bool
-        ``True`` when the daily absolute loss limit is exceeded.
-    reason : str
-        Human-readable explanation for the action.
-    """
-    all_checks_passed: bool = True
-    action: str = "none"
-    force_close_all: bool = False
-    stop_bot: bool = False
-    reason: str = ""
-    details: Dict[str, bool] = field(default_factory=dict)
+# Action priority: higher index = more severe, wins over lower.
+_ACTION_PRIORITY = {
+    'none': 0,
+    'block_new_orders': 1,
+    'cooldown': 2,
+    'pause': 3,
+    'close_all': 4,
+    'force_close': 5,
+    'stop_bot': 6,
+}
 
 
 class RiskManager:
@@ -132,8 +118,17 @@ class RiskManager:
         return max(0.0, remaining)
 
     # ------------------------------------------------------------------ #
-    #  Metrics collection
+    #  Metrics collection (with short-lived cache)
     # ------------------------------------------------------------------ #
+
+    def _get_cached_metrics(self, max_age_seconds: float = 2.0) -> Optional[RiskMetrics]:
+        """Return the most recent metrics if fresh enough, else fetch new ones."""
+        if self.risk_metrics_history:
+            last = self.risk_metrics_history[-1]
+            age = (datetime.now() - last.timestamp).total_seconds()
+            if age < max_age_seconds:
+                return last
+        return self.get_current_metrics()
 
     def get_current_metrics(self) -> Optional[RiskMetrics]:
         try:
@@ -203,8 +198,11 @@ class RiskManager:
         The returned dict is backwards-compatible (contains ``all_checks_passed``
         and ``reason``) but also includes the new ``action``, ``force_close_all``,
         and ``stop_bot`` fields.
+
+        When multiple conditions fire simultaneously, the most severe action
+        wins (see ``_ACTION_PRIORITY``).
         """
-        metrics = self.get_current_metrics()
+        metrics = self._get_cached_metrics()
         if not metrics:
             return {
                 'all_checks_passed': False,
@@ -214,27 +212,30 @@ class RiskManager:
                 'reason': 'No metrics available',
             }
 
-        result = RiskCheckResult()
+        action = 'none'
+        force_close_all = False
+        stop_bot = False
         reasons: List[str] = []
+
+        def _escalate(new_action: str) -> None:
+            nonlocal action
+            if _ACTION_PRIORITY.get(new_action, 0) > _ACTION_PRIORITY.get(action, 0):
+                action = new_action
 
         # --- Risk level checks ------------------------------------------------
         risk_level = self.get_risk_level()
         if risk_level == "black":
-            result.all_checks_passed = False
-            result.action = "close_all"
-            result.force_close_all = True
+            force_close_all = True
+            _escalate("close_all")
             reasons.append("RISK_LEVEL is 'black' – closing all positions")
         elif risk_level == "red":
-            result.all_checks_passed = False
-            result.action = "pause"
+            _escalate("pause")
             reasons.append("RISK_LEVEL is 'red' – pausing trading")
 
         # --- Cooldown check ---------------------------------------------------
         if self.is_in_cooldown():
             remaining = self.cooldown_remaining_seconds()
-            result.all_checks_passed = False
-            if result.action in ("none", "block_new_orders"):
-                result.action = "cooldown"
+            _escalate("cooldown")
             reasons.append(
                 f"In cooldown after emergency stop ({remaining:.0f}s remaining)"
             )
@@ -261,18 +262,14 @@ class RiskManager:
                 f"Max open positions exceeded: {metrics.num_positions}/{self.max_open_positions}"
             )
 
-        all_legacy_ok = all(checks.values())
-        if not all_legacy_ok:
-            result.all_checks_passed = False
-            if result.action == "none":
-                result.action = "block_new_orders"
+        if not all(checks.values()):
+            _escalate("block_new_orders")
 
         # --- Force close margin (opt-in) --------------------------------------
         if self.force_close_margin is not None:
             if metrics.margin_ratio >= self.force_close_margin:
-                result.all_checks_passed = False
-                result.force_close_all = True
-                result.action = "force_close"
+                force_close_all = True
+                _escalate("force_close")
                 reasons.append(
                     f"Margin ratio {metrics.margin_ratio:.2%} >= force_close threshold "
                     f"{self.force_close_margin:.2%}"
@@ -282,26 +279,22 @@ class RiskManager:
         if self.daily_loss_limit is not None and self.daily_starting_balance is not None:
             daily_pnl = metrics.total_balance - self.daily_starting_balance
             if daily_pnl < 0 and abs(daily_pnl) >= self.daily_loss_limit:
-                result.all_checks_passed = False
-                result.stop_bot = True
-                result.action = "stop_bot"
+                stop_bot = True
+                _escalate("stop_bot")
                 reasons.append(
                     f"Daily loss ${abs(daily_pnl):.2f} >= limit ${self.daily_loss_limit:.2f}"
                 )
 
-        result.reason = "; ".join(reasons) if reasons else ""
-        result.details = checks
+        all_passed = action == 'none'
 
-        # Build backwards-compatible dict
-        out: Dict = {
-            'all_checks_passed': result.all_checks_passed,
-            'action': result.action,
-            'force_close_all': result.force_close_all,
-            'stop_bot': result.stop_bot,
-            'reason': result.reason,
+        return {
+            'all_checks_passed': all_passed,
+            'action': action,
+            'force_close_all': force_close_all,
+            'stop_bot': stop_bot,
+            'reason': "; ".join(reasons) if reasons else "",
             **checks,
         }
-        return out
 
     # ------------------------------------------------------------------ #
     #  Per-trade stop loss
@@ -314,9 +307,9 @@ class RiskManager:
         Parameters
         ----------
         positions :
-            List of position dicts as returned by ``order_manager.get_all_positions()``.
-            Each dict is expected to have at least ``coin``, ``szi`` (or ``size``),
-            ``entryPx``, and ``unrealizedPnl``.
+            List of position dicts from the Hyperliquid API (``assetPositions``
+            → ``position``). Expected keys: ``coin``, ``szi``, ``entryPx``,
+            ``unrealizedPnl``, ``positionValue``.
 
         Returns
         -------
@@ -329,7 +322,11 @@ class RiskManager:
         for pos in positions:
             entry_px = float(pos.get('entryPx', 0))
             unrealized_pnl = float(pos.get('unrealizedPnl', 0))
+            # positionValue may not always be present; fall back to szi * entryPx
             position_value = float(pos.get('positionValue', 0))
+            if position_value <= 0:
+                szi = float(pos.get('szi', 0))
+                position_value = abs(szi) * entry_px
 
             if position_value <= 0 or entry_px <= 0:
                 continue
@@ -367,7 +364,7 @@ class RiskManager:
     # ------------------------------------------------------------------ #
 
     def calculate_position_size_limit(self, coin: str, current_price: float) -> float:
-        metrics = self.get_current_metrics()
+        metrics = self._get_cached_metrics()
         if not metrics:
             return 0
 
@@ -401,7 +398,7 @@ class RiskManager:
     # ------------------------------------------------------------------ #
 
     def get_risk_summary(self) -> Dict:
-        metrics = self.get_current_metrics()
+        metrics = self._get_cached_metrics()
         if not metrics:
             return {'status': 'No data available'}
 

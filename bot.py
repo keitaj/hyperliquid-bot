@@ -188,11 +188,12 @@ class HyperliquidBot:
     def _build_risk_config() -> Dict:
         """Build a risk-manager config dict from :class:`Config` class attrs."""
         return {
+            # Legacy parameters (fixed defaults for backwards compatibility)
             'max_leverage': 3.0,
-            'max_position_size_pct': Config.MAX_POSITION_PCT,
+            'max_position_size_pct': 0.2,
             'max_drawdown_pct': 0.1,
             'daily_loss_limit_pct': 0.05,
-            # New guardrails
+            # Configurable guardrails
             'max_position_pct': Config.MAX_POSITION_PCT,
             'max_margin_usage': Config.MAX_MARGIN_USAGE,
             'force_close_margin': Config.FORCE_CLOSE_MARGIN,
@@ -369,70 +370,55 @@ class HyperliquidBot:
     #  Position management helpers
     # ------------------------------------------------------------------ #
 
+    def _close_position(self, pos: Dict, reason: str = "") -> bool:
+        """Market-close a single position. Returns True on success."""
+        from order_manager import OrderSide
+        coin = pos.get('coin', '')
+        size = float(pos.get('szi', 0))
+        if size == 0:
+            return False
+
+        close_side = OrderSide.SELL if size > 0 else OrderSide.BUY
+        abs_size = abs(size)
+
+        sz_decimals = self.market_data.get_sz_decimals(coin)
+        abs_size = round(abs_size, sz_decimals)
+
+        order = self.order_manager.create_market_order(
+            coin=coin,
+            side=close_side,
+            size=abs_size,
+            reduce_only=True,
+        )
+        if order:
+            prefix = f"{reason}: " if reason else ""
+            logger.info("%sClosed position for %s: size=%s", prefix, coin, abs_size)
+            return True
+        else:
+            logger.error("Failed to close position for %s", coin)
+            return False
+
     def _close_all_positions(self):
         """Market-close every open position."""
-        from order_manager import OrderSide
         try:
             positions = self.order_manager.get_all_positions()
             if not positions:
                 logger.info("No open positions to close")
                 return
-
             for pos in positions:
-                coin = pos.get('coin', '')
-                size = float(pos.get('szi', 0))
-                if size == 0:
-                    continue
-
-                close_side = OrderSide.SELL if size > 0 else OrderSide.BUY
-                abs_size = abs(size)
-
-                # Round to correct decimals
-                sz_decimals = self.market_data.get_sz_decimals(coin)
-                abs_size = round(abs_size, sz_decimals)
-
-                order = self.order_manager.create_market_order(
-                    coin=coin,
-                    side=close_side,
-                    size=abs_size,
-                    reduce_only=True,
-                )
-                if order:
-                    logger.info("Closed position for %s: size=%s", coin, abs_size)
-                else:
-                    logger.error("Failed to close position for %s", coin)
+                self._close_position(pos)
         except Exception as e:
             logger.error("Error closing all positions: %s", e)
 
     def _check_per_trade_stops(self):
         """Close individual positions that exceed the per-trade stop loss."""
-        from order_manager import OrderSide
         if self.risk_manager.per_trade_stop_loss is None:
             return
-
         try:
             positions = self.order_manager.get_all_positions()
             to_close = self.risk_manager.check_per_trade_stop_loss(positions)
             for pos in to_close:
-                coin = pos.get('coin', '')
-                size = float(pos.get('szi', 0))
-                if size == 0:
-                    continue
-
-                close_side = OrderSide.SELL if size > 0 else OrderSide.BUY
-                abs_size = abs(size)
-
-                sz_decimals = self.market_data.get_sz_decimals(coin)
-                abs_size = round(abs_size, sz_decimals)
-
-                order = self.order_manager.create_market_order(
-                    coin=coin,
-                    side=close_side,
-                    size=abs_size,
-                    reduce_only=True,
-                )
-                if order:
-                    logger.info("Per-trade stop loss: closed %s (size=%s)", coin, abs_size)
+                self._close_position(pos, reason="Per-trade stop loss")
         except Exception as e:
             logger.error("Error in per-trade stop loss check: %s", e)
 
@@ -599,6 +585,7 @@ class HyperliquidBot:
 if __name__ == "__main__":
     import argparse
     import json
+    import os
 
     parser = argparse.ArgumentParser(description='Hyperliquid Trading Bot')
     parser.add_argument(
@@ -757,7 +744,6 @@ if __name__ == "__main__":
 
     # Apply CLI overrides for DEX settings
     if args.dex is not None:
-        import os
         os.environ["TRADING_DEXES"] = ",".join(args.dex)
         # Reload config after env change
         Config.TRADING_DEXES = args.dex
@@ -780,9 +766,7 @@ if __name__ == "__main__":
     if args.cooldown_after_stop is not None:
         Config.COOLDOWN_AFTER_STOP = args.cooldown_after_stop
     if args.risk_level is not None:
-        import os
         os.environ["RISK_LEVEL"] = args.risk_level
-        Config.RISK_LEVEL = args.risk_level
 
     logger.info(f"Starting bot with {args.strategy} strategy")
     logger.info(f"Standard HL coins: {args.coins if Config.ENABLE_STANDARD_HL else '(disabled)'}")
