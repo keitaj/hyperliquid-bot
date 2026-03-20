@@ -138,6 +138,7 @@ class HyperliquidBot:
                 'max_open_orders': 4,
                 'refresh_interval_seconds': 30,
                 'close_immediately': True,
+                'maker_only': False,
                 'max_positions': 3,
                 'take_profit_percent': 1,
                 'stop_loss_percent': 2
@@ -680,6 +681,8 @@ if __name__ == "__main__":
                         help='Disable immediate position closing (market_making)')
     parser.add_argument('--max-position-age', type=float,
                         help='Max seconds to hold a position before force-closing (market_making, default: 120)')
+    parser.add_argument('--maker-only', action='store_true', default=False,
+                        help='Use post-only (maker) orders for all trades including closes (market_making)')
 
     # Risk guardrail parameters
     parser.add_argument('--max-position-pct', type=float,
@@ -779,6 +782,8 @@ if __name__ == "__main__":
             strategy_config['close_immediately'] = False
         if hasattr(args, 'max_position_age') and args.max_position_age is not None:
             strategy_config['max_position_age_seconds'] = args.max_position_age
+        if hasattr(args, 'maker_only') and args.maker_only:
+            strategy_config['maker_only'] = True
 
     # Apply CLI overrides for DEX settings
     if args.dex is not None:
