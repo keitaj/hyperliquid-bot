@@ -17,7 +17,8 @@ from strategies import (
     BollingerBandsStrategy,
     MACDStrategy,
     GridTradingStrategy,
-    BreakoutStrategy
+    BreakoutStrategy,
+    MarketMakingStrategy
 )
 
 logging.basicConfig(
@@ -130,6 +131,16 @@ class HyperliquidBot:
                 'max_positions': 3,
                 'take_profit_percent': 7,
                 'stop_loss_percent': 3
+            },
+            'market_making': {
+                'spread_bps': 5,
+                'order_size_usd': 50,
+                'max_open_orders': 4,
+                'refresh_interval_seconds': 30,
+                'close_immediately': True,
+                'max_positions': 3,
+                'take_profit_percent': 1,
+                'stop_loss_percent': 2
             }
         }
 
@@ -165,7 +176,8 @@ class HyperliquidBot:
             'bollinger_bands': BollingerBandsStrategy,
             'macd': MACDStrategy,
             'grid_trading': GridTradingStrategy,
-            'breakout': BreakoutStrategy
+            'breakout': BreakoutStrategy,
+            'market_making': MarketMakingStrategy
         }
 
         if strategy_name in strategy_map:
@@ -594,7 +606,7 @@ if __name__ == "__main__":
         '--strategy',
         type=str,
         default='simple_ma',
-        choices=['simple_ma', 'rsi', 'bollinger_bands', 'macd', 'grid_trading', 'breakout'],
+        choices=['simple_ma', 'rsi', 'bollinger_bands', 'macd', 'grid_trading', 'breakout', 'market_making'],
         help='Trading strategy to use'
     )
     parser.add_argument(
@@ -658,6 +670,14 @@ if __name__ == "__main__":
     parser.add_argument('--volume-multiplier', type=float, help='Volume multiplier (breakout)')
     parser.add_argument('--breakout-confirmation-bars', type=int, help='Breakout confirmation bars (breakout)')
     parser.add_argument('--atr-period', type=int, help='ATR period (breakout)')
+
+    # Market Making parameters
+    parser.add_argument('--spread-bps', type=float, help='Spread from mid price in basis points (market_making, default: 5)')
+    parser.add_argument('--order-size-usd', type=float, help='Size per order in USD (market_making, default: 50)')
+    parser.add_argument('--max-open-orders', type=int, help='Max concurrent open orders (market_making, default: 4)')
+    parser.add_argument('--refresh-interval', type=float, help='Seconds before cancelling stale orders (market_making, default: 30)')
+    parser.add_argument('--no-close-immediately', action='store_true', default=False,
+                        help='Disable immediate position closing (market_making)')
 
     # Risk guardrail parameters
     parser.add_argument('--max-position-pct', type=float,
@@ -743,6 +763,18 @@ if __name__ == "__main__":
             strategy_config['breakout_confirmation_bars'] = args.breakout_confirmation_bars
         if args.atr_period is not None:
             strategy_config['atr_period'] = args.atr_period
+
+    elif args.strategy == 'market_making':
+        if args.spread_bps is not None:
+            strategy_config['spread_bps'] = args.spread_bps
+        if args.order_size_usd is not None:
+            strategy_config['order_size_usd'] = args.order_size_usd
+        if args.max_open_orders is not None:
+            strategy_config['max_open_orders'] = args.max_open_orders
+        if args.refresh_interval is not None:
+            strategy_config['refresh_interval_seconds'] = args.refresh_interval
+        if args.no_close_immediately:
+            strategy_config['close_immediately'] = False
 
     # Apply CLI overrides for DEX settings
     if args.dex is not None:
