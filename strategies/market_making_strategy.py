@@ -38,6 +38,7 @@ class MarketMakingStrategy(BaseStrategy):
         self.max_positions: int = config.get('max_positions', 3)
         self.max_position_age_seconds: float = config.get('max_position_age_seconds', 120)
         self.maker_only: bool = config.get('maker_only', False)
+        self.account_cap_pct: float = config.get('account_cap_pct', 0.05)
 
         # ---- Internal state ---- #
         self._last_order_time: Dict[str, float] = {}
@@ -238,7 +239,7 @@ class MarketMakingStrategy(BaseStrategy):
         if base_size_usd <= 0:
             return 0.0
 
-        return self._apply_account_cap(base_size_usd, market_data.mid_price, cap_pct=0.05)
+        return self._apply_account_cap(base_size_usd, market_data.mid_price, cap_pct=self.account_cap_pct)
 
     # ------------------------------------------------------------------ #
     #  Order placement and management

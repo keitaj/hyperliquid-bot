@@ -16,6 +16,12 @@ class MACDStrategy(BaseStrategy):
         self.lookback = max(self.slow_ema, self.fast_ema) + self.signal_ema + 20
         self.position_size_usd = config.get('position_size_usd', 100)
         self.max_positions = config.get('max_positions', 3)
+        self.candle_interval = config.get('candle_interval', '15m')
+        self.divergence_lookback = config.get('divergence_lookback', 20)
+        self.histogram_strength_high = config.get('histogram_strength_high', 0.5)
+        self.histogram_strength_low = config.get('histogram_strength_low', 0.1)
+        self.histogram_multiplier_high = config.get('histogram_multiplier_high', 1.3)
+        self.histogram_multiplier_low = config.get('histogram_multiplier_low', 0.7)
         
     def calculate_macd(self, df: pd.DataFrame) -> pd.DataFrame:
         df['ema_fast'] = df['close'].ewm(span=self.fast_ema, adjust=False).mean()
@@ -29,7 +35,9 @@ class MACDStrategy(BaseStrategy):
         
         return df
     
-    def detect_divergence(self, df: pd.DataFrame, lookback: int = 20) -> Dict:
+    def detect_divergence(self, df: pd.DataFrame, lookback: int = None) -> Dict:
+        if lookback is None:
+            lookback = self.divergence_lookback
         recent_df = df.iloc[-lookback:]
         
         price_highs_idx = recent_df['high'].nlargest(2).index
@@ -59,7 +67,7 @@ class MACDStrategy(BaseStrategy):
         try:
             candles = self.market_data.get_candles(
                 coin=coin,
-                interval='15m',
+                interval=self.candle_interval,
                 lookback=self.lookback
             )
             
@@ -151,10 +159,10 @@ class MACDStrategy(BaseStrategy):
             df = self.calculate_macd(candles)
             histogram_strength = abs(df['histogram_pct'].iloc[-1])
 
-            if histogram_strength > 0.5:
-                base_size_usd *= 1.3
-            elif histogram_strength < 0.1:
-                base_size_usd *= 0.7
+            if histogram_strength > self.histogram_strength_high:
+                base_size_usd *= self.histogram_multiplier_high
+            elif histogram_strength < self.histogram_strength_low:
+                base_size_usd *= self.histogram_multiplier_low
 
             position_size = self._apply_account_cap(base_size_usd, market_data.mid_price)
 

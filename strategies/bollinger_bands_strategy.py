@@ -16,6 +16,12 @@ class BollingerBandsStrategy(BaseStrategy):
         self.lookback = self.bb_period + 20
         self.position_size_usd = config.get('position_size_usd', 100)
         self.max_positions = config.get('max_positions', 3)
+        self.candle_interval = config.get('candle_interval', '15m')
+        self.volatility_expansion_threshold = config.get('volatility_expansion_threshold', 1.5)
+        self.high_band_width_threshold = config.get('high_band_width_threshold', 0.05)
+        self.high_band_width_multiplier = config.get('high_band_width_multiplier', 0.8)
+        self.low_band_width_threshold = config.get('low_band_width_threshold', 0.02)
+        self.low_band_width_multiplier = config.get('low_band_width_multiplier', 1.2)
         
     def calculate_bollinger_bands(self, df: pd.DataFrame) -> pd.DataFrame:
         df['sma'] = df['close'].rolling(window=self.bb_period).mean()
@@ -30,7 +36,7 @@ class BollingerBandsStrategy(BaseStrategy):
         try:
             candles = self.market_data.get_candles(
                 coin=coin,
-                interval='15m',
+                interval=self.candle_interval,
                 lookback=self.lookback
             )
             
@@ -105,7 +111,7 @@ class BollingerBandsStrategy(BaseStrategy):
         recent_volatility = df['band_width'].iloc[-5:].mean()
         current_volatility = df['band_width'].iloc[-1]
         
-        if current_volatility > recent_volatility * 1.5:
+        if current_volatility > recent_volatility * self.volatility_expansion_threshold:
             price_movement = df['close'].iloc[-1] - df['close'].iloc[-2]
             if price_movement > 0:
                 logger.info("Volatility expansion detected - bullish breakout")
@@ -132,10 +138,10 @@ class BollingerBandsStrategy(BaseStrategy):
             df = self.calculate_bollinger_bands(candles)
             band_width = df['band_width'].iloc[-1]
 
-            if band_width > 0.05:
-                base_size_usd *= 0.8
-            elif band_width < 0.02:
-                base_size_usd *= 1.2
+            if band_width > self.high_band_width_threshold:
+                base_size_usd *= self.high_band_width_multiplier
+            elif band_width < self.low_band_width_threshold:
+                base_size_usd *= self.low_band_width_multiplier
 
             position_size = self._apply_account_cap(base_size_usd, market_data.mid_price)
 

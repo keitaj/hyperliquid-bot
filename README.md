@@ -31,6 +31,7 @@ Please refer to the [LICENSE](./LICENSE) file for detailed disclaimer.
 - [Features](#features)
 - [Technical Documentation](#technical-documentation)
 - [File Structure](#file-structure)
+- [Parameter Reference (for AI agents)](#parameter-reference-for-ai-agents)
 
 ## Setup
 
@@ -278,97 +279,33 @@ The bot handles this automatically at startup:
 
 ## Trading Strategies
 
-### 1. Simple MA Strategy (`simple_ma`)
-- Short-term and long-term moving average crossover
-- Buy on golden cross, sell on death cross
-- Default parameters: `fast_ma_period=10`, `slow_ma_period=30`
+| # | Strategy | Description |
+|---|---|---|
+| 1 | `simple_ma` | Moving average crossover — buy on golden cross, sell on death cross |
+| 2 | `rsi` | RSI overbought/oversold — buy when RSI < 30, sell when RSI > 70 |
+| 3 | `bollinger_bands` | Bollinger Bands bounce and volatility breakout |
+| 4 | `macd` | MACD/signal crossover with divergence detection |
+| 5 | `grid_trading` | Grid orders at regular intervals in ranging markets |
+| 6 | `breakout` | Support/resistance breakout with volume and ATR confirmation |
+| 7 | `market_making` | Symmetric buy/sell limits around mid price for spread capture |
 
-**Command-line Parameters:**
-- `--fast-ma-period`: Fast moving average period (default: 10)
-- `--slow-ma-period`: Slow moving average period (default: 30)
-
-### 2. RSI Strategy (`rsi`)
-- Relative Strength Index for overbought/oversold conditions
-- Buy when RSI < 30, sell when RSI > 70
-- Default parameters: `rsi_period=14`, `oversold=30`, `overbought=70`
-
-**Command-line Parameters:**
-- `--rsi-period`: RSI calculation period (default: 14)
-- `--oversold-threshold`: Oversold threshold (default: 30)
-- `--overbought-threshold`: Overbought threshold (default: 70)
-
-### 3. Bollinger Bands Strategy (`bollinger_bands`)
-- Uses price deviation from Bollinger Bands
-- Buy on lower band touch, sell on upper band touch
-- Breakout detection during volatility expansion
-- Default parameters: `bb_period=20`, `std_dev=2`, `squeeze_threshold=0.02`
-
-**Command-line Parameters:**
-- `--bb-period`: Bollinger Bands calculation period (default: 20)
-- `--std-dev`: Standard deviation multiplier (default: 2)
-- `--squeeze-threshold`: Squeeze detection threshold (default: 0.02)
-
-### 4. MACD Strategy (`macd`)
-- MACD line and signal line crossover
-- Divergence detection capability
-- Default parameters: `fast_ema=12`, `slow_ema=26`, `signal_ema=9`
-
-**Command-line Parameters:**
-- `--fast-ema`: Fast EMA period (default: 12)
-- `--slow-ema`: Slow EMA period (default: 26)
-- `--signal-ema`: Signal line EMA period (default: 9)
-
-### 5. Grid Trading Strategy (`grid_trading`)
-- Places buy and sell orders at regular intervals in ranging markets
-- Accumulates profits as price moves up and down
-- Default parameters: `grid_levels=10`, `grid_spacing_pct=0.5%`, `range_period=100`
-
-**Command-line Parameters:**
-- `--grid-levels`: Number of grid levels (default: 10)
-- `--grid-spacing-pct`: Grid spacing percentage (default: 0.5)
-- `--position-size-per-grid`: Position size per grid (default: 50)
-- `--range-period`: Range calculation period (default: 100)
-
-### 6. Breakout Strategy (`breakout`)
-- Detects support and resistance line breakouts
-- Volume confirmation and ATR-based stop loss management
-- Default parameters: `lookback_period=20`, `volume_multiplier=1.5`, `atr_period=14`
-
-**Command-line Parameters:**
-- `--lookback-period`: Support/resistance calculation period (default: 20)
-- `--volume-multiplier`: Volume confirmation multiplier (default: 1.5)
-- `--breakout-confirmation-bars`: Bars required for breakout confirmation (default: 2)
-- `--atr-period`: ATR calculation period (default: 14)
-
-### 7. Market Making Strategy (`market_making`)
-- Places symmetric buy/sell limit orders around the mid price to capture bid-ask spreads
-- Automatically refreshes stale orders and manages position risk
-- Supports maker-only (post-only) mode for guaranteed maker rebates
-- Default parameters: `spread_bps=5`, `order_size_usd=50`, `max_open_orders=4`, `refresh_interval=30s`, `max_position_age=120s`
-
-**Command-line Parameters:**
-- `--spread-bps`: Spread from mid price in basis points (default: 5)
-- `--order-size-usd`: Size per order in USD (default: 50)
-- `--max-open-orders`: Maximum concurrent open orders (default: 4)
-- `--refresh-interval`: Seconds before cancelling stale orders (default: 30)
-- `--no-close-immediately`: Disable immediate position closing (use take-profit limits instead)
-- `--max-position-age`: Maximum seconds to hold a position before force-close (default: 120)
-- `--maker-only`: Use post-only (maker) orders for all trades
+All parameters are configurable via CLI flags with sensible defaults.
+Run `python3 bot.py --help` for the full list, or see [Parameter Reference](#parameter-reference-for-ai-agents) below.
 
 ## Risk Guardrails
 
-Configurable risk management parameters via environment variables or CLI flags. CLI flags take precedence over environment variables.
+Configurable risk management via environment variables or CLI flags (CLI takes precedence).
 
-| Parameter | Env Var | CLI Flag | Default | Description |
-|---|---|---|---|---|
-| Max Position % | `MAX_POSITION_PCT` | `--max-position-pct` | 0.2 | Max single position as % of account |
-| Max Margin Usage | `MAX_MARGIN_USAGE` | `--max-margin-usage` | 0.8 | Stop new orders above this margin ratio |
-| Force Close Margin | `FORCE_CLOSE_MARGIN` | `--force-close-margin` | — | Force close ALL positions above this ratio |
-| Daily Loss Limit | `DAILY_LOSS_LIMIT` | `--daily-loss-limit` | — | Absolute $ daily loss to auto-stop bot |
-| Per-Trade Stop Loss | `PER_TRADE_STOP_LOSS` | `--per-trade-stop-loss` | — | Cut losing trades at this % loss (e.g., 0.05 = 5%) |
-| Max Open Positions | `MAX_OPEN_POSITIONS` | `--max-open-positions` | 5 | Max concurrent open positions |
-| Cooldown After Stop | `COOLDOWN_AFTER_STOP` | `--cooldown-after-stop` | 3600 | Seconds to wait after emergency stop |
-| Risk Level | `RISK_LEVEL` | `--risk-level` | green | `green` (100%), `yellow` (50%), `red` (pause), `black` (close all) |
+| Env Var | CLI Flag | Default | Description |
+|---|---|---|---|
+| `MAX_POSITION_PCT` | `--max-position-pct` | 0.2 | Max single position as % of account |
+| `MAX_MARGIN_USAGE` | `--max-margin-usage` | 0.8 | Stop new orders above this margin ratio |
+| `FORCE_CLOSE_MARGIN` | `--force-close-margin` | — | Force close ALL positions above this ratio |
+| `DAILY_LOSS_LIMIT` | `--daily-loss-limit` | — | Absolute $ daily loss to auto-stop bot |
+| `PER_TRADE_STOP_LOSS` | `--per-trade-stop-loss` | — | Cut losing trades at this % (e.g., 0.05 = 5%) |
+| `MAX_OPEN_POSITIONS` | `--max-open-positions` | 5 | Max concurrent open positions |
+| `COOLDOWN_AFTER_STOP` | `--cooldown-after-stop` | 3600 | Seconds to wait after emergency stop |
+| `RISK_LEVEL` | `--risk-level` | green | `green` (100%), `yellow` (50%), `red` (pause), `black` (close all) |
 
 ## Technical Documentation
 
@@ -410,3 +347,141 @@ For more detailed technical information, please refer to the following documents
 - Set risk management parameters carefully
 - HIP-3 DEXes may charge higher fees than standard Hyperliquid (typically 2x, with 50% going to the DEX deployer)
 - HIP-3 DEXes currently support isolated margin only (cross-margin not available)
+
+---
+
+## Parameter Reference (for AI agents)
+
+> This section is formatted for machine consumption. All CLI flags, config keys, and default values per strategy are listed below as structured YAML. CLI flags use `--kebab-case`, config dict keys use `snake_case`. Config merging: `default_configs[strategy]` is the base; CLI overrides are merged on top.
+
+```yaml
+system:
+  main_loop_interval: 10          # --main-loop-interval  (seconds)
+  market_order_slippage: 0.01     # --market-order-slippage  (0.01 = 1%)
+
+strategies:
+  simple_ma:
+    candle_interval: "5m"         # --candle-interval
+    fast_ma_period: 10            # --fast-ma-period
+    slow_ma_period: 30            # --slow-ma-period
+    position_size_usd: 100        # --position-size-usd
+    max_positions: 3              # --max-positions
+    take_profit_percent: 5        # --take-profit-percent
+    stop_loss_percent: 2          # --stop-loss-percent
+
+  rsi:
+    candle_interval: "15m"
+    rsi_period: 14                # --rsi-period
+    oversold_threshold: 30        # --oversold-threshold
+    overbought_threshold: 70      # --overbought-threshold
+    rsi_extreme_low: 25           # --rsi-extreme-low  (RSI below this → size × extreme multiplier)
+    rsi_moderate_low: 35          # --rsi-moderate-low  (RSI below this → size × moderate multiplier)
+    size_multiplier_extreme: 1.5  # --size-multiplier-extreme
+    size_multiplier_moderate: 1.2 # --size-multiplier-moderate
+    position_size_usd: 100
+    max_positions: 3
+    take_profit_percent: 5
+    stop_loss_percent: 2
+
+  bollinger_bands:
+    candle_interval: "15m"
+    bb_period: 20                         # --bb-period
+    std_dev: 2                            # --std-dev
+    squeeze_threshold: 0.02               # --squeeze-threshold
+    volatility_expansion_threshold: 1.5   # --volatility-expansion-threshold
+    high_band_width_threshold: 0.05       # --high-band-width-threshold  (band_width > this → size × high multiplier)
+    high_band_width_multiplier: 0.8       # --high-band-width-multiplier
+    low_band_width_threshold: 0.02        # --low-band-width-threshold  (band_width < this → size × low multiplier)
+    low_band_width_multiplier: 1.2        # --low-band-width-multiplier
+    position_size_usd: 100
+    max_positions: 3
+    take_profit_percent: 5
+    stop_loss_percent: 2
+
+  macd:
+    candle_interval: "15m"
+    fast_ema: 12                  # --fast-ema
+    slow_ema: 26                  # --slow-ema
+    signal_ema: 9                 # --signal-ema
+    divergence_lookback: 20       # --divergence-lookback
+    histogram_strength_high: 0.5  # --histogram-strength-high  (histogram% > this → size × high multiplier)
+    histogram_strength_low: 0.1   # --histogram-strength-low  (histogram% < this → size × low multiplier)
+    histogram_multiplier_high: 1.3 # --histogram-multiplier-high
+    histogram_multiplier_low: 0.7  # --histogram-multiplier-low
+    position_size_usd: 100
+    max_positions: 3
+    take_profit_percent: 5
+    stop_loss_percent: 2
+
+  grid_trading:
+    candle_interval: "15m"
+    grid_levels: 10                   # --grid-levels
+    grid_spacing_pct: 0.5             # --grid-spacing-pct
+    position_size_per_grid: 50        # --position-size-per-grid
+    range_period: 100                 # --range-period
+    range_pct_threshold: 10           # --range-pct-threshold  (range% < this → ranging market)
+    volatility_threshold: 0.15        # --volatility-threshold  (vol < this → ranging market)
+    grid_recalc_bars: 20              # --grid-recalc-bars
+    grid_saturation_threshold: 0.7    # --grid-saturation-threshold  (fill ratio > this → size × 0.5)
+    grid_boundary_margin_low: 0.98    # --grid-boundary-margin-low
+    grid_boundary_margin_high: 1.02   # --grid-boundary-margin-high
+    account_cap_pct: 0.05             # --account-cap-pct
+    max_positions: 5
+    take_profit_percent: 2
+    stop_loss_percent: 5
+
+  breakout:
+    candle_interval: "15m"
+    lookback_period: 20                    # --lookback-period
+    volume_multiplier: 1.5                 # --volume-multiplier
+    breakout_confirmation_bars: 2          # --breakout-confirmation-bars
+    atr_period: 14                         # --atr-period
+    pivot_window: 5                        # --pivot-window
+    avg_volume_lookback: 20                # --avg-volume-lookback
+    stop_loss_atr_multiplier: 1.5          # --stop-loss-atr-multiplier
+    position_stop_loss_atr_multiplier: 2.0 # --position-stop-loss-atr-multiplier
+    strong_breakout_multiplier: 1.5        # --strong-breakout-multiplier
+    high_atr_threshold: 3.0               # --high-atr-threshold  (ATR% > this → size × high multiplier)
+    low_atr_threshold: 1.0                # --low-atr-threshold  (ATR% < this → size × low multiplier)
+    high_atr_multiplier: 0.7              # --high-atr-multiplier
+    low_atr_multiplier: 1.3               # --low-atr-multiplier
+    position_size_usd: 100
+    max_positions: 3
+    take_profit_percent: 7
+    stop_loss_percent: 3
+
+  market_making:
+    spread_bps: 5                      # --spread-bps
+    order_size_usd: 50                 # --order-size-usd
+    max_open_orders: 4                 # --max-open-orders
+    refresh_interval_seconds: 30       # --refresh-interval
+    close_immediately: true            # --no-close-immediately  (flag inverts this)
+    max_position_age_seconds: 120      # --max-position-age
+    maker_only: false                  # --maker-only
+    account_cap_pct: 0.05              # --account-cap-pct
+    max_positions: 3
+    take_profit_percent: 1
+    stop_loss_percent: 2
+
+risk_guardrails:
+  max_position_pct: 0.2           # --max-position-pct  / env MAX_POSITION_PCT
+  max_margin_usage: 0.8           # --max-margin-usage  / env MAX_MARGIN_USAGE
+  force_close_margin: null        # --force-close-margin  / env FORCE_CLOSE_MARGIN
+  daily_loss_limit: null          # --daily-loss-limit  / env DAILY_LOSS_LIMIT
+  per_trade_stop_loss: null       # --per-trade-stop-loss  / env PER_TRADE_STOP_LOSS
+  max_open_positions: 5           # --max-open-positions  / env MAX_OPEN_POSITIONS
+  cooldown_after_stop: 3600       # --cooldown-after-stop  / env COOLDOWN_AFTER_STOP
+  risk_level: "green"             # --risk-level  / env RISK_LEVEL  (green|yellow|red|black)
+
+hip3:
+  env:
+    TRADING_DEXES: ""             # Comma-separated DEX names (e.g. "xyz,flx")
+    ENABLE_STANDARD_HL: "true"    # Trade standard HL perps alongside HIP-3
+    "{DEX}_COINS": ""             # Per-DEX coin list (e.g. XYZ_COINS=XYZ100,XYZ200)
+  cli:
+    --dex: []                     # HIP-3 DEX names (overrides TRADING_DEXES)
+    --no-hl: false                # Disable standard HL perps
+
+config_merge_order: "default_configs[strategy] ← CLI overrides (only non-null)"
+priority: "CLI flag > env var > default_configs > strategy constructor fallback"
+```

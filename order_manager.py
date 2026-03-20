@@ -42,10 +42,11 @@ class Order:
 
 
 class OrderManager:
-    def __init__(self, exchange: Exchange, info: Info, account_address: str):
+    def __init__(self, exchange: Exchange, info: Info, account_address: str, default_slippage: float = 0.01):
         self.exchange = exchange
         self.info = info
         self.account_address = account_address
+        self.default_slippage = default_slippage
         self.active_orders: Dict[int, Order] = {}
         
     def create_limit_order(
@@ -78,7 +79,7 @@ class OrderManager:
         side: OrderSide,
         size: float,
         reduce_only: bool = False,
-        slippage: float = 0.01
+        slippage: float = None
     ) -> Optional[Order]:
         """Place a market order using an aggressive IOC limit order.
 
@@ -86,6 +87,8 @@ class OrderManager:
         Instead we use an IOC (Immediate-or-Cancel) limit order with a
         slippage-adjusted price to simulate market execution.
         """
+        if slippage is None:
+            slippage = self.default_slippage
         try:
             mid_price = self._get_mid_price(coin)
             if mid_price <= 0:

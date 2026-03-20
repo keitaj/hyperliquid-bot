@@ -16,6 +16,16 @@ class BreakoutStrategy(BaseStrategy):
         self.atr_period = config.get('atr_period', 14)
         self.position_size_usd = config.get('position_size_usd', 100)
         self.max_positions = config.get('max_positions', 3)
+        self.candle_interval = config.get('candle_interval', '15m')
+        self.pivot_window = config.get('pivot_window', 5)
+        self.avg_volume_lookback = config.get('avg_volume_lookback', 20)
+        self.stop_loss_atr_multiplier = config.get('stop_loss_atr_multiplier', 1.5)
+        self.position_stop_loss_atr_multiplier = config.get('position_stop_loss_atr_multiplier', 2.0)
+        self.strong_breakout_multiplier = config.get('strong_breakout_multiplier', 1.5)
+        self.high_atr_threshold = config.get('high_atr_threshold', 3.0)
+        self.low_atr_threshold = config.get('low_atr_threshold', 1.0)
+        self.high_atr_multiplier = config.get('high_atr_multiplier', 0.7)
+        self.low_atr_multiplier = config.get('low_atr_multiplier', 1.3)
         self.support_resistance_levels = {}
         
     def calculate_atr(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -38,10 +48,11 @@ class BreakoutStrategy(BaseStrategy):
         pivot_highs = []
         pivot_lows = []
         
-        for i in range(5, len(df) - 5):
-            if df['high'].iloc[i] == max(df['high'].iloc[i-5:i+5]):
+        pw = self.pivot_window
+        for i in range(pw, len(df) - pw):
+            if df['high'].iloc[i] == max(df['high'].iloc[i-pw:i+pw]):
                 pivot_highs.append(df['high'].iloc[i])
-            if df['low'].iloc[i] == min(df['low'].iloc[i-5:i+5]):
+            if df['low'].iloc[i] == min(df['low'].iloc[i-pw:i+pw]):
                 pivot_lows.append(df['low'].iloc[i])
                 
         strong_resistance = None
@@ -72,7 +83,7 @@ class BreakoutStrategy(BaseStrategy):
         recent_bars = df.iloc[-self.breakout_confirmation_bars:]
         current_close = df['close'].iloc[-1]
         current_volume = df['volume'].iloc[-1]
-        avg_volume = df['volume'].iloc[-20:].mean()
+        avg_volume = df['volume'].iloc[-self.avg_volume_lookback:].mean()
         
         if current_volume < avg_volume * self.volume_multiplier:
             return None
@@ -93,7 +104,7 @@ class BreakoutStrategy(BaseStrategy):
         try:
             candles = self.market_data.get_candles(
                 coin=coin,
-                interval='15m',
+                interval=self.candle_interval,
                 lookback=max(self.lookback_period * 2, 50)
             )
             
@@ -120,7 +131,7 @@ class BreakoutStrategy(BaseStrategy):
                     'order_type': 'market',
                     'confidence': confidence,
                     'breakout_type': breakout_type,
-                    'stop_loss': levels['resistance'] - (df['atr'].iloc[-1] * 1.5)
+                    'stop_loss': levels['resistance'] - (df['atr'].iloc[-1] * self.stop_loss_atr_multiplier)
                 }
                 
             elif breakout_type in ['bearish', 'strong_bearish'] and has_position and self.positions[coin]['size'] > 0:
@@ -139,7 +150,7 @@ class BreakoutStrategy(BaseStrategy):
                 current_price = df['close'].iloc[-1]
                 atr = df['atr'].iloc[-1]
                 
-                if current_price < entry_price - (atr * 2):
+                if current_price < entry_price - (atr * self.position_stop_loss_atr_multiplier):
                     logger.info(f"Stop loss triggered for {coin}")
                     return {
                         'side': 'sell',
@@ -167,19 +178,19 @@ class BreakoutStrategy(BaseStrategy):
             base_size_usd = self.position_size_usd * confidence
 
             if signal.get('breakout_type') == 'strong_bullish':
-                base_size_usd *= 1.5
+                base_size_usd *= self.strong_breakout_multiplier
             elif signal.get('breakout_type') == 'strong_bearish':
-                base_size_usd *= 0.5
+                base_size_usd *= (1.0 / self.strong_breakout_multiplier)
 
             candles = self.market_data.get_candles(coin, '15m', 30)
             df = self.calculate_atr(candles)
             atr = df['atr'].iloc[-1]
             atr_pct = (atr / market_data.mid_price) * 100
 
-            if atr_pct > 3:
-                base_size_usd *= 0.7
-            elif atr_pct < 1:
-                base_size_usd *= 1.3
+            if atr_pct > self.high_atr_threshold:
+                base_size_usd *= self.high_atr_multiplier
+            elif atr_pct < self.low_atr_threshold:
+                base_size_usd *= self.low_atr_multiplier
 
             position_size = self._apply_account_cap(base_size_usd, market_data.mid_price)
 

@@ -14,6 +14,7 @@ class SimpleMAStrategy(BaseStrategy):
         self.lookback = max(self.fast_period, self.slow_period) + 10
         self.position_size_usd = config.get('position_size_usd', 100)
         self.max_positions = config.get('max_positions', 3)
+        self.candle_interval = config.get('candle_interval', '5m')
         
     def calculate_moving_averages(self, df: pd.DataFrame) -> pd.DataFrame:
         df['ma_fast'] = df['close'].rolling(window=self.fast_period).mean()
@@ -24,7 +25,7 @@ class SimpleMAStrategy(BaseStrategy):
         try:
             candles = self.market_data.get_candles(
                 coin=coin,
-                interval='5m',
+                interval=self.candle_interval,
                 lookback=self.lookback
             )
             

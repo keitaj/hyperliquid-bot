@@ -29,12 +29,15 @@ logger = logging.getLogger(__name__)
 
 
 class HyperliquidBot:
-    def __init__(self, strategy_name: str = "simple_ma", coins: List[str] = None, strategy_config: Dict = None):
+    def __init__(self, strategy_name: str = "simple_ma", coins: List[str] = None, strategy_config: Dict = None,
+                 main_loop_interval: float = 10, market_order_slippage: float = 0.01):
         Config.validate()
         self.account_address = Config.ACCOUNT_ADDRESS
         self.running = False
         self.connection_retry_count = 0
         self.last_connection_reset = time.time()
+        self.main_loop_interval = main_loop_interval
+        self.market_order_slippage = market_order_slippage
 
         # ------------------------------------------------------------------ #
         # HIP-3 Multi-DEX setup
@@ -63,6 +66,7 @@ class HyperliquidBot:
                 registry=self.registry,
                 market_data=self.market_data,
                 hip3_dexes=self.hip3_dexes,
+                default_slippage=self.market_order_slippage,
             )
         else:
             self.exchange = Exchange(
@@ -71,7 +75,7 @@ class HyperliquidBot:
             )
             self.info = self.exchange.info
             self.market_data = MarketDataManager(self.info)
-            self.order_manager = OrderManager(self.exchange, self.info, self.account_address)
+            self.order_manager = OrderManager(self.exchange, self.info, self.account_address, default_slippage=self.market_order_slippage)
 
         self.risk_config = self._build_risk_config()
         self.risk_manager = RiskManager(self.info, self.account_address, self.risk_config)
@@ -84,7 +88,8 @@ class HyperliquidBot:
                 'position_size_usd': 100,
                 'max_positions': 3,
                 'take_profit_percent': 5,
-                'stop_loss_percent': 2
+                'stop_loss_percent': 2,
+                'candle_interval': '5m',
             },
             'rsi': {
                 'rsi_period': 14,
@@ -93,7 +98,12 @@ class HyperliquidBot:
                 'position_size_usd': 100,
                 'max_positions': 3,
                 'take_profit_percent': 5,
-                'stop_loss_percent': 2
+                'stop_loss_percent': 2,
+                'candle_interval': '15m',
+                'rsi_extreme_low': 25,
+                'rsi_moderate_low': 35,
+                'size_multiplier_extreme': 1.5,
+                'size_multiplier_moderate': 1.2,
             },
             'bollinger_bands': {
                 'bb_period': 20,
@@ -102,7 +112,13 @@ class HyperliquidBot:
                 'position_size_usd': 100,
                 'max_positions': 3,
                 'take_profit_percent': 5,
-                'stop_loss_percent': 2
+                'stop_loss_percent': 2,
+                'candle_interval': '15m',
+                'volatility_expansion_threshold': 1.5,
+                'high_band_width_threshold': 0.05,
+                'high_band_width_multiplier': 0.8,
+                'low_band_width_threshold': 0.02,
+                'low_band_width_multiplier': 1.2,
             },
             'macd': {
                 'fast_ema': 12,
@@ -111,7 +127,13 @@ class HyperliquidBot:
                 'position_size_usd': 100,
                 'max_positions': 3,
                 'take_profit_percent': 5,
-                'stop_loss_percent': 2
+                'stop_loss_percent': 2,
+                'candle_interval': '15m',
+                'divergence_lookback': 20,
+                'histogram_strength_high': 0.5,
+                'histogram_strength_low': 0.1,
+                'histogram_multiplier_high': 1.3,
+                'histogram_multiplier_low': 0.7,
             },
             'grid_trading': {
                 'grid_levels': 10,
@@ -120,7 +142,15 @@ class HyperliquidBot:
                 'max_positions': 5,
                 'range_period': 100,
                 'take_profit_percent': 2,
-                'stop_loss_percent': 5
+                'stop_loss_percent': 5,
+                'candle_interval': '15m',
+                'range_pct_threshold': 10,
+                'volatility_threshold': 0.15,
+                'grid_recalc_bars': 20,
+                'grid_saturation_threshold': 0.7,
+                'grid_boundary_margin_low': 0.98,
+                'grid_boundary_margin_high': 1.02,
+                'account_cap_pct': 0.05,
             },
             'breakout': {
                 'lookback_period': 20,
@@ -130,7 +160,17 @@ class HyperliquidBot:
                 'position_size_usd': 100,
                 'max_positions': 3,
                 'take_profit_percent': 7,
-                'stop_loss_percent': 3
+                'stop_loss_percent': 3,
+                'candle_interval': '15m',
+                'pivot_window': 5,
+                'avg_volume_lookback': 20,
+                'stop_loss_atr_multiplier': 1.5,
+                'position_stop_loss_atr_multiplier': 2.0,
+                'strong_breakout_multiplier': 1.5,
+                'high_atr_threshold': 3.0,
+                'low_atr_threshold': 1.0,
+                'high_atr_multiplier': 0.7,
+                'low_atr_multiplier': 1.3,
             },
             'market_making': {
                 'spread_bps': 5,
@@ -141,12 +181,13 @@ class HyperliquidBot:
                 'maker_only': False,
                 'max_positions': 3,
                 'take_profit_percent': 1,
-                'stop_loss_percent': 2
+                'stop_loss_percent': 2,
+                'account_cap_pct': 0.05,
             }
         }
 
-        # Use provided config or default config for the strategy
-        config = strategy_config or default_configs.get(strategy_name, {})
+        # Merge: default config as base, CLI overrides on top
+        config = {**default_configs.get(strategy_name, {}), **(strategy_config or {})}
 
         # Store strategy name and coins for validation
         self.strategy_name = strategy_name
@@ -315,7 +356,7 @@ class HyperliquidBot:
 
                 self._trading_loop()
                 consecutive_errors = 0  # Reset on successful iteration
-                time.sleep(10)  # Increased delay to avoid rate limits
+                time.sleep(self.main_loop_interval)
 
             except ConnectionError as e:
                 consecutive_errors += 1
@@ -561,6 +602,7 @@ class HyperliquidBot:
                     registry=self.registry,
                     market_data=self.market_data,
                     hip3_dexes=self.hip3_dexes,
+                    default_slippage=self.market_order_slippage,
                 )
             else:
                 self.exchange = Exchange(
@@ -569,7 +611,7 @@ class HyperliquidBot:
                 )
                 self.info = self.exchange.info
                 self.market_data = MarketDataManager(self.info)
-                self.order_manager = OrderManager(self.exchange, self.info, self.account_address)
+                self.order_manager = OrderManager(self.exchange, self.info, self.account_address, default_slippage=self.market_order_slippage)
 
             # Preserve cooldown state across connection resets
             prev_emergency_stop_time = self.risk_manager._emergency_stop_time
@@ -640,6 +682,10 @@ if __name__ == "__main__":
     parser.add_argument('--max-positions', type=int, help='Maximum number of positions')
     parser.add_argument('--take-profit-percent', type=float, help='Take profit percentage')
     parser.add_argument('--stop-loss-percent', type=float, help='Stop loss percentage')
+    parser.add_argument('--candle-interval', type=str, help='Candle interval (e.g. 1m, 5m, 15m, 1h)')
+    parser.add_argument('--market-order-slippage', type=float, help='Market order slippage (default: 0.01 = 1%%)')
+    parser.add_argument('--main-loop-interval', type=float, help='Main loop sleep interval in seconds (default: 10)')
+    parser.add_argument('--account-cap-pct', type=float, help='Max position as %% of account for sizing (grid_trading/market_making)')
 
     # Simple MA strategy parameters
     parser.add_argument('--fast-ma-period', type=int, help='Fast MA period (simple_ma)')
@@ -649,28 +695,57 @@ if __name__ == "__main__":
     parser.add_argument('--rsi-period', type=int, help='RSI period (rsi)')
     parser.add_argument('--oversold-threshold', type=int, help='RSI oversold threshold (rsi)')
     parser.add_argument('--overbought-threshold', type=int, help='RSI overbought threshold (rsi)')
+    parser.add_argument('--rsi-extreme-low', type=int, help='RSI extreme low for size increase (rsi, default: 25)')
+    parser.add_argument('--rsi-moderate-low', type=int, help='RSI moderate low for size increase (rsi, default: 35)')
+    parser.add_argument('--size-multiplier-extreme', type=float, help='Size multiplier when RSI < extreme_low (rsi, default: 1.5)')
+    parser.add_argument('--size-multiplier-moderate', type=float, help='Size multiplier when RSI < moderate_low (rsi, default: 1.2)')
 
     # Bollinger Bands parameters
     parser.add_argument('--bb-period', type=int, help='Bollinger Bands period (bollinger_bands)')
     parser.add_argument('--std-dev', type=float, help='Standard deviation (bollinger_bands)')
     parser.add_argument('--squeeze-threshold', type=float, help='Squeeze threshold (bollinger_bands)')
+    parser.add_argument('--volatility-expansion-threshold', type=float, help='Volatility expansion multiplier (bollinger_bands, default: 1.5)')
+    parser.add_argument('--high-band-width-threshold', type=float, help='Band width threshold to reduce size (bollinger_bands, default: 0.05)')
+    parser.add_argument('--high-band-width-multiplier', type=float, help='Size multiplier when band width is high (bollinger_bands, default: 0.8)')
+    parser.add_argument('--low-band-width-threshold', type=float, help='Band width threshold to increase size (bollinger_bands, default: 0.02)')
+    parser.add_argument('--low-band-width-multiplier', type=float, help='Size multiplier when band width is low (bollinger_bands, default: 1.2)')
 
     # MACD parameters
     parser.add_argument('--fast-ema', type=int, help='Fast EMA period (macd)')
     parser.add_argument('--slow-ema', type=int, help='Slow EMA period (macd)')
     parser.add_argument('--signal-ema', type=int, help='Signal EMA period (macd)')
+    parser.add_argument('--divergence-lookback', type=int, help='Divergence detection lookback (macd, default: 20)')
+    parser.add_argument('--histogram-strength-high', type=float, help='Histogram strength to increase size (macd, default: 0.5)')
+    parser.add_argument('--histogram-strength-low', type=float, help='Histogram strength to reduce size (macd, default: 0.1)')
+    parser.add_argument('--histogram-multiplier-high', type=float, help='Size multiplier for strong histogram (macd, default: 1.3)')
+    parser.add_argument('--histogram-multiplier-low', type=float, help='Size multiplier for weak histogram (macd, default: 0.7)')
 
     # Grid Trading parameters
     parser.add_argument('--grid-levels', type=int, help='Number of grid levels (grid_trading)')
     parser.add_argument('--grid-spacing-pct', type=float, help='Grid spacing percentage (grid_trading)')
     parser.add_argument('--position-size-per-grid', type=float, help='Position size per grid (grid_trading)')
     parser.add_argument('--range-period', type=int, help='Range period (grid_trading)')
+    parser.add_argument('--range-pct-threshold', type=float, help='Max range %% for ranging market (grid_trading, default: 10)')
+    parser.add_argument('--volatility-threshold', type=float, help='Max volatility for ranging market (grid_trading, default: 0.15)')
+    parser.add_argument('--grid-recalc-bars', type=int, help='Bars between grid recalculation (grid_trading, default: 20)')
+    parser.add_argument('--grid-saturation-threshold', type=float, help='Grid fill ratio to reduce size (grid_trading, default: 0.7)')
+    parser.add_argument('--grid-boundary-margin-low', type=float, help='Low boundary margin (grid_trading, default: 0.98)')
+    parser.add_argument('--grid-boundary-margin-high', type=float, help='High boundary margin (grid_trading, default: 1.02)')
 
     # Breakout parameters
     parser.add_argument('--lookback-period', type=int, help='Lookback period (breakout)')
     parser.add_argument('--volume-multiplier', type=float, help='Volume multiplier (breakout)')
     parser.add_argument('--breakout-confirmation-bars', type=int, help='Breakout confirmation bars (breakout)')
     parser.add_argument('--atr-period', type=int, help='ATR period (breakout)')
+    parser.add_argument('--pivot-window', type=int, help='Pivot detection window (breakout, default: 5)')
+    parser.add_argument('--avg-volume-lookback', type=int, help='Average volume lookback bars (breakout, default: 20)')
+    parser.add_argument('--stop-loss-atr-multiplier', type=float, help='Stop loss ATR multiplier (breakout, default: 1.5)')
+    parser.add_argument('--position-stop-loss-atr-multiplier', type=float, help='Position stop loss ATR multiplier (breakout, default: 2.0)')
+    parser.add_argument('--strong-breakout-multiplier', type=float, help='Size multiplier for strong breakout (breakout, default: 1.5)')
+    parser.add_argument('--high-atr-threshold', type=float, help='ATR %% to reduce size (breakout, default: 3.0)')
+    parser.add_argument('--low-atr-threshold', type=float, help='ATR %% to increase size (breakout, default: 1.0)')
+    parser.add_argument('--high-atr-multiplier', type=float, help='Size multiplier for high ATR (breakout, default: 0.7)')
+    parser.add_argument('--low-atr-multiplier', type=float, help='Size multiplier for low ATR (breakout, default: 1.3)')
 
     # Market Making parameters
     parser.add_argument('--spread-bps', type=float, help='Spread from mid price in basis points (market_making, default: 5)')
@@ -717,6 +792,10 @@ if __name__ == "__main__":
         strategy_config['take_profit_percent'] = args.take_profit_percent
     if args.stop_loss_percent is not None:
         strategy_config['stop_loss_percent'] = args.stop_loss_percent
+    if args.candle_interval is not None:
+        strategy_config['candle_interval'] = args.candle_interval
+    if args.account_cap_pct is not None:
+        strategy_config['account_cap_pct'] = args.account_cap_pct
 
     # Strategy-specific parameters
     if args.strategy == 'simple_ma':
@@ -732,6 +811,14 @@ if __name__ == "__main__":
             strategy_config['oversold_threshold'] = args.oversold_threshold
         if args.overbought_threshold is not None:
             strategy_config['overbought_threshold'] = args.overbought_threshold
+        if args.rsi_extreme_low is not None:
+            strategy_config['rsi_extreme_low'] = args.rsi_extreme_low
+        if args.rsi_moderate_low is not None:
+            strategy_config['rsi_moderate_low'] = args.rsi_moderate_low
+        if args.size_multiplier_extreme is not None:
+            strategy_config['size_multiplier_extreme'] = args.size_multiplier_extreme
+        if args.size_multiplier_moderate is not None:
+            strategy_config['size_multiplier_moderate'] = args.size_multiplier_moderate
 
     elif args.strategy == 'bollinger_bands':
         if args.bb_period is not None:
@@ -740,6 +827,16 @@ if __name__ == "__main__":
             strategy_config['std_dev'] = args.std_dev
         if args.squeeze_threshold is not None:
             strategy_config['squeeze_threshold'] = args.squeeze_threshold
+        if args.volatility_expansion_threshold is not None:
+            strategy_config['volatility_expansion_threshold'] = args.volatility_expansion_threshold
+        if args.high_band_width_threshold is not None:
+            strategy_config['high_band_width_threshold'] = args.high_band_width_threshold
+        if args.high_band_width_multiplier is not None:
+            strategy_config['high_band_width_multiplier'] = args.high_band_width_multiplier
+        if args.low_band_width_threshold is not None:
+            strategy_config['low_band_width_threshold'] = args.low_band_width_threshold
+        if args.low_band_width_multiplier is not None:
+            strategy_config['low_band_width_multiplier'] = args.low_band_width_multiplier
 
     elif args.strategy == 'macd':
         if args.fast_ema is not None:
@@ -748,6 +845,16 @@ if __name__ == "__main__":
             strategy_config['slow_ema'] = args.slow_ema
         if args.signal_ema is not None:
             strategy_config['signal_ema'] = args.signal_ema
+        if args.divergence_lookback is not None:
+            strategy_config['divergence_lookback'] = args.divergence_lookback
+        if args.histogram_strength_high is not None:
+            strategy_config['histogram_strength_high'] = args.histogram_strength_high
+        if args.histogram_strength_low is not None:
+            strategy_config['histogram_strength_low'] = args.histogram_strength_low
+        if args.histogram_multiplier_high is not None:
+            strategy_config['histogram_multiplier_high'] = args.histogram_multiplier_high
+        if args.histogram_multiplier_low is not None:
+            strategy_config['histogram_multiplier_low'] = args.histogram_multiplier_low
 
     elif args.strategy == 'grid_trading':
         if args.grid_levels is not None:
@@ -758,6 +865,18 @@ if __name__ == "__main__":
             strategy_config['position_size_per_grid'] = args.position_size_per_grid
         if args.range_period is not None:
             strategy_config['range_period'] = args.range_period
+        if args.range_pct_threshold is not None:
+            strategy_config['range_pct_threshold'] = args.range_pct_threshold
+        if args.volatility_threshold is not None:
+            strategy_config['volatility_threshold'] = args.volatility_threshold
+        if args.grid_recalc_bars is not None:
+            strategy_config['grid_recalc_bars'] = args.grid_recalc_bars
+        if args.grid_saturation_threshold is not None:
+            strategy_config['grid_saturation_threshold'] = args.grid_saturation_threshold
+        if args.grid_boundary_margin_low is not None:
+            strategy_config['grid_boundary_margin_low'] = args.grid_boundary_margin_low
+        if args.grid_boundary_margin_high is not None:
+            strategy_config['grid_boundary_margin_high'] = args.grid_boundary_margin_high
 
     elif args.strategy == 'breakout':
         if args.lookback_period is not None:
@@ -768,6 +887,24 @@ if __name__ == "__main__":
             strategy_config['breakout_confirmation_bars'] = args.breakout_confirmation_bars
         if args.atr_period is not None:
             strategy_config['atr_period'] = args.atr_period
+        if args.pivot_window is not None:
+            strategy_config['pivot_window'] = args.pivot_window
+        if args.avg_volume_lookback is not None:
+            strategy_config['avg_volume_lookback'] = args.avg_volume_lookback
+        if args.stop_loss_atr_multiplier is not None:
+            strategy_config['stop_loss_atr_multiplier'] = args.stop_loss_atr_multiplier
+        if args.position_stop_loss_atr_multiplier is not None:
+            strategy_config['position_stop_loss_atr_multiplier'] = args.position_stop_loss_atr_multiplier
+        if args.strong_breakout_multiplier is not None:
+            strategy_config['strong_breakout_multiplier'] = args.strong_breakout_multiplier
+        if args.high_atr_threshold is not None:
+            strategy_config['high_atr_threshold'] = args.high_atr_threshold
+        if args.low_atr_threshold is not None:
+            strategy_config['low_atr_threshold'] = args.low_atr_threshold
+        if args.high_atr_multiplier is not None:
+            strategy_config['high_atr_multiplier'] = args.high_atr_multiplier
+        if args.low_atr_multiplier is not None:
+            strategy_config['low_atr_multiplier'] = args.low_atr_multiplier
 
     elif args.strategy == 'market_making':
         if args.spread_bps is not None:
@@ -821,6 +958,8 @@ if __name__ == "__main__":
     bot = HyperliquidBot(
         strategy_name=args.strategy,
         coins=args.coins if Config.ENABLE_STANDARD_HL else [],
-        strategy_config=strategy_config if strategy_config else None
+        strategy_config=strategy_config if strategy_config else None,
+        main_loop_interval=args.main_loop_interval if args.main_loop_interval is not None else 10,
+        market_order_slippage=args.market_order_slippage if args.market_order_slippage is not None else 0.01,
     )
     bot.run()

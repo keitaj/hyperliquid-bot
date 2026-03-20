@@ -15,6 +15,14 @@ class GridTradingStrategy(BaseStrategy):
         self.position_size_per_grid = config.get('position_size_per_grid', 50)
         self.max_positions = config.get('max_positions', 5)
         self.range_period = config.get('range_period', 100)
+        self.candle_interval = config.get('candle_interval', '15m')
+        self.range_pct_threshold = config.get('range_pct_threshold', 10)
+        self.volatility_threshold = config.get('volatility_threshold', 0.15)
+        self.grid_recalc_bars = config.get('grid_recalc_bars', 20)
+        self.grid_saturation_threshold = config.get('grid_saturation_threshold', 0.7)
+        self.grid_boundary_margin_low = config.get('grid_boundary_margin_low', 0.98)
+        self.grid_boundary_margin_high = config.get('grid_boundary_margin_high', 1.02)
+        self.account_cap_pct = config.get('account_cap_pct', 0.05)
         self.active_grids = {}
         
     def calculate_price_range(self, df: pd.DataFrame) -> Dict:
@@ -34,7 +42,7 @@ class GridTradingStrategy(BaseStrategy):
             'range_size': range_size,
             'range_pct': range_pct,
             'volatility': volatility,
-            'is_ranging': range_pct < 10 and volatility < 0.15
+            'is_ranging': range_pct < self.range_pct_threshold and volatility < self.volatility_threshold
         }
     
     def calculate_grid_levels(self, price_range: Dict) -> List[float]:
@@ -47,9 +55,9 @@ class GridTradingStrategy(BaseStrategy):
             buy_price = current_price - (grid_interval * (i + 1))
             sell_price = current_price + (grid_interval * (i + 1))
             
-            if buy_price > price_range['low'] * 0.98:
+            if buy_price > price_range['low'] * self.grid_boundary_margin_low:
                 grid_prices.append(('buy', buy_price))
-            if sell_price < price_range['high'] * 1.02:
+            if sell_price < price_range['high'] * self.grid_boundary_margin_high:
                 grid_prices.append(('sell', sell_price))
                 
         return sorted(grid_prices, key=lambda x: x[1])
@@ -58,7 +66,7 @@ class GridTradingStrategy(BaseStrategy):
         try:
             candles = self.market_data.get_candles(
                 coin=coin,
-                interval='15m',
+                interval=self.candle_interval,
                 lookback=self.range_period
             )
             
@@ -114,7 +122,7 @@ class GridTradingStrategy(BaseStrategy):
                             'grid_price': grid_price
                         }
             
-            if len(candles) - candles.index.get_loc(grid_info['last_update']) > 20:
+            if len(candles) - candles.index.get_loc(grid_info['last_update']) > self.grid_recalc_bars:
                 self.active_grids[coin] = {
                     'levels': self.calculate_grid_levels(price_range),
                     'filled_orders': {},
@@ -147,10 +155,10 @@ class GridTradingStrategy(BaseStrategy):
             base_size_usd = self.position_size_per_grid
             if coin in self.active_grids:
                 filled_count = len(self.active_grids[coin]['filled_orders'])
-                if filled_count > self.grid_levels * 0.7:
+                if filled_count > self.grid_levels * self.grid_saturation_threshold:
                     base_size_usd *= 0.5
 
-            position_size = self._apply_account_cap(base_size_usd, market_data.mid_price, cap_pct=0.05)
+            position_size = self._apply_account_cap(base_size_usd, market_data.mid_price, cap_pct=self.account_cap_pct)
 
             logger.info(f"Grid position size for {coin}: {position_size}")
             return position_size

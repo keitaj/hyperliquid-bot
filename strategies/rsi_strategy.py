@@ -16,6 +16,11 @@ class RSIStrategy(BaseStrategy):
         self.lookback = self.rsi_period + 20
         self.position_size_usd = config.get('position_size_usd', 100)
         self.max_positions = config.get('max_positions', 3)
+        self.candle_interval = config.get('candle_interval', '15m')
+        self.rsi_extreme_low = config.get('rsi_extreme_low', 25)
+        self.rsi_moderate_low = config.get('rsi_moderate_low', 35)
+        self.size_multiplier_extreme = config.get('size_multiplier_extreme', 1.5)
+        self.size_multiplier_moderate = config.get('size_multiplier_moderate', 1.2)
         
     def calculate_rsi(self, df: pd.DataFrame) -> pd.DataFrame:
         delta = df['close'].diff()
@@ -30,7 +35,7 @@ class RSIStrategy(BaseStrategy):
         try:
             candles = self.market_data.get_candles(
                 coin=coin,
-                interval='15m',
+                interval=self.candle_interval,
                 lookback=self.lookback
             )
             
@@ -95,10 +100,10 @@ class RSIStrategy(BaseStrategy):
             df = self.calculate_rsi(candles)
             current_rsi = df['rsi'].iloc[-1]
 
-            if signal['side'] == 'buy' and current_rsi < 25:
-                base_size_usd *= 1.5
-            elif signal['side'] == 'buy' and current_rsi < 35:
-                base_size_usd *= 1.2
+            if signal['side'] == 'buy' and current_rsi < self.rsi_extreme_low:
+                base_size_usd *= self.size_multiplier_extreme
+            elif signal['side'] == 'buy' and current_rsi < self.rsi_moderate_low:
+                base_size_usd *= self.size_multiplier_moderate
 
             position_size = self._apply_account_cap(base_size_usd, market_data.mid_price)
 
