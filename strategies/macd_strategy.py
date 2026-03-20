@@ -8,6 +8,13 @@ logger = logging.getLogger(__name__)
 
 
 class MACDStrategy(BaseStrategy):
+    """MACD crossover strategy with divergence detection.
+
+    Generates buy signals on bullish MACD/signal crossovers and sell
+    signals on bearish crossovers.  Confidence is boosted when price
+    divergence is detected against the histogram.
+    """
+
     def __init__(self, market_data_manager, order_manager, config):
         super().__init__(market_data_manager, order_manager, config)
         self.fast_ema = config.get('fast_ema', 12)

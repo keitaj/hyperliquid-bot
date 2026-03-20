@@ -1,4 +1,5 @@
 import logging
+import time
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from datetime import datetime
@@ -110,7 +111,6 @@ class MarketDataManager:
     def get_candles(self, coin: str, interval: str, lookback: int = 100) -> pd.DataFrame:
         try:
             # Calculate time range
-            import time
             end_time = int(time.time() * 1000)  # Current time in milliseconds
             
             # Calculate start time based on interval and lookback

@@ -1,4 +1,5 @@
 import logging
+import time
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
@@ -34,7 +35,7 @@ class Order:
     reduce_only: bool = False
     status: OrderStatus = OrderStatus.PENDING
     filled_size: float = 0.0
-    timestamp: datetime = None
+    timestamp: Optional[datetime] = None
     
     def __post_init__(self):
         if self.timestamp is None:
@@ -176,8 +177,7 @@ class OrderManager:
 
     def _get_cached_mids(self, dex: str = '') -> Dict:
         """Return all_mids for a DEX, using a short-lived cache."""
-        import time as _time
-        now = _time.time()
+        now = time.time()
         cached = self._mids_cache.get(dex)
         if cached and (now - cached[0]) < self._MIDS_CACHE_TTL:
             return cached[1]

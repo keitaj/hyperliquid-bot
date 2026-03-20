@@ -443,10 +443,10 @@ class HyperliquidBot:
         )
         if order:
             prefix = f"{reason}: " if reason else ""
-            logger.info("%sClosed position for %s: size=%s", prefix, coin, abs_size)
+            logger.info(f"{prefix}Closed position for {coin}: size={abs_size}")
             return True
         else:
-            logger.error("Failed to close position for %s", coin)
+            logger.error(f"Failed to close position for {coin}")
             return False
 
     def _close_all_positions(self):
@@ -459,7 +459,7 @@ class HyperliquidBot:
             for pos in positions:
                 self._close_position(pos)
         except Exception as e:
-            logger.error("Error closing all positions: %s", e)
+            logger.error(f"Error closing all positions: {e}")
 
     def _check_per_trade_stops(self):
         """Close individual positions that exceed the per-trade stop loss."""
@@ -471,7 +471,7 @@ class HyperliquidBot:
             for pos in to_close:
                 self._close_position(pos, reason="Per-trade stop loss")
         except Exception as e:
-            logger.error("Error in per-trade stop loss check: %s", e)
+            logger.error(f"Error in per-trade stop loss check: {e}")
 
     def _signal_handler(self, signum, frame):
         logger.info("Received shutdown signal")

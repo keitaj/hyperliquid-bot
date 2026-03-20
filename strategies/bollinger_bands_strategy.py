@@ -8,6 +8,13 @@ logger = logging.getLogger(__name__)
 
 
 class BollingerBandsStrategy(BaseStrategy):
+    """Bollinger Bands mean-reversion and breakout strategy.
+
+    Buys on lower band touches, sells on upper band touches.  Also
+    detects volatility expansion breakouts when band width exceeds
+    the squeeze threshold.
+    """
+
     def __init__(self, market_data_manager, order_manager, config):
         super().__init__(market_data_manager, order_manager, config)
         self.bb_period = config.get('bb_period', 20)

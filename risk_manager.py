@@ -2,7 +2,7 @@ import logging
 import os
 from typing import Dict, List, Optional
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from rate_limiter import api_wrapper
 
 logger = logging.getLogger(__name__)
@@ -101,7 +101,7 @@ class RiskManager:
     def record_emergency_stop(self) -> None:
         """Record the timestamp of an emergency stop."""
         self._emergency_stop_time = datetime.now()
-        logger.warning("Emergency stop recorded at %s", self._emergency_stop_time)
+        logger.warning(f"Emergency stop recorded at {self._emergency_stop_time}")
 
     def is_in_cooldown(self) -> bool:
         """Return ``True`` if the bot is still in cooldown after an emergency stop."""
@@ -138,7 +138,7 @@ class RiskManager:
                 return None
 
             margin_summary = user_state['marginSummary']
-            logger.debug("Available keys in margin_summary: %s", list(margin_summary.keys()))
+            logger.debug(f"Available keys in margin_summary: {list(margin_summary.keys())}")
 
             account_value = float(margin_summary.get('accountValue', 0))
             total_margin_used = float(margin_summary.get('totalMarginUsed', 0))
@@ -155,11 +155,9 @@ class RiskManager:
                         if bal.get('coin', '') in ('USDC', 'USDH', 'USDT0'):
                             account_value += float(bal.get('total', 0))
                     if account_value > 0:
-                        logger.debug(
-                            "Using spot balance as collateral: $%.2f", account_value
-                        )
+                        logger.debug(f"Using spot balance as collateral: ${account_value:.2f}")
                 except Exception as e:
-                    logger.debug("Could not fetch spot state: %s", e)
+                    logger.debug(f"Could not fetch spot state: {e}")
 
             available_balance = account_value - total_margin_used
             leverage = total_position_value / account_value if account_value > 0 else 0
@@ -202,7 +200,7 @@ class RiskManager:
             return metrics
 
         except Exception as e:
-            logger.error("Error getting risk metrics: %s", e)
+            logger.error(f"Error getting risk metrics: {e}")
             return None
 
     # ------------------------------------------------------------------ #
@@ -400,12 +398,12 @@ class RiskManager:
     def should_allow_new_position(self, coin: str, size: float, price: float) -> bool:
         risk_checks = self.check_risk_limits()
         if not risk_checks['all_checks_passed']:
-            logger.warning("Risk check failed: %s", risk_checks.get('reason'))
+            logger.warning(f"Risk check failed: {risk_checks.get('reason')}")
             return False
 
         max_size = self.calculate_position_size_limit(coin, price)
         if size > max_size:
-            logger.warning("Position size %s exceeds limit %s", size, max_size)
+            logger.warning(f"Position size {size} exceeds limit {max_size}")
             return False
 
         return True

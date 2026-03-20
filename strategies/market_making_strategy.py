@@ -87,8 +87,8 @@ class MarketMakingStrategy(BaseStrategy):
                             # Cancel leftover close order if position is gone
                             try:
                                 self.order_manager.cancel_order(close_oid, coin)
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"[mm] Could not cancel leftover close order for {coin}: {e}")
                         self._open_positions.pop(coin, None)
 
                 # No position — normal MM flow
@@ -130,8 +130,8 @@ class MarketMakingStrategy(BaseStrategy):
             if close_oid is not None:
                 try:
                     self.order_manager.cancel_order(close_oid, coin)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"[mm] Could not cancel close order for {coin}: {e}")
 
             if self.maker_only:
                 # Place a limit close at mid price (post_only) instead of market
@@ -180,8 +180,8 @@ class MarketMakingStrategy(BaseStrategy):
                 open_oids = {int(o['oid']) for o in open_orders}
                 if close_oid in open_oids:
                     return  # Close order still active, wait
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"[mm] Could not check close order status for {coin}: {e}")
             # Close order was filled or cancelled — position should be gone next cycle
             self._open_positions[coin] = (entry_time, None)
 

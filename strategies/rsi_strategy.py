@@ -8,6 +8,13 @@ logger = logging.getLogger(__name__)
 
 
 class RSIStrategy(BaseStrategy):
+    """RSI-based mean reversion strategy.
+
+    Buys when RSI crosses below the oversold threshold, sells when it
+    crosses above the overbought threshold.  Dynamic position sizing
+    increases size at extreme RSI readings.
+    """
+
     def __init__(self, market_data_manager, order_manager, config):
         super().__init__(market_data_manager, order_manager, config)
         self.rsi_period = config.get('rsi_period', 14)
@@ -23,11 +30,12 @@ class RSIStrategy(BaseStrategy):
         self.size_multiplier_moderate = config.get('size_multiplier_moderate', 1.2)
         
     def calculate_rsi(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Calculate RSI and add it as a column to the DataFrame."""
         delta = df['close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=self.rsi_period).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=self.rsi_period).mean()
-        
-        rs = gain / loss
+
+        rs = gain / loss.replace(0, np.nan)
         df['rsi'] = 100 - (100 / (1 + rs))
         return df
     

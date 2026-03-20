@@ -64,8 +64,8 @@ class BaseStrategy(ABC):
                     for bal in spot_state.get('balances', []):
                         if bal.get('coin', '') in ('USDC', 'USDH', 'USDT0'):
                             account_value += float(bal.get('total', 0))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Could not fetch spot state for account cap: {e}")
 
             if account_value > 0:
                 max_size_usd = account_value * cap_pct

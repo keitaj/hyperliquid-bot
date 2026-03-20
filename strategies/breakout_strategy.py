@@ -8,6 +8,13 @@ logger = logging.getLogger(__name__)
 
 
 class BreakoutStrategy(BaseStrategy):
+    """Support/resistance breakout strategy.
+
+    Identifies key support and resistance levels via pivot detection,
+    then enters on confirmed breakouts with volume confirmation.
+    Uses ATR-based stop losses and dynamic position sizing.
+    """
+
     def __init__(self, market_data_manager, order_manager, config):
         super().__init__(market_data_manager, order_manager, config)
         self.lookback_period = config.get('lookback_period', 20)

@@ -3,12 +3,15 @@
 Simple script to check Hyperliquid account balance and positions
 """
 
+import logging
 import sys
 import warnings
 warnings.filterwarnings("ignore")
 
 import requests
 from config import Config
+
+logger = logging.getLogger(__name__)
 
 DISPLAY_COINS = {"USDC", "USDH"}
 KNOWN_HIP3_DEXES = ["xyz", "flx", "cash", "km", "vntl", "hyna"]
@@ -81,8 +84,8 @@ def main():
                     dex_margin = dex_state['marginSummary']
                     perps_value += float(dex_margin.get('accountValue', 0))
                     margin_used += float(dex_margin.get('totalMarginUsed', 0))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Could not fetch DEX {dex} state: {e}")
 
         position_value = sum(p['position_value'] for p in all_positions)
         total_value = spot_total + perps_value

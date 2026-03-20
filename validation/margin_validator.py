@@ -85,7 +85,7 @@ class MarginValidator:
                             "(Portfolio Margin)", account_value
                         )
                 except Exception as e:
-                    logger.debug("Could not fetch spot state: %s", e)
+                    logger.debug(f"Could not fetch spot state: {e}")
 
             available_balance = account_value - margin_used
 

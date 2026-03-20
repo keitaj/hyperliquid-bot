@@ -7,7 +7,7 @@ Standard HL perps use index 0..N directly (not HIP-3).
 """
 import logging
 import requests
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ class DEXRegistry:
         # dex_name → {perp_dex_index, assets: {coin → {asset_id, sz_decimals}}, meta}
         self._dexes: Dict[str, Dict] = {}
 
-    def _post(self, payload: dict) -> any:
+    def _post(self, payload: dict) -> Any:
         resp = requests.post(
             f"{self.api_url}/info",
             json=payload,

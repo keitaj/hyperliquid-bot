@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Optional, List
+from typing import Dict, List, Optional, Tuple
 import pandas as pd
 import numpy as np
 from strategies.base_strategy import BaseStrategy
@@ -8,6 +8,13 @@ logger = logging.getLogger(__name__)
 
 
 class GridTradingStrategy(BaseStrategy):
+    """Grid trading strategy for ranging markets.
+
+    Places buy and sell limit orders at regular grid intervals around the
+    current price.  Profits accumulate as price oscillates within the range.
+    Automatically recalculates grid levels when the market moves.
+    """
+
     def __init__(self, market_data_manager, order_manager, config):
         super().__init__(market_data_manager, order_manager, config)
         self.grid_levels = config.get('grid_levels', 10)
@@ -45,7 +52,7 @@ class GridTradingStrategy(BaseStrategy):
             'is_ranging': range_pct < self.range_pct_threshold and volatility < self.volatility_threshold
         }
     
-    def calculate_grid_levels(self, price_range: Dict) -> List[float]:
+    def calculate_grid_levels(self, price_range: Dict) -> List[Tuple[str, float]]:
         current_price = price_range['current']
         grid_interval = current_price * (self.grid_spacing_pct / 100)
         

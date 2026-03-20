@@ -7,6 +7,12 @@ logger = logging.getLogger(__name__)
 
 
 class SimpleMAStrategy(BaseStrategy):
+    """Simple moving average crossover strategy.
+
+    Generates a buy signal when the fast MA crosses above the slow MA
+    (golden cross) and a sell signal on the reverse (death cross).
+    """
+
     def __init__(self, market_data_manager, order_manager, config):
         super().__init__(market_data_manager, order_manager, config)
         self.fast_period = config.get('fast_ma_period', 10)
