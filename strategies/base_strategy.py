@@ -43,15 +43,31 @@ class BaseStrategy(ABC):
     def _apply_account_cap(self, base_size_usd: float, mid_price: float, cap_pct: float = 0.1) -> float:
         """
         Convert a USD size to coin units, capping at cap_pct of account value.
-        Uses the rate-limited api_wrapper so we don't bypass the rate limiter.
+        With Portfolio Margin, spot stablecoin balances count as collateral.
         """
         try:
             user_state = api_wrapper.call(
                 self.order_manager.info.user_state,
                 self.order_manager.account_address,
             )
+            account_value = 0.0
             if 'marginSummary' in user_state:
                 account_value = float(user_state['marginSummary']['accountValue'])
+
+            # Portfolio Margin: fall back to spot balances when perp is empty
+            if account_value == 0:
+                try:
+                    spot_state = api_wrapper.call(
+                        self.order_manager.info.spot_user_state,
+                        self.order_manager.account_address,
+                    )
+                    for bal in spot_state.get('balances', []):
+                        if bal.get('coin', '') in ('USDC', 'USDH', 'USDT0'):
+                            account_value += float(bal.get('total', 0))
+                except Exception:
+                    pass
+
+            if account_value > 0:
                 max_size_usd = account_value * cap_pct
                 if base_size_usd > max_size_usd:
                     return max_size_usd / mid_price
