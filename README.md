@@ -27,6 +27,7 @@ Please refer to the [LICENSE](./LICENSE) file for detailed disclaimer.
   - [Python Usage](#-python-usage)
 - [HIP-3 Multi-DEX Trading](#hip-3-multi-dex-trading)
 - [Trading Strategies](#trading-strategies)
+- [Risk Guardrails](#risk-guardrails)
 - [Features](#features)
 - [Technical Documentation](#technical-documentation)
 - [File Structure](#file-structure)
@@ -143,6 +144,21 @@ python3 bot.py --strategy grid_trading --grid-levels 15 --grid-spacing-pct 0.3 -
 
 # Breakout Strategy
 python3 bot.py --strategy breakout --lookback-period 30 --volume-multiplier 2.0 --atr-period 20
+
+# Market Making Strategy
+python3 bot.py --strategy market_making --spread-bps 10 --order-size-usd 100 --maker-only
+```
+
+**Risk Guardrail Parameters**
+```bash
+# Configure risk limits
+python3 bot.py --strategy rsi \
+  --max-position-pct 0.1 \
+  --max-margin-usage 0.7 \
+  --daily-loss-limit 500 \
+  --per-trade-stop-loss 0.05 \
+  --max-open-positions 3 \
+  --risk-level yellow
 ```
 
 #### Balance & Position Check
@@ -155,15 +171,23 @@ Example output:
 ==================================================
 🏦 HYPERLIQUID ACCOUNT BALANCE
 ==================================================
-💰 Account Value:    $299.00
-✅ Available:        $299.00
-🔒 Margin Used:      $0.00
-📈 Position Value:   $0.00
+💰 Total Balance:    $1,299.00
+   📦 Spot (USDC/USDH):
+      USDC    $1,000.00
+      USDH    $0.00
+   📊 Perps:           $299.00
+✅ Available:        $1,149.00
+🔒 Margin Used:      $150.00
+📈 Position Value:   $500.00
+⚖️  Current Leverage: 0.38x
 
 ==================================================
 📋 POSITIONS
 ==================================================
-No open positions
+BTC          | LONG  | Size:   0.0050 | Entry: $100000.00 | PnL: 🟢$   5.00
+xyz:AAPL     | SHORT | Size:   1.0000 | Entry: $  250.00 | PnL: 🔴$  -2.50
+--------------------------------------------------
+TOTAL        |       |                |                 | PnL: 🟢$   2.50
 ==================================================
 ```
 
@@ -248,7 +272,8 @@ The bot handles this automatically at startup:
 - **Market Data**: Real-time price, order book, and candlestick data retrieval
 - **Order Management**: Limit and market order placement and cancellation
 - **Risk Management**: Leverage limits, maximum drawdown, daily loss limits
-- **Multiple Strategies**: Choose from 6 different trading strategies
+- **Multiple Strategies**: Choose from 7 different trading strategies
+- **Risk Guardrails**: Configurable margin limits, daily loss limits, per-trade stop loss, and dynamic risk levels
 - **HIP-3 Multi-DEX**: Trade across Hyperliquid, trade.xyz, Felix, and other HIP-3 DEXes simultaneously
 
 ## Trading Strategies
@@ -315,6 +340,36 @@ The bot handles this automatically at startup:
 - `--breakout-confirmation-bars`: Bars required for breakout confirmation (default: 2)
 - `--atr-period`: ATR calculation period (default: 14)
 
+### 7. Market Making Strategy (`market_making`)
+- Places symmetric buy/sell limit orders around the mid price to capture bid-ask spreads
+- Automatically refreshes stale orders and manages position risk
+- Supports maker-only (post-only) mode for guaranteed maker rebates
+- Default parameters: `spread_bps=5`, `order_size_usd=50`, `max_open_orders=4`, `refresh_interval=30s`, `max_position_age=120s`
+
+**Command-line Parameters:**
+- `--spread-bps`: Spread from mid price in basis points (default: 5)
+- `--order-size-usd`: Size per order in USD (default: 50)
+- `--max-open-orders`: Maximum concurrent open orders (default: 4)
+- `--refresh-interval`: Seconds before cancelling stale orders (default: 30)
+- `--no-close-immediately`: Disable immediate position closing (use take-profit limits instead)
+- `--max-position-age`: Maximum seconds to hold a position before force-close (default: 120)
+- `--maker-only`: Use post-only (maker) orders for all trades
+
+## Risk Guardrails
+
+Configurable risk management parameters via environment variables or CLI flags. CLI flags take precedence over environment variables.
+
+| Parameter | Env Var | CLI Flag | Default | Description |
+|---|---|---|---|---|
+| Max Position % | `MAX_POSITION_PCT` | `--max-position-pct` | 0.2 | Max single position as % of account |
+| Max Margin Usage | `MAX_MARGIN_USAGE` | `--max-margin-usage` | 0.8 | Stop new orders above this margin ratio |
+| Force Close Margin | `FORCE_CLOSE_MARGIN` | `--force-close-margin` | — | Force close ALL positions above this ratio |
+| Daily Loss Limit | `DAILY_LOSS_LIMIT` | `--daily-loss-limit` | — | Absolute $ daily loss to auto-stop bot |
+| Per-Trade Stop Loss | `PER_TRADE_STOP_LOSS` | `--per-trade-stop-loss` | — | Cut losing trades at this % loss (e.g., 0.05 = 5%) |
+| Max Open Positions | `MAX_OPEN_POSITIONS` | `--max-open-positions` | 5 | Max concurrent open positions |
+| Cooldown After Stop | `COOLDOWN_AFTER_STOP` | `--cooldown-after-stop` | 3600 | Seconds to wait after emergency stop |
+| Risk Level | `RISK_LEVEL` | `--risk-level` | green | `green` (100%), `yellow` (50%), `red` (pause), `black` (close all) |
+
 ## Technical Documentation
 
 For more detailed technical information, please refer to the following documents:
@@ -329,6 +384,7 @@ For more detailed technical information, please refer to the following documents
 - `market_data.py`: Market data retrieval
 - `order_manager.py`: Order management
 - `risk_manager.py`: Risk management
+- `rate_limiter.py`: API rate limiting
 - `hip3/`: HIP-3 multi-DEX support
   - `dex_registry.py`: DEX discovery and asset ID resolution
   - `multi_dex_market_data.py`: DEX-aware market data
@@ -341,6 +397,7 @@ For more detailed technical information, please refer to the following documents
   - `macd_strategy.py`: MACD strategy
   - `grid_trading_strategy.py`: Grid trading strategy
   - `breakout_strategy.py`: Breakout strategy
+  - `market_making_strategy.py`: Market making strategy
 - `validation/`: Pre-trade validation
   - `margin_validator.py`: Margin and configuration validation
 - `docs/`: Documentation
