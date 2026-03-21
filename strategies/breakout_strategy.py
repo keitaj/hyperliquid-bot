@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional
 import pandas as pd
 import numpy as np
 from strategies.base_strategy import BaseStrategy
@@ -34,79 +34,79 @@ class BreakoutStrategy(BaseStrategy):
         self.high_atr_multiplier = config.get('high_atr_multiplier', 0.7)
         self.low_atr_multiplier = config.get('low_atr_multiplier', 1.3)
         self.support_resistance_levels = {}
-        
+
     def calculate_atr(self, df: pd.DataFrame) -> pd.DataFrame:
         high_low = df['high'] - df['low']
         high_close = np.abs(df['high'] - df['close'].shift())
         low_close = np.abs(df['low'] - df['close'].shift())
-        
+
         ranges = pd.concat([high_low, high_close, low_close], axis=1)
         true_range = np.max(ranges, axis=1)
         df['atr'] = true_range.rolling(self.atr_period).mean()
         return df
-    
+
     def identify_support_resistance(self, df: pd.DataFrame) -> Dict:
         highs = df['high'].rolling(window=self.lookback_period).max()
         lows = df['low'].rolling(window=self.lookback_period).min()
-        
+
         current_resistance = highs.iloc[-1]
         current_support = lows.iloc[-1]
-        
+
         pivot_highs = []
         pivot_lows = []
-        
+
         pw = self.pivot_window
         for i in range(pw, len(df) - pw):
             if df['high'].iloc[i] == max(df['high'].iloc[i-pw:i+pw]):
                 pivot_highs.append(df['high'].iloc[i])
             if df['low'].iloc[i] == min(df['low'].iloc[i-pw:i+pw]):
                 pivot_lows.append(df['low'].iloc[i])
-                
+
         strong_resistance = None
         strong_support = None
-        
+
         if pivot_highs:
             resistance_counts = {}
             for high in pivot_highs:
                 rounded = round(high, 2)
                 resistance_counts[rounded] = resistance_counts.get(rounded, 0) + 1
             strong_resistance = max(resistance_counts, key=resistance_counts.get)
-            
+
         if pivot_lows:
             support_counts = {}
             for low in pivot_lows:
                 rounded = round(low, 2)
                 support_counts[rounded] = support_counts.get(rounded, 0) + 1
             strong_support = max(support_counts, key=support_counts.get)
-            
+
         return {
             'resistance': current_resistance,
             'support': current_support,
             'strong_resistance': strong_resistance,
             'strong_support': strong_support
         }
-    
+
     def detect_breakout(self, df: pd.DataFrame, levels: Dict) -> Optional[str]:
         recent_bars = df.iloc[-self.breakout_confirmation_bars:]
         current_close = df['close'].iloc[-1]
         current_volume = df['volume'].iloc[-1]
         avg_volume = df['volume'].iloc[-self.avg_volume_lookback:].mean()
-        
+
         if current_volume < avg_volume * self.volume_multiplier:
             return None
-            
+
         if levels['resistance'] and all(recent_bars['close'] > levels['resistance']):
             if levels['strong_resistance'] and current_close > levels['strong_resistance']:
                 return 'strong_bullish'
             return 'bullish'
-            
+
         if levels['support'] and all(recent_bars['close'] < levels['support']):
             if levels['strong_support'] and current_close < levels['strong_support']:
                 return 'strong_bearish'
             return 'bearish'
-            
+
         return None
-    
+
     def generate_signals(self, coin: str) -> Optional[Dict]:
         try:
             candles = self.market_data.get_candles(
@@ -114,22 +114,22 @@ class BreakoutStrategy(BaseStrategy):
                 interval=self.candle_interval,
                 lookback=max(self.lookback_period * 2, 50)
             )
-            
+
             if len(candles) < self.lookback_period + self.atr_period:
                 return None
-                
+
             df = self.calculate_atr(candles)
             levels = self.identify_support_resistance(df)
-            
+
             if coin not in self.support_resistance_levels:
                 self.support_resistance_levels[coin] = levels
             else:
                 self.support_resistance_levels[coin].update(levels)
-                
+
             breakout_type = self.detect_breakout(df, levels)
-            
+
             has_position = coin in self.positions and self.positions[coin]['size'] != 0
-            
+
             if breakout_type in ['bullish', 'strong_bullish'] and not has_position:
                 confidence = 0.7 if breakout_type == 'bullish' else 0.85
                 logger.info(f"{breakout_type.upper()} breakout detected for {coin} above {levels['resistance']:.2f}")
@@ -140,7 +140,7 @@ class BreakoutStrategy(BaseStrategy):
                     'breakout_type': breakout_type,
                     'stop_loss': levels['resistance'] - (df['atr'].iloc[-1] * self.stop_loss_atr_multiplier)
                 }
-                
+
             elif breakout_type in ['bearish', 'strong_bearish'] and has_position and self.positions[coin]['size'] > 0:
                 confidence = 0.75 if breakout_type == 'bearish' else 0.9
                 logger.info(f"{breakout_type.upper()} breakout detected for {coin} below {levels['support']:.2f}")
@@ -151,12 +151,12 @@ class BreakoutStrategy(BaseStrategy):
                     'confidence': confidence,
                     'breakout_type': breakout_type
                 }
-                
+
             if has_position and self.positions[coin]['size'] > 0:
                 entry_price = self.positions[coin]['entry_price']
                 current_price = df['close'].iloc[-1]
                 atr = df['atr'].iloc[-1]
-                
+
                 if current_price < entry_price - (atr * self.position_stop_loss_atr_multiplier):
                     logger.info(f"Stop loss triggered for {coin}")
                     return {
@@ -165,13 +165,13 @@ class BreakoutStrategy(BaseStrategy):
                         'reduce_only': True,
                         'confidence': 1.0
                     }
-                    
+
             return None
-            
+
         except Exception as e:
             logger.error(f"Error generating breakout signals for {coin}: {e}")
             return None
-    
+
     def calculate_position_size(self, coin: str, signal: Dict) -> float:
         try:
             if self._check_max_positions(coin):

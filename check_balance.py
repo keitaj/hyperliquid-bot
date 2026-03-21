@@ -3,13 +3,13 @@
 Simple script to check Hyperliquid account balance and positions
 """
 
+from config import Config
+import requests
 import logging
 import sys
 import warnings
 warnings.filterwarnings("ignore")
 
-import requests
-from config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -94,12 +94,12 @@ def main():
         print("🏦 HYPERLIQUID ACCOUNT BALANCE")
         print("=" * 50)
         print(f"💰 Total Balance:    ${total_value:,.2f}")
-        print(f"   📦 Spot (USDC/USDH):")
+        print("   📦 Spot (USDC/USDH):")
         if spot_balances:
             for b in spot_balances:
                 print(f"      {b['coin']:6}  ${float(b['total']):,.2f}")
         else:
-            print(f"      (none)")
+            print("      (none)")
         print(f"   📊 Perps:           ${perps_value:,.2f}")
         print(f"✅ Available:        ${total_value - margin_used:,.2f}")
         print(f"🔒 Margin Used:      ${margin_used:,.2f}")
@@ -121,7 +121,10 @@ def main():
                 side = "LONG" if p['size'] > 0 else "SHORT"
                 pnl_color = "🟢" if p['unrealized_pnl'] >= 0 else "🔴"
 
-                print(f"{p['coin']:12} | {side:5} | Size: {abs(p['size']):8.4f} | Entry: ${p['entry_px']:8.2f} | PnL: {pnl_color}${p['unrealized_pnl']:8.2f}")
+                print(
+                    f"{p['coin']:12} | {side:5} | Size: {abs(p['size']):8.4f} "
+                    f"| Entry: ${p['entry_px']:8.2f} | PnL: {pnl_color}${p['unrealized_pnl']:8.2f}"
+                )
 
             print("-" * 50)
             total_pnl_color = "🟢" if total_pnl >= 0 else "🔴"
@@ -134,6 +137,7 @@ def main():
     except Exception as e:
         print(f"❌ Error: {e}")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

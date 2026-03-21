@@ -1,5 +1,10 @@
 # Hyperliquid Trading Bot
 
+[![CI](https://github.com/keitaj/hyperliquid-bot/actions/workflows/ci.yml/badge.svg)](https://github.com/keitaj/hyperliquid-bot/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Release](https://img.shields.io/github/v/release/keitaj/hyperliquid-bot)](https://github.com/keitaj/hyperliquid-bot/releases)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
+
 **English** | [日本語](README_ja.md)
 
 Automated trading bot for Hyperliquid DEX with **HIP-3 multi-DEX support** (trade.xyz, Felix, Markets by Kinetiq, Based, and more).

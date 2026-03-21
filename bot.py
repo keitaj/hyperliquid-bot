@@ -1,9 +1,8 @@
 import logging
 import time
 import signal
-from typing import Dict, List, Optional
+from typing import Dict, List
 from hyperliquid.exchange import Exchange
-from hyperliquid.utils import constants
 from config import Config
 from market_data import MarketDataManager
 from order_manager import OrderManager
@@ -75,7 +74,8 @@ class HyperliquidBot:
             )
             self.info = self.exchange.info
             self.market_data = MarketDataManager(self.info)
-            self.order_manager = OrderManager(self.exchange, self.info, self.account_address, default_slippage=self.market_order_slippage)
+            self.order_manager = OrderManager(self.exchange, self.info, self.account_address,
+                                              default_slippage=self.market_order_slippage)
 
         self.risk_config = self._build_risk_config()
         self.risk_manager = RiskManager(self.info, self.account_address, self.risk_config)
@@ -266,7 +266,7 @@ class HyperliquidBot:
         try:
             from rate_limiter import api_wrapper
             user_state = api_wrapper.call(self.info.user_state, self.account_address)
-            logger.info(f"User state retrieved successfully")
+            logger.info("User state retrieved successfully")
             return user_state
         except Exception as e:
             logger.error(f"Error getting user state: {e}")
@@ -479,19 +479,20 @@ class HyperliquidBot:
         try:
             # Set a timeout for order cancellation to avoid hanging
             import threading
+
             def cancel_orders():
                 self.order_manager.cancel_all_orders()
                 logger.info("All orders cancelled")
-            
+
             cancel_thread = threading.Thread(target=cancel_orders, daemon=True)
             cancel_thread.start()
             cancel_thread.join(timeout=5)  # 5 second timeout
-            
+
             if cancel_thread.is_alive():
                 logger.warning("Order cancellation timed out, forcing shutdown")
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
-        
+
         # Force exit if still running after a short delay
         import sys
         import time
@@ -611,7 +612,8 @@ class HyperliquidBot:
                 )
                 self.info = self.exchange.info
                 self.market_data = MarketDataManager(self.info)
-                self.order_manager = OrderManager(self.exchange, self.info, self.account_address, default_slippage=self.market_order_slippage)
+                self.order_manager = OrderManager(self.exchange, self.info,
+                                                  self.account_address, default_slippage=self.market_order_slippage)
 
             # Preserve cooldown state across connection resets
             prev_emergency_stop_time = self.risk_manager._emergency_stop_time
@@ -685,7 +687,8 @@ if __name__ == "__main__":
     parser.add_argument('--candle-interval', type=str, help='Candle interval (e.g. 1m, 5m, 15m, 1h)')
     parser.add_argument('--market-order-slippage', type=float, help='Market order slippage (default: 0.01 = 1%%)')
     parser.add_argument('--main-loop-interval', type=float, help='Main loop sleep interval in seconds (default: 10)')
-    parser.add_argument('--account-cap-pct', type=float, help='Max position as %% of account for sizing (grid_trading/market_making)')
+    parser.add_argument('--account-cap-pct', type=float,
+                        help='Max position as %% of account for sizing (grid_trading/market_making)')
 
     # Simple MA strategy parameters
     parser.add_argument('--fast-ma-period', type=int, help='Fast MA period (simple_ma)')
@@ -697,40 +700,57 @@ if __name__ == "__main__":
     parser.add_argument('--overbought-threshold', type=int, help='RSI overbought threshold (rsi)')
     parser.add_argument('--rsi-extreme-low', type=int, help='RSI extreme low for size increase (rsi, default: 25)')
     parser.add_argument('--rsi-moderate-low', type=int, help='RSI moderate low for size increase (rsi, default: 35)')
-    parser.add_argument('--size-multiplier-extreme', type=float, help='Size multiplier when RSI < extreme_low (rsi, default: 1.5)')
-    parser.add_argument('--size-multiplier-moderate', type=float, help='Size multiplier when RSI < moderate_low (rsi, default: 1.2)')
+    parser.add_argument('--size-multiplier-extreme', type=float,
+                        help='Size multiplier when RSI < extreme_low (rsi, default: 1.5)')
+    parser.add_argument('--size-multiplier-moderate', type=float,
+                        help='Size multiplier when RSI < moderate_low (rsi, default: 1.2)')
 
     # Bollinger Bands parameters
     parser.add_argument('--bb-period', type=int, help='Bollinger Bands period (bollinger_bands)')
     parser.add_argument('--std-dev', type=float, help='Standard deviation (bollinger_bands)')
     parser.add_argument('--squeeze-threshold', type=float, help='Squeeze threshold (bollinger_bands)')
-    parser.add_argument('--volatility-expansion-threshold', type=float, help='Volatility expansion multiplier (bollinger_bands, default: 1.5)')
-    parser.add_argument('--high-band-width-threshold', type=float, help='Band width threshold to reduce size (bollinger_bands, default: 0.05)')
-    parser.add_argument('--high-band-width-multiplier', type=float, help='Size multiplier when band width is high (bollinger_bands, default: 0.8)')
-    parser.add_argument('--low-band-width-threshold', type=float, help='Band width threshold to increase size (bollinger_bands, default: 0.02)')
-    parser.add_argument('--low-band-width-multiplier', type=float, help='Size multiplier when band width is low (bollinger_bands, default: 1.2)')
+    parser.add_argument('--volatility-expansion-threshold', type=float,
+                        help='Volatility expansion multiplier (bollinger_bands, default: 1.5)')
+    parser.add_argument('--high-band-width-threshold', type=float,
+                        help='Band width threshold to reduce size (bollinger_bands, default: 0.05)')
+    parser.add_argument('--high-band-width-multiplier', type=float,
+                        help='Size multiplier when band width is high (bollinger_bands, default: 0.8)')
+    parser.add_argument('--low-band-width-threshold', type=float,
+                        help='Band width threshold to increase size (bollinger_bands, default: 0.02)')
+    parser.add_argument('--low-band-width-multiplier', type=float,
+                        help='Size multiplier when band width is low (bollinger_bands, default: 1.2)')
 
     # MACD parameters
     parser.add_argument('--fast-ema', type=int, help='Fast EMA period (macd)')
     parser.add_argument('--slow-ema', type=int, help='Slow EMA period (macd)')
     parser.add_argument('--signal-ema', type=int, help='Signal EMA period (macd)')
     parser.add_argument('--divergence-lookback', type=int, help='Divergence detection lookback (macd, default: 20)')
-    parser.add_argument('--histogram-strength-high', type=float, help='Histogram strength to increase size (macd, default: 0.5)')
-    parser.add_argument('--histogram-strength-low', type=float, help='Histogram strength to reduce size (macd, default: 0.1)')
-    parser.add_argument('--histogram-multiplier-high', type=float, help='Size multiplier for strong histogram (macd, default: 1.3)')
-    parser.add_argument('--histogram-multiplier-low', type=float, help='Size multiplier for weak histogram (macd, default: 0.7)')
+    parser.add_argument('--histogram-strength-high', type=float,
+                        help='Histogram strength to increase size (macd, default: 0.5)')
+    parser.add_argument('--histogram-strength-low', type=float,
+                        help='Histogram strength to reduce size (macd, default: 0.1)')
+    parser.add_argument('--histogram-multiplier-high', type=float,
+                        help='Size multiplier for strong histogram (macd, default: 1.3)')
+    parser.add_argument('--histogram-multiplier-low', type=float,
+                        help='Size multiplier for weak histogram (macd, default: 0.7)')
 
     # Grid Trading parameters
     parser.add_argument('--grid-levels', type=int, help='Number of grid levels (grid_trading)')
     parser.add_argument('--grid-spacing-pct', type=float, help='Grid spacing percentage (grid_trading)')
     parser.add_argument('--position-size-per-grid', type=float, help='Position size per grid (grid_trading)')
     parser.add_argument('--range-period', type=int, help='Range period (grid_trading)')
-    parser.add_argument('--range-pct-threshold', type=float, help='Max range %% for ranging market (grid_trading, default: 10)')
-    parser.add_argument('--volatility-threshold', type=float, help='Max volatility for ranging market (grid_trading, default: 0.15)')
-    parser.add_argument('--grid-recalc-bars', type=int, help='Bars between grid recalculation (grid_trading, default: 20)')
-    parser.add_argument('--grid-saturation-threshold', type=float, help='Grid fill ratio to reduce size (grid_trading, default: 0.7)')
-    parser.add_argument('--grid-boundary-margin-low', type=float, help='Low boundary margin (grid_trading, default: 0.98)')
-    parser.add_argument('--grid-boundary-margin-high', type=float, help='High boundary margin (grid_trading, default: 1.02)')
+    parser.add_argument('--range-pct-threshold', type=float,
+                        help='Max range %% for ranging market (grid_trading, default: 10)')
+    parser.add_argument('--volatility-threshold', type=float,
+                        help='Max volatility for ranging market (grid_trading, default: 0.15)')
+    parser.add_argument('--grid-recalc-bars', type=int,
+                        help='Bars between grid recalculation (grid_trading, default: 20)')
+    parser.add_argument('--grid-saturation-threshold', type=float,
+                        help='Grid fill ratio to reduce size (grid_trading, default: 0.7)')
+    parser.add_argument('--grid-boundary-margin-low', type=float,
+                        help='Low boundary margin (grid_trading, default: 0.98)')
+    parser.add_argument('--grid-boundary-margin-high', type=float,
+                        help='High boundary margin (grid_trading, default: 1.02)')
 
     # Breakout parameters
     parser.add_argument('--lookback-period', type=int, help='Lookback period (breakout)')
@@ -739,19 +759,25 @@ if __name__ == "__main__":
     parser.add_argument('--atr-period', type=int, help='ATR period (breakout)')
     parser.add_argument('--pivot-window', type=int, help='Pivot detection window (breakout, default: 5)')
     parser.add_argument('--avg-volume-lookback', type=int, help='Average volume lookback bars (breakout, default: 20)')
-    parser.add_argument('--stop-loss-atr-multiplier', type=float, help='Stop loss ATR multiplier (breakout, default: 1.5)')
-    parser.add_argument('--position-stop-loss-atr-multiplier', type=float, help='Position stop loss ATR multiplier (breakout, default: 2.0)')
-    parser.add_argument('--strong-breakout-multiplier', type=float, help='Size multiplier for strong breakout (breakout, default: 1.5)')
+    parser.add_argument('--stop-loss-atr-multiplier', type=float,
+                        help='Stop loss ATR multiplier (breakout, default: 1.5)')
+    parser.add_argument('--position-stop-loss-atr-multiplier', type=float,
+                        help='Position stop loss ATR multiplier (breakout, default: 2.0)')
+    parser.add_argument('--strong-breakout-multiplier', type=float,
+                        help='Size multiplier for strong breakout (breakout, default: 1.5)')
     parser.add_argument('--high-atr-threshold', type=float, help='ATR %% to reduce size (breakout, default: 3.0)')
     parser.add_argument('--low-atr-threshold', type=float, help='ATR %% to increase size (breakout, default: 1.0)')
-    parser.add_argument('--high-atr-multiplier', type=float, help='Size multiplier for high ATR (breakout, default: 0.7)')
+    parser.add_argument('--high-atr-multiplier', type=float,
+                        help='Size multiplier for high ATR (breakout, default: 0.7)')
     parser.add_argument('--low-atr-multiplier', type=float, help='Size multiplier for low ATR (breakout, default: 1.3)')
 
     # Market Making parameters
-    parser.add_argument('--spread-bps', type=float, help='Spread from mid price in basis points (market_making, default: 5)')
+    parser.add_argument('--spread-bps', type=float,
+                        help='Spread from mid price in basis points (market_making, default: 5)')
     parser.add_argument('--order-size-usd', type=float, help='Size per order in USD (market_making, default: 50)')
     parser.add_argument('--max-open-orders', type=int, help='Max concurrent open orders (market_making, default: 4)')
-    parser.add_argument('--refresh-interval', type=float, help='Seconds before cancelling stale orders (market_making, default: 30)')
+    parser.add_argument('--refresh-interval', type=float,
+                        help='Seconds before cancelling stale orders (market_making, default: 30)')
     parser.add_argument('--no-close-immediately', action='store_true', default=False,
                         help='Disable immediate position closing (market_making)')
     parser.add_argument('--max-position-age', type=float,

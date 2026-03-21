@@ -18,7 +18,6 @@ class ValidationResult:
     recommendations: Optional[List[str]] = field(default=None)
 
 
-
 class MarginValidator:
     """Validates margin requirements and trading configuration"""
 
@@ -184,10 +183,14 @@ class MarginValidator:
         # Check margin sufficiency
         if margin_required_with_buffer > account_value:
             validation_passed = False
-            recommended_position_size = (account_value / (risk_multiplier * self.SAFETY_BUFFER * self.MARGIN_REQUIREMENT * max_positions))
+            recommended_position_size = (account_value / (risk_multiplier *
+                                         self.SAFETY_BUFFER * self.MARGIN_REQUIREMENT * max_positions))
             recommendations.append(f"Reduce position_size_usd to ${recommended_position_size:.2f} or less")
-            recommendations.append(f"Or reduce max_positions to {int(account_value / (position_size * self.MARGIN_REQUIREMENT * self.SAFETY_BUFFER * risk_multiplier))} or less")
-            recommendations.append(f"Or add at least ${margin_required_with_buffer - account_value:.2f} to your account")
+            max_pos = int(account_value / (
+                position_size * self.MARGIN_REQUIREMENT * self.SAFETY_BUFFER * risk_multiplier))
+            recommendations.append(f"Or reduce max_positions to {max_pos} or less")
+            recommendations.append(
+                f"Or add at least ${margin_required_with_buffer - account_value:.2f} to your account")
 
         # Check minimum order values
         if min_order_issues:
@@ -203,7 +206,9 @@ class MarginValidator:
                 validation_passed = False
                 max_grids = int(account_value / (position_size * self.MARGIN_REQUIREMENT))
                 recommendations.append(f"Reduce grid_levels to {max_grids} or less")
-                recommendations.append(f"Or reduce position_size_per_grid to ${account_value / (grid_levels * self.MARGIN_REQUIREMENT):.2f}")
+                max_grid_size = account_value / (grid_levels * self.MARGIN_REQUIREMENT)
+                recommendations.append(
+                    f"Or reduce position_size_per_grid to ${max_grid_size:.2f}")
 
         logger.info("-" * 60)
         if validation_passed:

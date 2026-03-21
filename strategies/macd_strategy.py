@@ -1,7 +1,6 @@
 import logging
 from typing import Dict, Optional
 import pandas as pd
-import numpy as np
 from strategies.base_strategy import BaseStrategy
 
 logger = logging.getLogger(__name__)
@@ -29,47 +28,47 @@ class MACDStrategy(BaseStrategy):
         self.histogram_strength_low = config.get('histogram_strength_low', 0.1)
         self.histogram_multiplier_high = config.get('histogram_multiplier_high', 1.3)
         self.histogram_multiplier_low = config.get('histogram_multiplier_low', 0.7)
-        
+
     def calculate_macd(self, df: pd.DataFrame) -> pd.DataFrame:
         df['ema_fast'] = df['close'].ewm(span=self.fast_ema, adjust=False).mean()
         df['ema_slow'] = df['close'].ewm(span=self.slow_ema, adjust=False).mean()
         df['macd_line'] = df['ema_fast'] - df['ema_slow']
         df['signal_line'] = df['macd_line'].ewm(span=self.signal_ema, adjust=False).mean()
         df['macd_histogram'] = df['macd_line'] - df['signal_line']
-        
+
         df['macd_pct'] = (df['macd_line'] / df['close']) * 100
         df['histogram_pct'] = (df['macd_histogram'] / df['close']) * 100
-        
+
         return df
-    
+
     def detect_divergence(self, df: pd.DataFrame, lookback: int = None) -> Dict:
         if lookback is None:
             lookback = self.divergence_lookback
         recent_df = df.iloc[-lookback:]
-        
+
         price_highs_idx = recent_df['high'].nlargest(2).index
         price_lows_idx = recent_df['low'].nsmallest(2).index
-        
+
         bullish_divergence = False
         bearish_divergence = False
-        
+
         if len(price_lows_idx) >= 2:
             idx1, idx2 = sorted(price_lows_idx)
-            if (recent_df.loc[idx2, 'low'] < recent_df.loc[idx1, 'low'] and 
-                recent_df.loc[idx2, 'macd_histogram'] > recent_df.loc[idx1, 'macd_histogram']):
+            if (recent_df.loc[idx2, 'low'] < recent_df.loc[idx1, 'low'] and
+                    recent_df.loc[idx2, 'macd_histogram'] > recent_df.loc[idx1, 'macd_histogram']):
                 bullish_divergence = True
-                
+
         if len(price_highs_idx) >= 2:
             idx1, idx2 = sorted(price_highs_idx)
-            if (recent_df.loc[idx2, 'high'] > recent_df.loc[idx1, 'high'] and 
-                recent_df.loc[idx2, 'macd_histogram'] < recent_df.loc[idx1, 'macd_histogram']):
+            if (recent_df.loc[idx2, 'high'] > recent_df.loc[idx1, 'high'] and
+                    recent_df.loc[idx2, 'macd_histogram'] < recent_df.loc[idx1, 'macd_histogram']):
                 bearish_divergence = True
-                
+
         return {
             'bullish_divergence': bullish_divergence,
             'bearish_divergence': bearish_divergence
         }
-    
+
     def generate_signals(self, coin: str) -> Optional[Dict]:
         try:
             candles = self.market_data.get_candles(
@@ -77,27 +76,27 @@ class MACDStrategy(BaseStrategy):
                 interval=self.candle_interval,
                 lookback=self.lookback
             )
-            
+
             if len(candles) < self.lookback:
                 return None
-                
+
             df = self.calculate_macd(candles)
-            
+
             current_macd = df['macd_line'].iloc[-1]
             current_signal = df['signal_line'].iloc[-1]
             current_histogram = df['macd_histogram'].iloc[-1]
-            
+
             prev_macd = df['macd_line'].iloc[-2]
             prev_signal = df['signal_line'].iloc[-2]
             prev_histogram = df['macd_histogram'].iloc[-2]
-            
+
             histogram_increasing = current_histogram > prev_histogram
             histogram_positive = current_histogram > 0
-            
+
             divergence = self.detect_divergence(df)
-            
+
             has_position = coin in self.positions and self.positions[coin]['size'] != 0
-            
+
             if prev_macd <= prev_signal and current_macd > current_signal:
                 if not has_position and current_macd < 0:
                     logger.info(f"MACD bullish crossover for {coin}: MACD={current_macd:.4f}")
@@ -111,7 +110,7 @@ class MACDStrategy(BaseStrategy):
                         'post_only': True,
                         'confidence': confidence
                     }
-                    
+
             elif not has_position and divergence['bullish_divergence'] and histogram_increasing:
                 logger.info(f"MACD bullish divergence signal for {coin}")
                 return {
@@ -120,7 +119,7 @@ class MACDStrategy(BaseStrategy):
                     'post_only': True,
                     'confidence': 0.75
                 }
-                    
+
             elif prev_macd >= prev_signal and current_macd < current_signal:
                 if has_position and self.positions[coin]['size'] > 0:
                     logger.info(f"MACD bearish crossover for {coin}: MACD={current_macd:.4f}")
@@ -134,7 +133,7 @@ class MACDStrategy(BaseStrategy):
                         'reduce_only': True,
                         'confidence': confidence
                     }
-            
+
             elif has_position and self.positions[coin]['size'] > 0:
                 if not histogram_positive and not histogram_increasing:
                     return {
@@ -143,13 +142,13 @@ class MACDStrategy(BaseStrategy):
                         'reduce_only': True,
                         'confidence': 0.6
                     }
-                    
+
             return None
-            
+
         except Exception as e:
             logger.error(f"Error generating MACD signals for {coin}: {e}")
             return None
-    
+
     def calculate_position_size(self, coin: str, signal: Dict) -> float:
         try:
             if self._check_max_positions(coin):

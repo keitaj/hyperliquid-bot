@@ -28,7 +28,7 @@ class RSIStrategy(BaseStrategy):
         self.rsi_moderate_low = config.get('rsi_moderate_low', 35)
         self.size_multiplier_extreme = config.get('size_multiplier_extreme', 1.5)
         self.size_multiplier_moderate = config.get('size_multiplier_moderate', 1.2)
-        
+
     def calculate_rsi(self, df: pd.DataFrame) -> pd.DataFrame:
         """Calculate RSI and add it as a column to the DataFrame."""
         delta = df['close'].diff()
@@ -38,7 +38,7 @@ class RSIStrategy(BaseStrategy):
         rs = gain / loss.replace(0, np.nan)
         df['rsi'] = 100 - (100 / (1 + rs))
         return df
-    
+
     def generate_signals(self, coin: str) -> Optional[Dict]:
         try:
             candles = self.market_data.get_candles(
@@ -46,17 +46,17 @@ class RSIStrategy(BaseStrategy):
                 interval=self.candle_interval,
                 lookback=self.lookback
             )
-            
+
             if len(candles) < self.rsi_period + 2:
                 return None
-                
+
             df = self.calculate_rsi(candles)
-            
+
             current_rsi = df['rsi'].iloc[-1]
             prev_rsi = df['rsi'].iloc[-2]
-            
+
             has_position = coin in self.positions and self.positions[coin]['size'] != 0
-            
+
             if prev_rsi >= self.oversold_threshold and current_rsi < self.oversold_threshold:
                 if not has_position:
                     logger.info(f"RSI oversold signal for {coin}: RSI={current_rsi:.2f}")
@@ -66,7 +66,7 @@ class RSIStrategy(BaseStrategy):
                         'post_only': True,
                         'confidence': 0.8
                     }
-                    
+
             elif prev_rsi <= self.overbought_threshold and current_rsi > self.overbought_threshold:
                 if has_position and self.positions[coin]['size'] > 0:
                     logger.info(f"RSI overbought signal for {coin}: RSI={current_rsi:.2f}")
@@ -76,7 +76,7 @@ class RSIStrategy(BaseStrategy):
                         'reduce_only': True,
                         'confidence': 0.8
                     }
-            
+
             elif has_position and self.positions[coin]['size'] > 0:
                 if current_rsi > self.overbought_threshold - 5:
                     return {
@@ -85,13 +85,13 @@ class RSIStrategy(BaseStrategy):
                         'reduce_only': True,
                         'confidence': 0.6
                     }
-                    
+
             return None
-            
+
         except Exception as e:
             logger.error(f"Error generating RSI signals for {coin}: {e}")
             return None
-    
+
     def calculate_position_size(self, coin: str, signal: Dict) -> float:
         try:
             if self._check_max_positions(coin):

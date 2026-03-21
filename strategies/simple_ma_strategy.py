@@ -21,12 +21,12 @@ class SimpleMAStrategy(BaseStrategy):
         self.position_size_usd = config.get('position_size_usd', 100)
         self.max_positions = config.get('max_positions', 3)
         self.candle_interval = config.get('candle_interval', '5m')
-        
+
     def calculate_moving_averages(self, df: pd.DataFrame) -> pd.DataFrame:
         df['ma_fast'] = df['close'].rolling(window=self.fast_period).mean()
         df['ma_slow'] = df['close'].rolling(window=self.slow_period).mean()
         return df
-    
+
     def generate_signals(self, coin: str) -> Optional[Dict]:
         try:
             candles = self.market_data.get_candles(
@@ -34,19 +34,19 @@ class SimpleMAStrategy(BaseStrategy):
                 interval=self.candle_interval,
                 lookback=self.lookback
             )
-            
+
             if len(candles) < self.slow_period:
                 return None
-                
+
             df = self.calculate_moving_averages(candles)
-            
+
             current_fast_ma = df['ma_fast'].iloc[-1]
             current_slow_ma = df['ma_slow'].iloc[-1]
             prev_fast_ma = df['ma_fast'].iloc[-2]
             prev_slow_ma = df['ma_slow'].iloc[-2]
-            
+
             has_position = coin in self.positions and self.positions[coin]['size'] != 0
-            
+
             if prev_fast_ma <= prev_slow_ma and current_fast_ma > current_slow_ma:
                 if not has_position:
                     logger.info(f"Bullish crossover detected for {coin}")
@@ -56,7 +56,7 @@ class SimpleMAStrategy(BaseStrategy):
                         'post_only': True,
                         'confidence': 0.7
                     }
-                    
+
             elif prev_fast_ma >= prev_slow_ma and current_fast_ma < current_slow_ma:
                 if has_position and self.positions[coin]['size'] > 0:
                     logger.info(f"Bearish crossover detected for {coin}")
@@ -66,13 +66,13 @@ class SimpleMAStrategy(BaseStrategy):
                         'reduce_only': True,
                         'confidence': 0.8
                     }
-                    
+
             return None
-            
+
         except Exception as e:
             logger.error(f"Error generating signals for {coin}: {e}")
             return None
-    
+
     def calculate_position_size(self, coin: str, signal: Dict) -> float:
         try:
             if self._check_max_positions(coin):

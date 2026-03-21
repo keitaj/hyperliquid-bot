@@ -5,7 +5,6 @@ from typing import Dict, List, Optional, Tuple
 
 from strategies.base_strategy import BaseStrategy
 from order_manager import OrderSide
-from rate_limiter import api_wrapper
 
 logger = logging.getLogger(__name__)
 
