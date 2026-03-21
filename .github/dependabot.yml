@@ -6,6 +6,10 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "chore(deps):"
+    groups:
+      pip-dependencies:
+        patterns:
+          - "*"
 
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -13,3 +17,7 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "chore(ci):"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
