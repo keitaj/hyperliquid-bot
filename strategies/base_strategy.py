@@ -55,7 +55,7 @@ class BaseStrategy(ABC):
                 account_value = float(user_state['marginSummary']['accountValue'])
 
             # Portfolio Margin: fall back to spot balances when perp is empty
-            if account_value == 0:
+            if True:  # Portfolio Margin: always include spot
                 try:
                     spot_state = api_wrapper.call(
                         self.order_manager.info.spot_user_state,
