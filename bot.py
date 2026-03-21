@@ -1,6 +1,7 @@
 import logging
 import time
 import signal
+import warnings
 from typing import Dict, List
 from hyperliquid.exchange import Exchange
 from config import Config
@@ -19,6 +20,8 @@ from strategies import (
     BreakoutStrategy,
     MarketMakingStrategy
 )
+
+warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL")
 
 logging.basicConfig(
     level=logging.INFO,
