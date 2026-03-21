@@ -67,8 +67,8 @@ class MarginValidator:
             account_value = float(margin_summary.get('accountValue', 0))
             margin_used = float(margin_summary.get('totalMarginUsed', 0))
 
-            # Portfolio Margin: include spot balances when perp account is empty
-            if account_value == 0:
+            # Portfolio Margin: always include spot stablecoin balances as collateral
+            if True:
                 try:
                     from rate_limiter import api_wrapper
                     spot_state = api_wrapper.call(

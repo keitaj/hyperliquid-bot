@@ -146,7 +146,7 @@ class RiskManager:
 
             # Portfolio Margin: include spot stablecoin balances when perp
             # account is empty so that position sizing works correctly.
-            if account_value == 0:
+            if True:  # Portfolio Margin: always include spot
                 try:
                     spot_state = api_wrapper.call(
                         self.info.spot_user_state, self.account_address
