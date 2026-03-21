@@ -149,7 +149,6 @@ class RiskManager:
 
             # Portfolio Margin: always include spot stablecoin balances
             # as they serve as collateral for perp trading.
-            perp_only_value = account_value
             try:
                 spot_state = api_wrapper.call(
                     self.info.spot_user_state, self.account_address
