@@ -1,6 +1,5 @@
 # Hyperliquid Trading Bot
 
-[![Lint](https://github.com/keitaj/hyperliquid-bot/actions/workflows/lint.yml/badge.svg)](https://github.com/keitaj/hyperliquid-bot/actions/workflows/lint.yml)
 [![Test](https://github.com/keitaj/hyperliquid-bot/actions/workflows/test.yml/badge.svg)](https://github.com/keitaj/hyperliquid-bot/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Release](https://img.shields.io/github/v/release/keitaj/hyperliquid-bot)](https://github.com/keitaj/hyperliquid-bot/releases)
