@@ -67,6 +67,9 @@ class RiskManager:
         # Emergency stop cooldown tracking
         self._emergency_stop_time: Optional[datetime] = None
 
+        # Last known balance (for spot API failure fallback)
+        self._last_known_balance: Optional[float] = None
+
     # ------------------------------------------------------------------ #
     #  Risk level helpers (runtime-reloadable via env var)
     # ------------------------------------------------------------------ #
@@ -144,20 +147,28 @@ class RiskManager:
             total_margin_used = float(margin_summary.get('totalMarginUsed', 0))
             total_position_value = float(margin_summary.get('totalNtlPos', 0))
 
-            # Portfolio Margin: include spot stablecoin balances when perp
-            # account is empty so that position sizing works correctly.
-            if True:  # Portfolio Margin: always include spot
-                try:
-                    spot_state = api_wrapper.call(
-                        self.info.spot_user_state, self.account_address
+            # Portfolio Margin: always include spot stablecoin balances
+            # as they serve as collateral for perp trading.
+            perp_only_value = account_value
+            try:
+                spot_state = api_wrapper.call(
+                    self.info.spot_user_state, self.account_address
+                )
+                for bal in spot_state.get('balances', []):
+                    if bal.get('coin', '') in ('USDC', 'USDH', 'USDT0'):
+                        account_value += float(bal.get('total', 0))
+                self._last_known_balance = account_value
+            except Exception as e:
+                # Spot API failed (e.g. 429) — use last known balance
+                # to avoid daily_loss_limit false triggers
+                if self._last_known_balance is not None:
+                    account_value = self._last_known_balance
+                    logger.debug(
+                        "Spot API failed, using last known balance: $%.2f",
+                        account_value,
                     )
-                    for bal in spot_state.get('balances', []):
-                        if bal.get('coin', '') in ('USDC', 'USDH', 'USDT0'):
-                            account_value += float(bal.get('total', 0))
-                    if account_value > 0:
-                        logger.debug(f"Using spot balance as collateral: ${account_value:.2f}")
-                except Exception as e:
-                    logger.debug(f"Could not fetch spot state: {e}")
+                else:
+                    logger.debug("Could not fetch spot state: %s", e)
 
             available_balance = account_value - total_margin_used
             leverage = total_position_value / account_value if account_value > 0 else 0
@@ -293,12 +304,25 @@ class RiskManager:
         # --- Daily absolute loss limit (opt-in) ------------------------------
         if self.daily_loss_limit is not None and self.daily_starting_balance is not None:
             daily_pnl = metrics.total_balance - self.daily_starting_balance
-            if daily_pnl < 0 and abs(daily_pnl) >= self.daily_loss_limit:
-                stop_bot = True
-                _escalate("stop_bot")
-                reasons.append(
-                    f"Daily loss ${abs(daily_pnl):.2f} >= limit ${self.daily_loss_limit:.2f}"
-                )
+
+            # Guard against false triggers from spot API failures:
+            # If balance drops by more than 50% in one cycle, it's likely
+            # a data issue (e.g. spot API returned 429) not a real loss.
+            if self.daily_starting_balance > 0:
+                change_pct = abs(daily_pnl) / self.daily_starting_balance
+                if change_pct > 0.5:
+                    logger.warning(
+                        "Ignoring suspicious balance change: $%.2f -> $%.2f (%.0f%%). "
+                        "Likely spot API failure.",
+                        self.daily_starting_balance, metrics.total_balance,
+                        change_pct * 100,
+                    )
+                elif daily_pnl < 0 and abs(daily_pnl) >= self.daily_loss_limit:
+                    stop_bot = True
+                    _escalate("stop_bot")
+                    reasons.append(
+                        f"Daily loss ${abs(daily_pnl):.2f} >= limit ${self.daily_loss_limit:.2f}"
+                    )
 
         all_passed = action == 'none'
 
