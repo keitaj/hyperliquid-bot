@@ -787,6 +787,9 @@ if __name__ == "__main__":
                         help='Max seconds to hold a position before force-closing (market_making, default: 120)')
     parser.add_argument('--maker-only', action='store_true', default=False,
                         help='Use post-only (maker) orders for all trades including closes (market_making)')
+    parser.add_argument('--taker-fallback-age', type=float,
+                        help='Seconds after max-position-age to fall back to taker for force-close. '
+                             'Not set = never use taker. 0 = taker at max-position-age. (market_making)')
 
     # Risk guardrail parameters
     parser.add_argument('--max-position-pct', type=float,
@@ -950,6 +953,8 @@ if __name__ == "__main__":
             strategy_config['max_position_age_seconds'] = args.max_position_age
         if hasattr(args, 'maker_only') and args.maker_only:
             strategy_config['maker_only'] = True
+        if hasattr(args, 'taker_fallback_age') and args.taker_fallback_age is not None:
+            strategy_config['taker_fallback_age_seconds'] = args.taker_fallback_age
 
     # Apply CLI overrides for DEX settings
     if args.dex is not None:
