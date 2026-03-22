@@ -1,3 +1,4 @@
+import os
 import time
 import logging
 from threading import Lock
@@ -97,11 +98,28 @@ class APICallWrapper:
 
 
 # Global rate limiter instance
+# Configurable via environment variables. Hyperliquid allows 1,200 weight/minute
+# (~20 req/sec for weight-1 requests).
+_rate_limit_rps = float(os.getenv("RATE_LIMIT_RPS", "5.0"))
+_rate_limit_burst = int(os.getenv("RATE_LIMIT_BURST", "8"))
+
+# Hyperliquid allows 1,200 weight/minute = 20 req/sec for weight-1 requests.
+if _rate_limit_rps > 20.0:
+    raise ValueError(
+        f"RATE_LIMIT_RPS={_rate_limit_rps} exceeds Hyperliquid's limit of 20 req/sec. "
+        "Set to 20.0 or lower to avoid being rate-limited."
+    )
+if _rate_limit_burst > 20:
+    raise ValueError(
+        f"RATE_LIMIT_BURST={_rate_limit_burst} exceeds Hyperliquid's limit of 20 req/sec. "
+        "Set to 20 or lower."
+    )
+
 _global_rate_limiter = RateLimiter(
-    requests_per_second=1.5,  # Conservative rate
-    burst_limit=3,            # Low burst limit
-    backoff_factor=2.0,
-    max_backoff=30.0
+    requests_per_second=_rate_limit_rps,
+    burst_limit=_rate_limit_burst,
+    backoff_factor=float(os.getenv("RATE_LIMIT_BACKOFF", "2.0")),
+    max_backoff=float(os.getenv("RATE_LIMIT_MAX_BACKOFF", "30.0")),
 )
 
 api_wrapper = APICallWrapper(_global_rate_limiter)
