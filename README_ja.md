@@ -94,7 +94,7 @@ docker run --rm --env-file .env ghcr.io/keitaj/hyperliquid-bot:latest \
 
 #### 利用可能なイメージタグ
 - `latest` - 最新安定版
-- `v0.1.0` - 特定バージョン
+- `v0.3.0` - 特定バージョン
 
 ### 🐍 Python での使い方
 
@@ -147,7 +147,7 @@ python3 bot.py --strategy grid_trading --grid-levels 15 --grid-spacing-pct 0.3 -
 python3 bot.py --strategy breakout --lookback-period 30 --volume-multiplier 2.0 --atr-period 20
 
 # Market Making戦略
-python3 bot.py --strategy market_making --spread-bps 10 --order-size-usd 100 --maker-only
+python3 bot.py --strategy market_making --spread-bps 10 --order-size-usd 100 --maker-only --taker-fallback-age 60
 ```
 
 **リスクガードレールパラメーター**
@@ -306,6 +306,17 @@ asset_id = 100000 + (1 × 10000) + 0 = 110000
 | `MAX_OPEN_POSITIONS` | `--max-open-positions` | 5 | 最大同時ポジション数 |
 | `COOLDOWN_AFTER_STOP` | `--cooldown-after-stop` | 3600 | 緊急停止後の待機秒数 |
 | `RISK_LEVEL` | `--risk-level` | green | `green`（100%）、`yellow`（50%）、`red`（一時停止）、`black`（全決済） |
+
+### レートリミッター
+
+Hyperliquidは1,200 weight/分（〜20 req/秒）を許可しています。環境変数でレートリミッターを設定可能です：
+
+| 環境変数 | デフォルト | 説明 |
+|---|---|---|
+| `RATE_LIMIT_RPS` | 5.0 | 秒あたりリクエスト数（最大20） |
+| `RATE_LIMIT_BURST` | 8 | バースト上限（最大20） |
+| `RATE_LIMIT_BACKOFF` | 2.0 | レート制限エラー時のバックオフ倍率 |
+| `RATE_LIMIT_MAX_BACKOFF` | 30.0 | 最大バックオフ秒数 |
 
 ## 技術ドキュメント
 

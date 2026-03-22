@@ -99,7 +99,7 @@ docker run --rm --env-file .env ghcr.io/keitaj/hyperliquid-bot:latest \
 
 #### Available Image Tags
 - `latest` - Latest stable version
-- `v0.1.0` - Specific version
+- `v0.3.0` - Specific version
 
 ### 🐍 Python Usage
 
@@ -152,7 +152,7 @@ python3 bot.py --strategy grid_trading --grid-levels 15 --grid-spacing-pct 0.3 -
 python3 bot.py --strategy breakout --lookback-period 30 --volume-multiplier 2.0 --atr-period 20
 
 # Market Making Strategy
-python3 bot.py --strategy market_making --spread-bps 10 --order-size-usd 100 --maker-only
+python3 bot.py --strategy market_making --spread-bps 10 --order-size-usd 100 --maker-only --taker-fallback-age 60
 ```
 
 **Risk Guardrail Parameters**
@@ -312,6 +312,17 @@ Configurable risk management via environment variables or CLI flags (CLI takes p
 | `COOLDOWN_AFTER_STOP` | `--cooldown-after-stop` | 3600 | Seconds to wait after emergency stop |
 | `RISK_LEVEL` | `--risk-level` | green | `green` (100%), `yellow` (50%), `red` (pause), `black` (close all) |
 
+### Rate Limiter
+
+Hyperliquid allows 1,200 weight/minute (~20 req/sec). The rate limiter is configurable via environment variables:
+
+| Env Var | Default | Description |
+|---|---|---|
+| `RATE_LIMIT_RPS` | 5.0 | Requests per second (max 20) |
+| `RATE_LIMIT_BURST` | 8 | Burst limit (max 20) |
+| `RATE_LIMIT_BACKOFF` | 2.0 | Backoff multiplier on rate limit errors |
+| `RATE_LIMIT_MAX_BACKOFF` | 30.0 | Maximum backoff seconds |
+
 ## Technical Documentation
 
 For more detailed technical information, please refer to the following documents:
@@ -463,6 +474,7 @@ strategies:
     close_immediately: true            # --no-close-immediately  (flag inverts this)
     max_position_age_seconds: 120      # --max-position-age
     maker_only: false                  # --maker-only
+    taker_fallback_age_seconds: null   # --taker-fallback-age  (seconds after max-position-age to fall back to taker; null = never)
     account_cap_pct: 0.05              # --account-cap-pct
     max_positions: 3
     take_profit_percent: 1
