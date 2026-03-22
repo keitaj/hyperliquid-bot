@@ -37,6 +37,9 @@ class MarketMakingStrategy(BaseStrategy):
         self.max_positions: int = config.get('max_positions', 3)
         self.max_position_age_seconds: float = config.get('max_position_age_seconds', 120)
         self.maker_only: bool = config.get('maker_only', False)
+        # Seconds after max_position_age to fall back to taker for force-close.
+        # 0 = taker fallback at max_position_age (immediate), None = never use taker.
+        self.taker_fallback_age_seconds: float = config.get('taker_fallback_age_seconds', None)
         self.account_cap_pct: float = config.get('account_cap_pct', 0.05)
 
         # ---- Internal state ---- #
@@ -132,45 +135,51 @@ class MarketMakingStrategy(BaseStrategy):
                 except Exception as e:
                     logger.debug(f"[mm] Could not cancel close order for {coin}: {e}")
 
-            if self.maker_only:
-                # Place a limit close at mid price (post_only) instead of market
-                market_data = self.market_data.get_market_data(coin)
-                if market_data and market_data.mid_price > 0:
-                    close_side = OrderSide.SELL if size > 0 else OrderSide.BUY
-                    # Price at mid to maximize fill chance while staying maker
-                    close_price = self._round_price(market_data.mid_price)
-                    abs_size = round(abs(size), self.market_data.get_sz_decimals(coin))
-                    if abs_size > 0:
-                        try:
-                            order = self.order_manager.create_limit_order(
-                                coin=coin, side=close_side, size=abs_size,
-                                price=close_price, reduce_only=True, post_only=True,
-                            )
-                            if order and order.id is not None:
-                                # Give it another cycle to fill as maker
-                                self._open_positions[coin] = (entry_time, order.id)
-                                logger.info(
-                                    f"[mm] Position {coin} held {age:.0f}s — "
-                                    f"maker close at {close_price:.6f} (oid={order.id})"
-                                )
-                                return
-                        except Exception as e:
-                            logger.error(f"[mm] Maker close failed for {coin}: {e}")
+            # Check if taker fallback should be used
+            use_taker = False
+            if not self.maker_only:
+                use_taker = True
+            elif self.taker_fallback_age_seconds is not None:
+                taker_deadline = self.max_position_age_seconds + self.taker_fallback_age_seconds
+                if age >= taker_deadline:
+                    use_taker = True
 
-                # Fallback: if maker close failed, extend deadline once more
-                logger.info(
+            if use_taker:
+                logger.warning(
                     f"[mm] Position {coin} held {age:.0f}s — "
-                    f"maker close pending, will retry next cycle"
-                )
-                return
-            else:
-                logger.info(
-                    f"[mm] Position {coin} held for {age:.0f}s (max {self.max_position_age_seconds:.0f}s) "
-                    f"— closing at mid price"
+                    f"force closing with taker order"
                 )
                 self.close_position(coin)
                 self._open_positions.pop(coin, None)
                 return
+
+            # Maker-only close: try limit at mid price (post_only)
+            market_data = self.market_data.get_market_data(coin)
+            if market_data and market_data.mid_price > 0:
+                close_side = OrderSide.SELL if size > 0 else OrderSide.BUY
+                close_price = self._round_price(market_data.mid_price)
+                abs_size = round(abs(size), self.market_data.get_sz_decimals(coin))
+                if abs_size > 0:
+                    try:
+                        order = self.order_manager.create_limit_order(
+                            coin=coin, side=close_side, size=abs_size,
+                            price=close_price, reduce_only=True, post_only=True,
+                        )
+                        if order and order.id is not None:
+                            self._open_positions[coin] = (entry_time, order.id)
+                            logger.info(
+                                f"[mm] Position {coin} held {age:.0f}s — "
+                                f"maker close at {close_price:.6f} (oid={order.id})"
+                            )
+                            return
+                    except Exception as e:
+                        logger.debug(f"[mm] Maker close failed for {coin}: {e}")
+
+            logger.info(
+                f"[mm] Position {coin} held {age:.0f}s — "
+                f"maker close pending, will retry next cycle"
+            )
+            return
 
         # Check if close order is still alive
         if close_oid is not None:
