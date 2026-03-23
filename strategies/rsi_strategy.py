@@ -41,13 +41,8 @@ class RSIStrategy(BaseStrategy):
 
     def generate_signals(self, coin: str) -> Optional[Dict]:
         try:
-            candles = self.market_data.get_candles(
-                coin=coin,
-                interval=self.candle_interval,
-                lookback=self.lookback
-            )
-
-            if len(candles) < self.rsi_period + 2:
+            candles = self._get_candles_or_none(coin, self.rsi_period + 2)
+            if candles is None:
                 return None
 
             df = self.calculate_rsi(candles)
@@ -55,7 +50,7 @@ class RSIStrategy(BaseStrategy):
             current_rsi = df['rsi'].iloc[-1]
             prev_rsi = df['rsi'].iloc[-2]
 
-            has_position = coin in self.positions and self.positions[coin]['size'] != 0
+            has_position = self._has_position(coin)
 
             if prev_rsi >= self.oversold_threshold and current_rsi < self.oversold_threshold:
                 if not has_position:
@@ -68,7 +63,7 @@ class RSIStrategy(BaseStrategy):
                     }
 
             elif prev_rsi <= self.overbought_threshold and current_rsi > self.overbought_threshold:
-                if has_position and self.positions[coin]['size'] > 0:
+                if self._has_position(coin) and self.positions[coin]['size'] > 0:
                     logger.info(f"RSI overbought signal for {coin}: RSI={current_rsi:.2f}")
                     return {
                         'side': 'sell',
@@ -77,7 +72,7 @@ class RSIStrategy(BaseStrategy):
                         'confidence': 0.8
                     }
 
-            elif has_position and self.positions[coin]['size'] > 0:
+            elif self._has_position(coin) and self.positions[coin]['size'] > 0:
                 if current_rsi > self.overbought_threshold - 5:
                     return {
                         'side': 'sell',

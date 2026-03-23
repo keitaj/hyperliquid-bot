@@ -29,13 +29,8 @@ class SimpleMAStrategy(BaseStrategy):
 
     def generate_signals(self, coin: str) -> Optional[Dict]:
         try:
-            candles = self.market_data.get_candles(
-                coin=coin,
-                interval=self.candle_interval,
-                lookback=self.lookback
-            )
-
-            if len(candles) < self.slow_period:
+            candles = self._get_candles_or_none(coin, self.slow_period)
+            if candles is None:
                 return None
 
             df = self.calculate_moving_averages(candles)
@@ -45,7 +40,7 @@ class SimpleMAStrategy(BaseStrategy):
             prev_fast_ma = df['ma_fast'].iloc[-2]
             prev_slow_ma = df['ma_slow'].iloc[-2]
 
-            has_position = coin in self.positions and self.positions[coin]['size'] != 0
+            has_position = self._has_position(coin)
 
             if prev_fast_ma <= prev_slow_ma and current_fast_ma > current_slow_ma:
                 if not has_position:
@@ -58,7 +53,7 @@ class SimpleMAStrategy(BaseStrategy):
                     }
 
             elif prev_fast_ma >= prev_slow_ma and current_fast_ma < current_slow_ma:
-                if has_position and self.positions[coin]['size'] > 0:
+                if self._has_position(coin) and self.positions[coin]['size'] > 0:
                     logger.info(f"Bearish crossover detected for {coin}")
                     return {
                         'side': 'sell',

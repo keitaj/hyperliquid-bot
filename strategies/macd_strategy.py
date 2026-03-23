@@ -71,13 +71,8 @@ class MACDStrategy(BaseStrategy):
 
     def generate_signals(self, coin: str) -> Optional[Dict]:
         try:
-            candles = self.market_data.get_candles(
-                coin=coin,
-                interval=self.candle_interval,
-                lookback=self.lookback
-            )
-
-            if len(candles) < self.lookback:
+            candles = self._get_candles_or_none(coin, self.lookback)
+            if candles is None:
                 return None
 
             df = self.calculate_macd(candles)
@@ -95,7 +90,7 @@ class MACDStrategy(BaseStrategy):
 
             divergence = self.detect_divergence(df)
 
-            has_position = coin in self.positions and self.positions[coin]['size'] != 0
+            has_position = self._has_position(coin)
 
             if prev_macd <= prev_signal and current_macd > current_signal:
                 if not has_position and current_macd < 0:
@@ -111,7 +106,7 @@ class MACDStrategy(BaseStrategy):
                         'confidence': confidence
                     }
 
-            elif not has_position and divergence['bullish_divergence'] and histogram_increasing:
+            elif not self._has_position(coin) and divergence['bullish_divergence'] and histogram_increasing:
                 logger.info(f"MACD bullish divergence signal for {coin}")
                 return {
                     'side': 'buy',
@@ -121,7 +116,7 @@ class MACDStrategy(BaseStrategy):
                 }
 
             elif prev_macd >= prev_signal and current_macd < current_signal:
-                if has_position and self.positions[coin]['size'] > 0:
+                if self._has_position(coin) and self.positions[coin]['size'] > 0:
                     logger.info(f"MACD bearish crossover for {coin}: MACD={current_macd:.4f}")
                     confidence = 0.75
                     if divergence['bearish_divergence']:
@@ -134,7 +129,7 @@ class MACDStrategy(BaseStrategy):
                         'confidence': confidence
                     }
 
-            elif has_position and self.positions[coin]['size'] > 0:
+            elif self._has_position(coin) and self.positions[coin]['size'] > 0:
                 if not histogram_positive and not histogram_increasing:
                     return {
                         'side': 'sell',
