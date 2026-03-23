@@ -66,7 +66,8 @@ class BollingerBandsStrategy(BaseStrategy):
                         'side': 'buy',
                         'order_type': 'limit',
                         'post_only': True,
-                        'confidence': 0.75
+                        'confidence': 0.75,
+                        'band_width': band_width,
                     }
 
             elif current_close < current_lower * 0.995:
@@ -75,7 +76,8 @@ class BollingerBandsStrategy(BaseStrategy):
                     return {
                         'side': 'buy',
                         'order_type': 'market',
-                        'confidence': 0.85
+                        'confidence': 0.85,
+                        'band_width': band_width,
                     }
 
             elif prev_close <= prev_upper and current_close > current_upper:
@@ -85,7 +87,8 @@ class BollingerBandsStrategy(BaseStrategy):
                         'side': 'sell',
                         'order_type': 'market',
                         'reduce_only': True,
-                        'confidence': 0.8
+                        'confidence': 0.8,
+                        'band_width': band_width,
                     }
 
             elif self._has_position(coin) and self.positions[coin]['size'] > 0:
@@ -94,12 +97,14 @@ class BollingerBandsStrategy(BaseStrategy):
                         'side': 'sell',
                         'order_type': 'limit',
                         'reduce_only': True,
-                        'confidence': 0.6
+                        'confidence': 0.6,
+                        'band_width': band_width,
                     }
 
             if band_width < self.squeeze_threshold:
                 volatility_signal = self._detect_volatility_breakout(df)
                 if volatility_signal and not self._has_position(coin):
+                    volatility_signal['band_width'] = band_width
                     return volatility_signal
 
             return None
@@ -135,9 +140,10 @@ class BollingerBandsStrategy(BaseStrategy):
             confidence = signal.get('confidence', 0.5)
             base_size_usd = self.position_size_usd * confidence
 
-            candles = self.market_data.get_candles(coin, '15m', 30)
-            df = self.calculate_bollinger_bands(candles)
-            band_width = df['band_width'].iloc[-1]
+            band_width = signal.get('band_width')
+            if band_width is None:
+                logger.warning("Signal missing 'band_width', skipping dynamic sizing")
+                band_width = (self.high_band_width_threshold + self.low_band_width_threshold) / 2
 
             if band_width > self.high_band_width_threshold:
                 base_size_usd *= self.high_band_width_multiplier
