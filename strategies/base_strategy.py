@@ -3,7 +3,7 @@ from typing import Dict, List, Optional
 import logging
 from market_data import MarketDataManager, MarketData
 from order_manager import OrderManager, OrderSide
-from rate_limiter import api_wrapper
+from account_utils import get_account_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -46,29 +46,12 @@ class BaseStrategy(ABC):
         With Portfolio Margin, spot stablecoin balances count as collateral.
         """
         try:
-            user_state = api_wrapper.call(
-                self.order_manager.info.user_state,
+            snapshot = get_account_snapshot(
+                self.order_manager.info,
                 self.order_manager.account_address,
             )
-            account_value = 0.0
-            if 'marginSummary' in user_state:
-                account_value = float(user_state['marginSummary']['accountValue'])
-
-            # Portfolio Margin: fall back to spot balances when perp is empty
-            if True:  # Portfolio Margin: always include spot
-                try:
-                    spot_state = api_wrapper.call(
-                        self.order_manager.info.spot_user_state,
-                        self.order_manager.account_address,
-                    )
-                    for bal in spot_state.get('balances', []):
-                        if bal.get('coin', '') in ('USDC', 'USDH', 'USDT0'):
-                            account_value += float(bal.get('total', 0))
-                except Exception as e:
-                    logger.debug(f"Could not fetch spot state for account cap: {e}")
-
-            if account_value > 0:
-                max_size_usd = account_value * cap_pct
+            if snapshot.account_value > 0:
+                max_size_usd = snapshot.account_value * cap_pct
                 if base_size_usd > max_size_usd:
                     return max_size_usd / mid_price
         except Exception as e:

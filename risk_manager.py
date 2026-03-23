@@ -4,6 +4,7 @@ from typing import Dict, List, Optional
 from dataclasses import dataclass
 from datetime import datetime
 from rate_limiter import api_wrapper
+from account_utils import get_account_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -144,31 +145,16 @@ class RiskManager:
             margin_summary = user_state['marginSummary']
             logger.debug(f"Available keys in margin_summary: {list(margin_summary.keys())}")
 
-            account_value = float(margin_summary.get('accountValue', 0))
-            total_margin_used = float(margin_summary.get('totalMarginUsed', 0))
             total_position_value = float(margin_summary.get('totalNtlPos', 0))
 
-            # Portfolio Margin: always include spot stablecoin balances
-            # as they serve as collateral for perp trading.
-            try:
-                spot_state = api_wrapper.call(
-                    self.info.spot_user_state, self.account_address
-                )
-                for bal in spot_state.get('balances', []):
-                    if bal.get('coin', '') in ('USDC', 'USDH', 'USDT0'):
-                        account_value += float(bal.get('total', 0))
-                self._last_known_balance = account_value
-            except Exception as e:
-                # Spot API failed (e.g. 429) — use last known balance
-                # to avoid daily_loss_limit false triggers
-                if self._last_known_balance is not None:
-                    account_value = self._last_known_balance
-                    logger.debug(
-                        "Spot API failed, using last known balance: $%.2f",
-                        account_value,
-                    )
-                else:
-                    logger.debug("Could not fetch spot state: %s", e)
+            snapshot = get_account_snapshot(
+                self.info,
+                self.account_address,
+                last_known_balance=self._last_known_balance,
+            )
+            account_value = snapshot.account_value
+            total_margin_used = snapshot.margin_used
+            self._last_known_balance = account_value
 
             available_balance = account_value - total_margin_used
             leverage = total_position_value / account_value if account_value > 0 else 0
