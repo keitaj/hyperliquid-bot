@@ -177,15 +177,11 @@ Example output:
 ==================================================
 🏦 HYPERLIQUID ACCOUNT BALANCE
 ==================================================
-💰 Total Balance:    $1,299.00
-   📦 Spot (USDC/USDH):
-      USDC    $1,000.00
-      USDH    $0.00
-   📊 Perps:           $299.00
-✅ Available:        $1,149.00
-🔒 Margin Used:      $150.00
+📦 Spot (USDC/USDH):
+   USDC    $1,000.00
+   USDH    $0.00
+📊 Perps:           $299.00
 📈 Position Value:   $500.00
-⚖️  Current Leverage: 0.38x
 
 ==================================================
 📋 POSITIONS

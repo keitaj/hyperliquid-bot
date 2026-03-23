@@ -61,15 +61,10 @@ def main():
             if b["coin"] in DISPLAY_COINS and float(b["total"]) > 0
         ]
 
-        # ── Total available balance (Spot USDC/USDH + Perps) ──
-        spot_total = sum(float(b["total"]) for b in spot_balances)
         perps_value = 0.0
-        margin_used = 0.0
 
         if 'marginSummary' in user_state:
-            margin_summary = user_state['marginSummary']
-            perps_value = float(margin_summary.get('accountValue', 0))
-            margin_used = float(margin_summary.get('totalMarginUsed', 0))
+            perps_value = float(user_state['marginSummary'].get('accountValue', 0))
 
         # ── Collect all positions (standard + HIP-3 DEXes) ──
         all_positions = _collect_positions(user_state)
@@ -81,33 +76,23 @@ def main():
                 all_positions.extend(dex_positions)
 
                 if 'marginSummary' in dex_state:
-                    dex_margin = dex_state['marginSummary']
-                    perps_value += float(dex_margin.get('accountValue', 0))
-                    margin_used += float(dex_margin.get('totalMarginUsed', 0))
+                    perps_value += float(dex_state['marginSummary'].get('accountValue', 0))
             except Exception as e:
                 logger.debug(f"Could not fetch DEX {dex} state: {e}")
 
         position_value = sum(p['position_value'] for p in all_positions)
-        total_value = spot_total + perps_value
 
         print("=" * 50)
         print("🏦 HYPERLIQUID ACCOUNT BALANCE")
         print("=" * 50)
-        print(f"💰 Total Balance:    ${total_value:,.2f}")
-        print("   📦 Spot (USDC/USDH):")
+        print("📦 Spot (USDC/USDH):")
         if spot_balances:
             for b in spot_balances:
-                print(f"      {b['coin']:6}  ${float(b['total']):,.2f}")
+                print(f"   {b['coin']:6}  ${float(b['total']):,.2f}")
         else:
-            print("      (none)")
-        print(f"   📊 Perps:           ${perps_value:,.2f}")
-        print(f"✅ Available:        ${total_value - margin_used:,.2f}")
-        print(f"🔒 Margin Used:      ${margin_used:,.2f}")
+            print("   (none)")
+        print(f"📊 Perps:           ${perps_value:,.2f}")
         print(f"📈 Position Value:   ${position_value:,.2f}")
-
-        if position_value > 0 and total_value > 0:
-            leverage = position_value / total_value
-            print(f"⚖️  Current Leverage: {leverage:.2f}x")
 
         print("\n" + "=" * 50)
         print("📋 POSITIONS")
