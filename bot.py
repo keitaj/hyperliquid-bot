@@ -81,7 +81,10 @@ class HyperliquidBot:
                                               default_slippage=self.market_order_slippage)
 
         self.risk_config = self._build_risk_config()
-        self.risk_manager = RiskManager(self.info, self.account_address, self.risk_config)
+        self.risk_manager = RiskManager(
+            self.info, self.account_address, self.risk_config,
+            hip3_dexes=self.hip3_dexes,
+        )
 
         # Default strategy configurations
         default_configs = {
@@ -621,7 +624,10 @@ class HyperliquidBot:
             # Preserve cooldown state across connection resets
             prev_emergency_stop_time = self.risk_manager._emergency_stop_time
             prev_daily_starting_balance = self.risk_manager.daily_starting_balance
-            self.risk_manager = RiskManager(self.info, self.account_address, self.risk_config)
+            self.risk_manager = RiskManager(
+                self.info, self.account_address, self.risk_config,
+                hip3_dexes=self.hip3_dexes,
+            )
             self.risk_manager._emergency_stop_time = prev_emergency_stop_time
             self.risk_manager.daily_starting_balance = prev_daily_starting_balance
 

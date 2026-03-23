@@ -38,10 +38,11 @@ _ACTION_PRIORITY = {
 
 
 class RiskManager:
-    def __init__(self, info, account_address: str, config: Dict):
+    def __init__(self, info, account_address: str, config: Dict, hip3_dexes: Optional[List[str]] = None):
         self.info = info
         self.account_address = account_address
         self.config = config
+        self.hip3_dexes: List[str] = hip3_dexes or []
 
         # Legacy parameters (backwards compatible)
         self.max_leverage = config.get('max_leverage', 3.0)
@@ -173,7 +174,8 @@ class RiskManager:
             leverage = total_position_value / account_value if account_value > 0 else 0
             margin_ratio = total_margin_used / account_value if account_value > 0 else 0
 
-            # Compute unrealized PnL from position data
+            # Compute unrealized PnL and position count from ALL positions
+            # (standard HL + HIP-3 DEXes)
             unrealized_pnl = 0.0
             positions = user_state.get('assetPositions', [])
             for pos in positions:
@@ -181,6 +183,31 @@ class RiskManager:
                 unrealized_pnl += float(pos_data.get('unrealizedPnl', 0))
 
             num_positions = len(positions)
+
+            # Include HIP-3 DEX positions in metrics
+            for dex in self.hip3_dexes:
+                try:
+                    dex_state = api_wrapper.call(
+                        self.info.user_state, self.account_address, dex=dex
+                    )
+                    dex_positions = dex_state.get('assetPositions', [])
+                    num_positions += len(dex_positions)
+                    for pos in dex_positions:
+                        pos_data = pos.get('position', pos)
+                        unrealized_pnl += float(pos_data.get('unrealizedPnl', 0))
+                        total_margin_used += float(pos_data.get('marginUsed', 0))
+                        pos_val = float(pos_data.get(
+                            'positionValue',
+                            float(pos_data.get('szi', 0)) * float(pos_data.get('entryPx', 0)),
+                        ))
+                        total_position_value += abs(pos_val)
+                except Exception as e:
+                    logger.debug("Could not fetch HIP-3 positions for DEX '%s': %s", dex, e)
+
+            # Recompute derived values with HIP-3 data included
+            available_balance = account_value - total_margin_used
+            leverage = total_position_value / account_value if account_value > 0 else 0
+            margin_ratio = total_margin_used / account_value if account_value > 0 else 0
 
             metrics = RiskMetrics(
                 total_balance=account_value,
