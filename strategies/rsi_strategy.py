@@ -59,7 +59,8 @@ class RSIStrategy(BaseStrategy):
                         'side': 'buy',
                         'order_type': 'limit',
                         'post_only': True,
-                        'confidence': 0.8
+                        'confidence': 0.8,
+                        'rsi': current_rsi,
                     }
 
             elif prev_rsi <= self.overbought_threshold and current_rsi > self.overbought_threshold:
@@ -69,7 +70,8 @@ class RSIStrategy(BaseStrategy):
                         'side': 'sell',
                         'order_type': 'market',
                         'reduce_only': True,
-                        'confidence': 0.8
+                        'confidence': 0.8,
+                        'rsi': current_rsi,
                     }
 
             elif self._has_position(coin) and self.positions[coin]['size'] > 0:
@@ -78,7 +80,8 @@ class RSIStrategy(BaseStrategy):
                         'side': 'sell',
                         'order_type': 'limit',
                         'reduce_only': True,
-                        'confidence': 0.6
+                        'confidence': 0.6,
+                        'rsi': current_rsi,
                     }
 
             return None
@@ -99,9 +102,7 @@ class RSIStrategy(BaseStrategy):
             confidence = signal.get('confidence', 0.5)
             base_size_usd = self.position_size_usd * confidence
 
-            candles = self.market_data.get_candles(coin, '15m', 20)
-            df = self.calculate_rsi(candles)
-            current_rsi = df['rsi'].iloc[-1]
+            current_rsi = signal.get('rsi', 50)
 
             if signal['side'] == 'buy' and current_rsi < self.rsi_extreme_low:
                 base_size_usd *= self.size_multiplier_extreme

@@ -88,6 +88,7 @@ class MACDStrategy(BaseStrategy):
             histogram_increasing = current_histogram > prev_histogram
             histogram_positive = current_histogram > 0
 
+            histogram_strength = abs(df['histogram_pct'].iloc[-1])
             divergence = self.detect_divergence(df)
 
             has_position = self._has_position(coin)
@@ -103,7 +104,8 @@ class MACDStrategy(BaseStrategy):
                         'side': 'buy',
                         'order_type': 'limit',
                         'post_only': True,
-                        'confidence': confidence
+                        'confidence': confidence,
+                        'histogram_strength': histogram_strength,
                     }
 
             elif not self._has_position(coin) and divergence['bullish_divergence'] and histogram_increasing:
@@ -112,7 +114,8 @@ class MACDStrategy(BaseStrategy):
                     'side': 'buy',
                     'order_type': 'limit',
                     'post_only': True,
-                    'confidence': 0.75
+                    'confidence': 0.75,
+                    'histogram_strength': histogram_strength,
                 }
 
             elif prev_macd >= prev_signal and current_macd < current_signal:
@@ -126,7 +129,8 @@ class MACDStrategy(BaseStrategy):
                         'side': 'sell',
                         'order_type': 'market',
                         'reduce_only': True,
-                        'confidence': confidence
+                        'confidence': confidence,
+                        'histogram_strength': histogram_strength,
                     }
 
             elif self._has_position(coin) and self.positions[coin]['size'] > 0:
@@ -135,7 +139,8 @@ class MACDStrategy(BaseStrategy):
                         'side': 'sell',
                         'order_type': 'limit',
                         'reduce_only': True,
-                        'confidence': 0.6
+                        'confidence': 0.6,
+                        'histogram_strength': histogram_strength,
                     }
 
             return None
@@ -156,9 +161,7 @@ class MACDStrategy(BaseStrategy):
             confidence = signal.get('confidence', 0.5)
             base_size_usd = self.position_size_usd * confidence
 
-            candles = self.market_data.get_candles(coin, '15m', 50)
-            df = self.calculate_macd(candles)
-            histogram_strength = abs(df['histogram_pct'].iloc[-1])
+            histogram_strength = signal.get('histogram_strength', 0.0)
 
             if histogram_strength > self.histogram_strength_high:
                 base_size_usd *= self.histogram_multiplier_high

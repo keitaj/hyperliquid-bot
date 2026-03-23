@@ -126,6 +126,7 @@ class BreakoutStrategy(BaseStrategy):
                 self.support_resistance_levels[coin].update(levels)
 
             breakout_type = self.detect_breakout(df, levels)
+            atr = df['atr'].iloc[-1]
 
             has_position = self._has_position(coin)
 
@@ -137,7 +138,8 @@ class BreakoutStrategy(BaseStrategy):
                     'order_type': 'market',
                     'confidence': confidence,
                     'breakout_type': breakout_type,
-                    'stop_loss': levels['resistance'] - (df['atr'].iloc[-1] * self.stop_loss_atr_multiplier)
+                    'atr': atr,
+                    'stop_loss': levels['resistance'] - (atr * self.stop_loss_atr_multiplier),
                 }
 
             elif (breakout_type in ['bearish', 'strong_bearish']
@@ -149,13 +151,13 @@ class BreakoutStrategy(BaseStrategy):
                     'order_type': 'market',
                     'reduce_only': True,
                     'confidence': confidence,
-                    'breakout_type': breakout_type
+                    'breakout_type': breakout_type,
+                    'atr': atr,
                 }
 
             if self._has_position(coin) and self.positions[coin]['size'] > 0:
                 entry_price = self.positions[coin]['entry_price']
                 current_price = df['close'].iloc[-1]
-                atr = df['atr'].iloc[-1]
 
                 if current_price < entry_price - (atr * self.position_stop_loss_atr_multiplier):
                     logger.info(f"Stop loss triggered for {coin}")
@@ -163,7 +165,8 @@ class BreakoutStrategy(BaseStrategy):
                         'side': 'sell',
                         'order_type': 'market',
                         'reduce_only': True,
-                        'confidence': 1.0
+                        'confidence': 1.0,
+                        'atr': atr,
                     }
 
             return None
@@ -189,10 +192,8 @@ class BreakoutStrategy(BaseStrategy):
             elif signal.get('breakout_type') == 'strong_bearish':
                 base_size_usd *= (1.0 / self.strong_breakout_multiplier)
 
-            candles = self.market_data.get_candles(coin, '15m', 30)
-            df = self.calculate_atr(candles)
-            atr = df['atr'].iloc[-1]
-            atr_pct = (atr / market_data.mid_price) * 100
+            atr = signal.get('atr', 0)
+            atr_pct = (atr / market_data.mid_price) * 100 if atr else 0
 
             if atr_pct > self.high_atr_threshold:
                 base_size_usd *= self.high_atr_multiplier
