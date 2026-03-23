@@ -71,13 +71,8 @@ class GridTradingStrategy(BaseStrategy):
 
     def generate_signals(self, coin: str) -> Optional[Dict]:
         try:
-            candles = self.market_data.get_candles(
-                coin=coin,
-                interval=self.candle_interval,
-                lookback=self.range_period
-            )
-
-            if len(candles) < 50:
+            candles = self._get_candles_or_none(coin, 50, lookback=self.range_period)
+            if candles is None:
                 return None
 
             df = candles

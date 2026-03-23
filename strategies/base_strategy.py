@@ -29,6 +29,26 @@ class BaseStrategy(ABC):
         pass
 
     # ------------------------------------------------------------------ #
+    # Shared signal helpers
+    # ------------------------------------------------------------------ #
+
+    def _has_position(self, coin: str) -> bool:
+        """Return True if *coin* has a non-zero open position."""
+        return coin in self.positions and self.positions[coin]['size'] != 0
+
+    def _get_candles_or_none(self, coin: str, min_periods: int,
+                             interval: str = None, lookback: int = None):
+        """Fetch candles and return None if fewer than *min_periods* rows."""
+        candles = self.market_data.get_candles(
+            coin=coin,
+            interval=interval or getattr(self, 'candle_interval', '15m'),
+            lookback=lookback or getattr(self, 'lookback', min_periods + 10),
+        )
+        if len(candles) < min_periods:
+            return None
+        return candles
+
+    # ------------------------------------------------------------------ #
     # Shared position-sizing helpers
     # ------------------------------------------------------------------ #
 

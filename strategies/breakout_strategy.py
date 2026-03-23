@@ -109,13 +109,12 @@ class BreakoutStrategy(BaseStrategy):
 
     def generate_signals(self, coin: str) -> Optional[Dict]:
         try:
-            candles = self.market_data.get_candles(
-                coin=coin,
-                interval=self.candle_interval,
-                lookback=max(self.lookback_period * 2, 50)
+            candles = self._get_candles_or_none(
+                coin,
+                self.lookback_period + self.atr_period,
+                lookback=max(self.lookback_period * 2, 50),
             )
-
-            if len(candles) < self.lookback_period + self.atr_period:
+            if candles is None:
                 return None
 
             df = self.calculate_atr(candles)
@@ -128,7 +127,7 @@ class BreakoutStrategy(BaseStrategy):
 
             breakout_type = self.detect_breakout(df, levels)
 
-            has_position = coin in self.positions and self.positions[coin]['size'] != 0
+            has_position = self._has_position(coin)
 
             if breakout_type in ['bullish', 'strong_bullish'] and not has_position:
                 confidence = 0.7 if breakout_type == 'bullish' else 0.85
@@ -141,7 +140,8 @@ class BreakoutStrategy(BaseStrategy):
                     'stop_loss': levels['resistance'] - (df['atr'].iloc[-1] * self.stop_loss_atr_multiplier)
                 }
 
-            elif breakout_type in ['bearish', 'strong_bearish'] and has_position and self.positions[coin]['size'] > 0:
+            elif (breakout_type in ['bearish', 'strong_bearish']
+                  and self._has_position(coin) and self.positions[coin]['size'] > 0):
                 confidence = 0.75 if breakout_type == 'bearish' else 0.9
                 logger.info(f"{breakout_type.upper()} breakout detected for {coin} below {levels['support']:.2f}")
                 return {
@@ -152,7 +152,7 @@ class BreakoutStrategy(BaseStrategy):
                     'breakout_type': breakout_type
                 }
 
-            if has_position and self.positions[coin]['size'] > 0:
+            if self._has_position(coin) and self.positions[coin]['size'] > 0:
                 entry_price = self.positions[coin]['entry_price']
                 current_price = df['close'].iloc[-1]
                 atr = df['atr'].iloc[-1]

@@ -40,13 +40,8 @@ class BollingerBandsStrategy(BaseStrategy):
 
     def generate_signals(self, coin: str) -> Optional[Dict]:
         try:
-            candles = self.market_data.get_candles(
-                coin=coin,
-                interval=self.candle_interval,
-                lookback=self.lookback
-            )
-
-            if len(candles) < self.bb_period + 2:
+            candles = self._get_candles_or_none(coin, self.bb_period + 2)
+            if candles is None:
                 return None
 
             df = self.calculate_bollinger_bands(candles)
@@ -62,7 +57,7 @@ class BollingerBandsStrategy(BaseStrategy):
             prev_upper = df['upper_band'].iloc[-2]
             prev_lower = df['lower_band'].iloc[-2]
 
-            has_position = coin in self.positions and self.positions[coin]['size'] != 0
+            has_position = self._has_position(coin)
 
             if prev_close >= prev_lower and current_close < current_lower:
                 if not has_position and band_width > self.squeeze_threshold:
@@ -75,7 +70,7 @@ class BollingerBandsStrategy(BaseStrategy):
                     }
 
             elif current_close < current_lower * 0.995:
-                if not has_position:
+                if not self._has_position(coin):
                     logger.info(f"BB strong oversold for {coin}: Price={current_close:.2f}, Lower={current_lower:.2f}")
                     return {
                         'side': 'buy',
@@ -84,7 +79,7 @@ class BollingerBandsStrategy(BaseStrategy):
                     }
 
             elif prev_close <= prev_upper and current_close > current_upper:
-                if has_position and self.positions[coin]['size'] > 0:
+                if self._has_position(coin) and self.positions[coin]['size'] > 0:
                     logger.info(f"BB upper band touch for {coin}: Price={current_close:.2f}, Upper={current_upper:.2f}")
                     return {
                         'side': 'sell',
@@ -93,7 +88,7 @@ class BollingerBandsStrategy(BaseStrategy):
                         'confidence': 0.8
                     }
 
-            elif has_position and self.positions[coin]['size'] > 0:
+            elif self._has_position(coin) and self.positions[coin]['size'] > 0:
                 if current_close > current_sma and price_position > 0.8:
                     return {
                         'side': 'sell',
@@ -104,7 +99,7 @@ class BollingerBandsStrategy(BaseStrategy):
 
             if band_width < self.squeeze_threshold:
                 volatility_signal = self._detect_volatility_breakout(df)
-                if volatility_signal and not has_position:
+                if volatility_signal and not self._has_position(coin):
                     return volatility_signal
 
             return None
