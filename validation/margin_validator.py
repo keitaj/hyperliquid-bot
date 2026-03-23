@@ -6,6 +6,7 @@ Validates margin requirements based on strategy and parameters
 import logging
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass, field
+from account_utils import get_account_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -57,39 +58,8 @@ class MarginValidator:
         we fall back to the spot clearinghouse to capture available capital.
         """
         try:
-            user_state = self.info.user_state(self.account_address)
-
-            if 'marginSummary' not in user_state:
-                logger.error("Could not retrieve margin information")
-                return 0.0, 0.0
-
-            margin_summary = user_state['marginSummary']
-            account_value = float(margin_summary.get('accountValue', 0))
-            margin_used = float(margin_summary.get('totalMarginUsed', 0))
-
-            # Portfolio Margin: always include spot stablecoin balances as collateral
-            if True:
-                try:
-                    from rate_limiter import api_wrapper
-                    spot_state = api_wrapper.call(
-                        self.info.spot_user_state, self.account_address
-                    )
-                    for bal in spot_state.get('balances', []):
-                        coin = bal.get('coin', '')
-                        if coin in ('USDC', 'USDH', 'USDT0'):
-                            account_value += float(bal.get('total', 0))
-                    if account_value > 0:
-                        logger.info(
-                            "Perp account empty but spot balance found: $%.2f "
-                            "(Portfolio Margin)", account_value
-                        )
-                except Exception as e:
-                    logger.debug(f"Could not fetch spot state: {e}")
-
-            available_balance = account_value - margin_used
-
-            return account_value, available_balance
-
+            snapshot = get_account_snapshot(self.info, self.account_address)
+            return snapshot.account_value, snapshot.account_value - snapshot.margin_used
         except Exception as e:
             logger.error(f"Error getting account info: {e}")
             return 0.0, 0.0
