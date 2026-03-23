@@ -192,8 +192,11 @@ class BreakoutStrategy(BaseStrategy):
             elif signal.get('breakout_type') == 'strong_bearish':
                 base_size_usd *= (1.0 / self.strong_breakout_multiplier)
 
-            atr = signal.get('atr', 0)
-            atr_pct = (atr / market_data.mid_price) * 100 if atr else 0
+            atr = signal.get('atr')
+            if atr is None:
+                logger.warning("Signal missing 'atr', skipping dynamic sizing")
+                atr = market_data.mid_price * (self.high_atr_threshold + self.low_atr_threshold) / 200
+            atr_pct = (atr / market_data.mid_price) * 100
 
             if atr_pct > self.high_atr_threshold:
                 base_size_usd *= self.high_atr_multiplier

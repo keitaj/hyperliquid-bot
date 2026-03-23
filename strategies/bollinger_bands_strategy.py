@@ -140,7 +140,10 @@ class BollingerBandsStrategy(BaseStrategy):
             confidence = signal.get('confidence', 0.5)
             base_size_usd = self.position_size_usd * confidence
 
-            band_width = signal.get('band_width', 0.03)
+            band_width = signal.get('band_width')
+            if band_width is None:
+                logger.warning("Signal missing 'band_width', skipping dynamic sizing")
+                band_width = (self.high_band_width_threshold + self.low_band_width_threshold) / 2
 
             if band_width > self.high_band_width_threshold:
                 base_size_usd *= self.high_band_width_multiplier

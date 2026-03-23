@@ -102,7 +102,10 @@ class RSIStrategy(BaseStrategy):
             confidence = signal.get('confidence', 0.5)
             base_size_usd = self.position_size_usd * confidence
 
-            current_rsi = signal.get('rsi', 50)
+            current_rsi = signal.get('rsi')
+            if current_rsi is None:
+                logger.warning("Signal missing 'rsi', skipping dynamic sizing")
+                current_rsi = (self.rsi_extreme_low + self.overbought_threshold) / 2
 
             if signal['side'] == 'buy' and current_rsi < self.rsi_extreme_low:
                 base_size_usd *= self.size_multiplier_extreme

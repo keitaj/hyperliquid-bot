@@ -161,7 +161,10 @@ class MACDStrategy(BaseStrategy):
             confidence = signal.get('confidence', 0.5)
             base_size_usd = self.position_size_usd * confidence
 
-            histogram_strength = signal.get('histogram_strength', 0.0)
+            histogram_strength = signal.get('histogram_strength')
+            if histogram_strength is None:
+                logger.warning("Signal missing 'histogram_strength', skipping dynamic sizing")
+                histogram_strength = (self.histogram_strength_high + self.histogram_strength_low) / 2
 
             if histogram_strength > self.histogram_strength_high:
                 base_size_usd *= self.histogram_multiplier_high
