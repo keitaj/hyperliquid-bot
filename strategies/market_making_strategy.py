@@ -53,6 +53,26 @@ class MarketMakingStrategy(BaseStrategy):
     #  Main loop override
     # ------------------------------------------------------------------ #
 
+    def _count_active_coins(self) -> int:
+        """Count coins that have a position or pending orders (about to become positions).
+
+        This prevents placing orders on too many coins in the same cycle,
+        even before the orders are filled and show up in self.positions.
+        """
+        active = set()
+        # Coins with actual positions
+        for coin, pos in self.positions.items():
+            if abs(pos.get('size', 0)) > 0:
+                active.add(coin)
+        # Coins being managed (take-profit pending)
+        for coin in self._open_positions:
+            active.add(coin)
+        # Coins with live orders (placed this cycle or earlier)
+        for coin in self._tracked_orders:
+            if self._tracked_orders[coin]:
+                active.add(coin)
+        return len(active)
+
     def run(self, coins: List[str]):
         """Override the default signal-based loop with a market-making loop.
 
@@ -86,7 +106,6 @@ class MarketMakingStrategy(BaseStrategy):
                     if coin in self._open_positions:
                         close_oid = self._open_positions[coin][1]
                         if close_oid is not None:
-                            # Cancel leftover close order if position is gone
                             try:
                                 self.order_manager.cancel_order(close_oid, coin)
                             except Exception as e:
@@ -95,6 +114,14 @@ class MarketMakingStrategy(BaseStrategy):
 
                 # No position — normal MM flow
                 self._cancel_stale_orders(coin)
+
+                # Check max positions using active coin count (not just self.positions)
+                active_count = self._count_active_coins()
+                if active_count >= self.max_positions:
+                    logger.debug(
+                        f"[mm] Max active coins ({active_count}/{self.max_positions}), skipping {coin}"
+                    )
+                    continue
 
                 current_orders = self._tracked_orders.get(coin, [])
                 if len(current_orders) < self.max_open_orders:
@@ -260,9 +287,6 @@ class MarketMakingStrategy(BaseStrategy):
         (position is managed by _manage_position_close instead).
         """
         if coin in self._open_positions:
-            return
-
-        if self._check_max_positions(coin):
             return
 
         market_data = self.market_data.get_market_data(coin)
