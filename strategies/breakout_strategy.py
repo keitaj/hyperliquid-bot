@@ -140,7 +140,8 @@ class BreakoutStrategy(BaseStrategy):
                     'stop_loss': levels['resistance'] - (df['atr'].iloc[-1] * self.stop_loss_atr_multiplier)
                 }
 
-            elif breakout_type in ['bearish', 'strong_bearish'] and self._has_position(coin) and self.positions[coin]['size'] > 0:
+            elif (breakout_type in ['bearish', 'strong_bearish']
+                  and self._has_position(coin) and self.positions[coin]['size'] > 0):
                 confidence = 0.75 if breakout_type == 'bearish' else 0.9
                 logger.info(f"{breakout_type.upper()} breakout detected for {coin} below {levels['support']:.2f}")
                 return {
