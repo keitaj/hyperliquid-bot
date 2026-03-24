@@ -59,6 +59,7 @@ class RiskManager:
         self.per_trade_stop_loss: Optional[float] = config.get('per_trade_stop_loss', None)
         self.max_open_positions: int = config.get('max_open_positions', 5)
         self.cooldown_after_stop: int = config.get('cooldown_after_stop', 3600)
+        self.metrics_cache_ttl: float = config.get('metrics_cache_ttl', 2.0)
 
         # Tracking state
         self.risk_metrics_history: List[RiskMetrics] = []
@@ -126,12 +127,12 @@ class RiskManager:
     #  Metrics collection (with short-lived cache)
     # ------------------------------------------------------------------ #
 
-    def _get_cached_metrics(self, max_age_seconds: float = 2.0) -> Optional[RiskMetrics]:
+    def _get_cached_metrics(self) -> Optional[RiskMetrics]:
         """Return the most recent metrics if fresh enough, else fetch new ones."""
         if self.risk_metrics_history:
             last = self.risk_metrics_history[-1]
             age = (datetime.now() - last.timestamp).total_seconds()
-            if age < max_age_seconds:
+            if age < self.metrics_cache_ttl:
                 return last
         return self.get_current_metrics()
 

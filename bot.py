@@ -1,4 +1,5 @@
 import logging
+import os
 import time
 import signal
 import warnings
@@ -262,6 +263,7 @@ class HyperliquidBot:
             'per_trade_stop_loss': Config.PER_TRADE_STOP_LOSS,
             'max_open_positions': Config.MAX_OPEN_POSITIONS,
             'cooldown_after_stop': Config.COOLDOWN_AFTER_STOP,
+            'metrics_cache_ttl': Config.METRICS_CACHE_TTL,
         }
 
     def _build_perp_dexs(self) -> list:
@@ -653,7 +655,6 @@ class HyperliquidBot:
 if __name__ == "__main__":
     import argparse
     import json
-    import os
 
     parser = argparse.ArgumentParser(description='Hyperliquid Trading Bot')
     parser.add_argument(
