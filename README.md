@@ -307,6 +307,7 @@ Configurable risk management via environment variables or CLI flags (CLI takes p
 | `MAX_OPEN_POSITIONS` | `--max-open-positions` | 5 | Max concurrent open positions |
 | `COOLDOWN_AFTER_STOP` | `--cooldown-after-stop` | 3600 | Seconds to wait after emergency stop |
 | `RISK_LEVEL` | `--risk-level` | green | `green` (100%), `yellow` (50%), `red` (pause), `black` (close all) |
+| `METRICS_CACHE_TTL` | — | 2.0 | Seconds to cache risk metrics before re-fetching (recommend 10+ for 6+ coins) |
 
 ### Rate Limiter
 
@@ -485,6 +486,7 @@ risk_guardrails:
   max_open_positions: 5           # --max-open-positions  / env MAX_OPEN_POSITIONS
   cooldown_after_stop: 3600       # --cooldown-after-stop  / env COOLDOWN_AFTER_STOP
   risk_level: "green"             # --risk-level  / env RISK_LEVEL  (green|yellow|red|black)
+  metrics_cache_ttl: 2.0          # env METRICS_CACHE_TTL  (seconds; recommend 10+ for 6+ coins)
 
 hip3:
   env:

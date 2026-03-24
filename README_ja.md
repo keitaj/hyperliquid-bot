@@ -306,6 +306,7 @@ asset_id = 100000 + (1 × 10000) + 0 = 110000
 | `MAX_OPEN_POSITIONS` | `--max-open-positions` | 5 | 最大同時ポジション数 |
 | `COOLDOWN_AFTER_STOP` | `--cooldown-after-stop` | 3600 | 緊急停止後の待機秒数 |
 | `RISK_LEVEL` | `--risk-level` | green | `green`（100%）、`yellow`（50%）、`red`（一時停止）、`black`（全決済） |
+| `METRICS_CACHE_TTL` | — | 2.0 | リスクメトリクスのキャッシュ秒数（6銘柄以上の場合は10以上を推奨） |
 
 ### レートリミッター
 
