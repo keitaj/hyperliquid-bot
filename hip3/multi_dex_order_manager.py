@@ -176,32 +176,52 @@ class MultiDexOrderManager(OrderManager):
             open_orders = self.get_open_orders()
             open_order_ids = {int(o["oid"]) for o in open_orders}
 
-            for order_id, order in list(self.active_orders.items()):
-                if order_id not in open_order_ids:
-                    dex: Optional[str] = None
-                    if self.registry.is_hip3(order.coin):
-                        dex, _ = self.registry.parse_coin(order.coin)
+            # Find orders that are no longer on the book
+            disappeared = [
+                (oid, order) for oid, order in self.active_orders.items()
+                if oid not in open_order_ids
+            ]
+            if not disappeared:
+                return
 
-                    try:
-                        if dex:
-                            fills = self.market_data_ext.get_user_fills_dex(self.account_address, dex)
+            # Group disappeared orders by DEX so we fetch fills once per DEX
+            by_dex: Dict[Optional[str], list] = {}  # None = standard HL
+            for order_id, order in disappeared:
+                dex: Optional[str] = None
+                if self.registry.is_hip3(order.coin):
+                    dex, _ = self.registry.parse_coin(order.coin)
+                by_dex.setdefault(dex, []).append((order_id, order))
+
+            # Fetch fills once per DEX and build oid->total_size lookup
+            for dex, orders in by_dex.items():
+                try:
+                    if dex:
+                        fills = self.market_data_ext.get_user_fills_dex(self.account_address, dex)
+                    else:
+                        fills = api_wrapper.call(self.info.user_fills, self.account_address)
+
+                    filled_by_oid: Dict[int, float] = {}
+                    for fill in fills:
+                        foid = int(fill["oid"])
+                        if foid in filled_by_oid:
+                            filled_by_oid[foid] += float(fill["sz"])
                         else:
-                            fills = api_wrapper.call(self.info.user_fills, self.account_address)
+                            filled_by_oid[foid] = float(fill["sz"])
 
-                        filled = False
-                        for fill in fills:
-                            if int(fill["oid"]) == order_id:
-                                order.filled_size = float(fill["sz"])
-                                order.status = OrderStatus.FILLED
-                                filled = True
-                                break
-                        if not filled:
+                    for order_id, order in orders:
+                        if order_id in filled_by_oid:
+                            order.filled_size = filled_by_oid[order_id]
+                            order.status = OrderStatus.FILLED
+                        else:
                             order.status = OrderStatus.CANCELLED
+                        del self.active_orders[order_id]
 
-                    except Exception as e:
-                        logger.error(f"Error checking fill for order {order_id}: {e}")
-
-                    del self.active_orders[order_id]
+                except Exception as e:
+                    logger.error(f"Error checking fills for DEX '{dex}': {e}")
+                    # Still clean up orders to avoid retrying indefinitely
+                    for order_id, order in orders:
+                        order.status = OrderStatus.CANCELLED
+                        del self.active_orders[order_id]
 
         except Exception as e:
             logger.error(f"Error updating order status: {e}")

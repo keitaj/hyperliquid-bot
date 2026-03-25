@@ -270,19 +270,31 @@ class OrderManager:
             open_orders = self.get_open_orders()
             open_order_ids = {int(o['oid']) for o in open_orders}
 
-            for order_id, order in list(self.active_orders.items()):
-                if order_id not in open_order_ids:
-                    fills = api_wrapper.call(self.info.user_fills, self.account_address)
+            # Find orders that are no longer on the book
+            disappeared = [
+                (oid, order) for oid, order in self.active_orders.items()
+                if oid not in open_order_ids
+            ]
+            if not disappeared:
+                return
 
-                    for fill in fills:
-                        if int(fill['oid']) == order_id:
-                            order.filled_size = float(fill['sz'])
-                            order.status = OrderStatus.FILLED
-                            break
-                    else:
-                        order.status = OrderStatus.CANCELLED
+            # Fetch fills once for all disappeared orders
+            fills = api_wrapper.call(self.info.user_fills, self.account_address)
+            filled_by_oid = {}
+            for fill in fills:
+                foid = int(fill['oid'])
+                if foid in filled_by_oid:
+                    filled_by_oid[foid] += float(fill['sz'])
+                else:
+                    filled_by_oid[foid] = float(fill['sz'])
 
-                    del self.active_orders[order_id]
+            for order_id, order in disappeared:
+                if order_id in filled_by_oid:
+                    order.filled_size = filled_by_oid[order_id]
+                    order.status = OrderStatus.FILLED
+                else:
+                    order.status = OrderStatus.CANCELLED
+                del self.active_orders[order_id]
 
         except Exception as e:
             logger.error(f"Error updating order status: {e}")
