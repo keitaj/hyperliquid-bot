@@ -74,27 +74,43 @@ class RateLimiter:
 
 
 class APICallWrapper:
-    """Wrapper to add rate limiting to API calls"""
+    """Wrapper to add rate limiting to API calls with automatic retry on 429."""
+
+    MAX_RETRIES = 3
 
     def __init__(self, rate_limiter: RateLimiter):
         self.rate_limiter = rate_limiter
 
-    def call(self, func, *args, **kwargs):
-        """Execute API call with rate limiting and error handling"""
-        self.rate_limiter.wait_if_needed()
+    @staticmethod
+    def _is_rate_limit_error(e: Exception) -> bool:
+        error_str = str(e)
+        return "429" in error_str or "rate limit" in error_str.lower()
 
-        try:
-            result = func(*args, **kwargs)
-            self.rate_limiter.on_success()
-            return result
-        except Exception as e:
-            # Check if it's a 429 error (rate limit)
-            error_str = str(e)
-            if "429" in error_str or "rate limit" in error_str.lower():
-                self.rate_limiter.on_429_error()
-                # Wait before retrying
-                time.sleep(self.rate_limiter._current_backoff)
-            raise e
+    def call(self, func, *args, **kwargs):
+        """Execute API call with rate limiting and automatic retry on 429."""
+        last_exception = None
+
+        for attempt in range(1, self.MAX_RETRIES + 1):
+            self.rate_limiter.wait_if_needed()
+            try:
+                result = func(*args, **kwargs)
+                self.rate_limiter.on_success()
+                return result
+            except Exception as e:
+                if self._is_rate_limit_error(e):
+                    self.rate_limiter.on_429_error()
+                    last_exception = e
+                    if attempt < self.MAX_RETRIES:
+                        logger.warning(
+                            "Rate limited (attempt %d/%d), retrying after %.1fs backoff",
+                            attempt, self.MAX_RETRIES, self.rate_limiter._current_backoff,
+                        )
+                        time.sleep(self.rate_limiter._current_backoff)
+                        continue
+                    logger.error("Rate limited after %d attempts, giving up", self.MAX_RETRIES)
+                raise
+
+        raise last_exception  # pragma: no cover
 
 
 # Global rate limiter instance
