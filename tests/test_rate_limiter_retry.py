@@ -1,6 +1,6 @@
 """Unit tests for APICallWrapper automatic retry on 429 errors."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 import pytest
 
 from rate_limiter import APICallWrapper, RateLimiter
