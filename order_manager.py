@@ -43,12 +43,15 @@ class Order:
 
 
 class OrderManager:
+    _MIDS_CACHE_TTL = 5.0  # seconds
+
     def __init__(self, exchange: Exchange, info: Info, account_address: str, default_slippage: float = 0.01):
         self.exchange = exchange
         self.info = info
         self.account_address = account_address
         self.default_slippage = default_slippage
         self.active_orders: Dict[int, Order] = {}
+        self._mids_cache: Dict[str, tuple] = {}
 
     def create_limit_order(
         self,
@@ -169,11 +172,6 @@ class OrderManager:
             logger.error(f"Error placing order: {e}")
             order.status = OrderStatus.REJECTED
             return None
-
-    # Short-lived cache for all_mids to avoid redundant API calls within a cycle.
-    # Key: dex name ('' for standard), Value: (timestamp, mids_dict)
-    _mids_cache: Dict[str, tuple] = {}
-    _MIDS_CACHE_TTL = 5.0  # seconds
 
     def _get_cached_mids(self, dex: str = '') -> Dict:
         """Return all_mids for a DEX, using a short-lived cache."""
