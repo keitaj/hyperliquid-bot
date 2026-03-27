@@ -41,6 +41,7 @@ class HyperliquidBot:
         self.last_connection_reset = time.time()
         self.main_loop_interval = main_loop_interval
         self.market_order_slippage = market_order_slippage
+        self.api_timeout = Config.API_TIMEOUT
 
         # ------------------------------------------------------------------ #
         # HIP-3 Multi-DEX setup
@@ -56,6 +57,7 @@ class HyperliquidBot:
                 wallet=self._load_wallet(),
                 base_url=Config.API_URL,
                 perp_dexs=self._build_perp_dexs(),
+                timeout=self.api_timeout,
             )
             # Reuse the Info object created inside Exchange to avoid duplicate API calls.
             self.info = self.exchange.info
@@ -75,6 +77,7 @@ class HyperliquidBot:
             self.exchange = Exchange(
                 wallet=self._load_wallet(),
                 base_url=Config.API_URL,
+                timeout=self.api_timeout,
             )
             self.info = self.exchange.info
             self.market_data = MarketDataManager(self.info)

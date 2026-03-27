@@ -60,15 +60,24 @@ class TestRetryOn429:
 
         assert func.call_count == 1
 
-    def test_non_429_error_not_retried(self):
-        """Non-rate-limit errors should propagate without retry."""
+    def test_non_retriable_error_not_retried(self):
+        """Non-rate-limit, non-timeout errors should propagate without retry."""
         wrapper = _make_wrapper()
-        func = MagicMock(side_effect=[ConnectionError("timeout"), "ok"])
+        func = MagicMock(side_effect=[ValueError("bad data"), "ok"])
 
-        with pytest.raises(ConnectionError):
+        with pytest.raises(ValueError):
             wrapper.call(func)
 
         assert func.call_count == 1
+
+    def test_timeout_error_retried(self):
+        """Timeout errors should trigger retry."""
+        wrapper = _make_wrapper()
+        func = MagicMock(side_effect=[ConnectionError("Connection aborted, timeout"), "ok"])
+
+        result = wrapper.call(func)
+        assert result == "ok"
+        assert func.call_count == 2
 
     def test_backoff_increases_on_consecutive_429s(self):
         wrapper = _make_wrapper(max_backoff=60.0)

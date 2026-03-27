@@ -87,6 +87,9 @@ class Config:
     # How long (seconds) to cache risk metrics before re-fetching from the API.
     METRICS_CACHE_TTL: float = float(os.getenv("METRICS_CACHE_TTL", "2.0"))
 
+    # Timeout (seconds) for Hyperliquid API calls.
+    API_TIMEOUT: float = float(os.getenv("API_TIMEOUT", "10"))
+
     # Dynamic risk level: green (100%), yellow (50%), red (pause), black (close all).
     # Read at runtime directly from os.getenv("RISK_LEVEL") by RiskManager,
     # so it can be changed without restarting the bot.
