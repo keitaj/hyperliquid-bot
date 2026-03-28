@@ -5,15 +5,19 @@ import signal
 import types
 import warnings
 from typing import Any, Dict, List, Optional
-from hyperliquid.exchange import Exchange
-from config import Config
-from market_data import MarketDataManager
-from order_manager import OrderManager
-from risk_manager import RiskManager
-from validation import MarginValidator, validate_strategy_config
-from hip3 import DEXRegistry, MultiDexMarketData, MultiDexOrderManager
-from order_manager import OrderSide
-from strategies import (
+
+from log_config import setup_logging
+setup_logging()
+
+from hyperliquid.exchange import Exchange  # noqa: E402
+from config import Config  # noqa: E402
+from market_data import MarketDataManager  # noqa: E402
+from order_manager import OrderManager  # noqa: E402
+from risk_manager import RiskManager  # noqa: E402
+from validation import MarginValidator, validate_strategy_config  # noqa: E402
+from hip3 import DEXRegistry, MultiDexMarketData, MultiDexOrderManager  # noqa: E402
+from order_manager import OrderSide  # noqa: E402
+from strategies import (  # noqa: E402
     SimpleMAStrategy,
     RSIStrategy,
     BollingerBandsStrategy,
@@ -25,10 +29,6 @@ from strategies import (
 
 warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL")
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
 logger = logging.getLogger(__name__)
 
 
