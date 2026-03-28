@@ -7,7 +7,7 @@ risk_manager, and margin_validator.
 
 import logging
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 from rate_limiter import api_wrapper
 
@@ -25,7 +25,7 @@ class AccountSnapshot:
 
 
 def get_account_snapshot(
-    info,
+    info: Any,
     account_address: str,
     *,
     last_known_balance: Optional[float] = None,

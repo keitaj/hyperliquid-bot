@@ -2,8 +2,9 @@ import logging
 import os
 import time
 import signal
+import types
 import warnings
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 from hyperliquid.exchange import Exchange
 from config import Config
 from market_data import MarketDataManager
@@ -32,8 +33,9 @@ logger = logging.getLogger(__name__)
 
 
 class HyperliquidBot:
-    def __init__(self, strategy_name: str = "simple_ma", coins: List[str] = None, strategy_config: Dict = None,
-                 main_loop_interval: float = 10, market_order_slippage: float = 0.01):
+    def __init__(self, strategy_name: str = "simple_ma", coins: Optional[List[str]] = None,
+                 strategy_config: Optional[Dict] = None,
+                 main_loop_interval: float = 10, market_order_slippage: float = 0.01) -> None:
         Config.validate()
         self.account_address = Config.ACCOUNT_ADDRESS
         self.running = False
@@ -250,7 +252,7 @@ class HyperliquidBot:
 
         self.coins = self.trading_coins
 
-    def _load_wallet(self):
+    def _load_wallet(self) -> Any:
         from eth_account import Account
         return Account.from_key(Config.PRIVATE_KEY)
 
@@ -312,7 +314,7 @@ class HyperliquidBot:
         limit_px: float,
         order_type: Dict,
         reduce_only: bool = False
-    ):
+    ) -> Optional[Dict]:
         try:
             order_result = self.exchange.order(
                 coin=coin,
@@ -328,7 +330,7 @@ class HyperliquidBot:
             logger.error(f"Error placing order: {e}")
             return None
 
-    def cancel_order(self, coin: str, oid: int):
+    def cancel_order(self, coin: str, oid: int) -> Optional[Dict]:
         try:
             cancel_result = self.exchange.cancel(coin=coin, oid=oid)
             logger.info(f"Order cancelled: {cancel_result}")
@@ -337,7 +339,7 @@ class HyperliquidBot:
             logger.error(f"Error cancelling order: {e}")
             return None
 
-    def run(self):
+    def run(self) -> None:
         logger.info("Starting Hyperliquid trading bot...")
         self.running = True
 
@@ -388,7 +390,7 @@ class HyperliquidBot:
                 logger.error(f"Error in main loop (#{consecutive_errors}): {e}")
                 time.sleep(10)  # Longer delay on error
 
-    def _trading_loop(self):
+    def _trading_loop(self) -> None:
         risk_checks = self.risk_manager.check_risk_limits()
         action = risk_checks.get('action', 'none')
 
@@ -465,7 +467,7 @@ class HyperliquidBot:
             logger.error(f"Failed to close position for {coin}")
             return False
 
-    def _close_all_positions(self):
+    def _close_all_positions(self) -> None:
         """Market-close every open position."""
         try:
             positions = self.order_manager.get_all_positions()
@@ -477,7 +479,7 @@ class HyperliquidBot:
         except Exception as e:
             logger.error(f"Error closing all positions: {e}")
 
-    def _check_per_trade_stops(self):
+    def _check_per_trade_stops(self) -> None:
         """Close individual positions that exceed the per-trade stop loss."""
         if self.risk_manager.per_trade_stop_loss is None:
             return
@@ -489,7 +491,7 @@ class HyperliquidBot:
         except Exception as e:
             logger.error(f"Error in per-trade stop loss check: {e}")
 
-    def _signal_handler(self, signum, frame):
+    def _signal_handler(self, signum: int, frame: Optional[types.FrameType]) -> None:
         logger.info("Received shutdown signal")
         self.running = False
         try:
@@ -595,7 +597,7 @@ class HyperliquidBot:
             logger.error("Proceeding with caution...")
             return True  # Allow to proceed but with warning
 
-    def _reset_connections(self):
+    def _reset_connections(self) -> None:
         """Reset connections when encountering persistent errors"""
         try:
             logger.info("Resetting connections due to persistent errors...")
