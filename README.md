@@ -276,6 +276,8 @@ The bot handles this automatically at startup:
 - **Risk Management**: Leverage limits, maximum drawdown, daily loss limits
 - **Multiple Strategies**: Choose from 7 different trading strategies
 - **Risk Guardrails**: Configurable margin limits, daily loss limits, per-trade stop loss, and dynamic risk levels
+- **Startup Validation**: Strategy parameters validated at startup with all errors reported at once
+- **Structured Logging**: JSON output mode for log aggregation tools (`LOG_FORMAT=json`)
 - **HIP-3 Multi-DEX**: Trade across Hyperliquid, trade.xyz, Felix, and other HIP-3 DEXes simultaneously
 
 ## Trading Strategies
@@ -308,6 +310,21 @@ Configurable risk management via environment variables or CLI flags (CLI takes p
 | `COOLDOWN_AFTER_STOP` | `--cooldown-after-stop` | 3600 | Seconds to wait after emergency stop |
 | `RISK_LEVEL` | `--risk-level` | green | `green` (100%), `yellow` (50%), `red` (pause), `black` (close all) |
 | `METRICS_CACHE_TTL` | — | 2.0 | Seconds to cache risk metrics before re-fetching (recommend 10+ for 6+ coins) |
+| `META_CACHE_TTL` | — | 3600 | Seconds to cache asset metadata (sz_decimals) |
+| `MIDS_CACHE_TTL` | — | 5.0 | Seconds to cache mid prices in order manager |
+
+### Margin Validation
+
+Minimum order values and margin multipliers used during startup validation. Override via environment variables if Hyperliquid changes its requirements.
+
+| Env Var | Default | Description |
+|---|---|---|
+| `MIN_ORDER_VALUE_DEFAULT` | 50 | Default minimum order value in USD |
+| `MIN_ORDER_VALUE_BTC` | 100 | Minimum order value for BTC |
+| `MIN_ORDER_VALUE_ETH` | 100 | Minimum order value for ETH |
+| `MIN_ORDER_VALUE_{COIN}` | — | Minimum order value for any coin (e.g. `MIN_ORDER_VALUE_SOL=80`) |
+| `INITIAL_MARGIN_MULTIPLIER` | 3.0 | Margin multiplier for initial orders |
+| `MARGIN_SAFETY_BUFFER` | 1.5 | Safety buffer on margin calculations |
 
 ### Rate Limiter
 
@@ -319,6 +336,19 @@ Hyperliquid allows 1,200 weight/minute (~20 req/sec). The rate limiter is config
 | `RATE_LIMIT_BURST` | 8 | Burst limit (max 20) |
 | `RATE_LIMIT_BACKOFF` | 2.0 | Backoff multiplier on rate limit errors |
 | `RATE_LIMIT_MAX_BACKOFF` | 30.0 | Maximum backoff seconds |
+
+### Logging
+
+| Env Var | Default | Description |
+|---|---|---|
+| `LOG_FORMAT` | `text` | Log output format: `text` (human-readable) or `json` (structured, one JSON object per line) |
+| `LOG_LEVEL` | `INFO` | Log verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
+
+JSON mode is useful for log aggregation tools (Datadog, CloudWatch, Loki, etc.). Example:
+
+```bash
+LOG_FORMAT=json LOG_LEVEL=DEBUG python3 bot.py --strategy rsi
+```
 
 ## Technical Documentation
 
@@ -335,6 +365,9 @@ For more detailed technical information, please refer to the following documents
 - `order_manager.py`: Order management
 - `risk_manager.py`: Risk management
 - `rate_limiter.py`: API rate limiting
+- `log_config.py`: Logging setup (text / JSON structured output)
+- `coin_utils.py`: Shared HIP-3 coin notation helpers
+- `account_utils.py`: Account balance helpers (Portfolio Margin)
 - `hip3/`: HIP-3 multi-DEX support
   - `dex_registry.py`: DEX discovery and asset ID resolution
   - `multi_dex_market_data.py`: DEX-aware market data
@@ -348,8 +381,11 @@ For more detailed technical information, please refer to the following documents
   - `grid_trading_strategy.py`: Grid trading strategy
   - `breakout_strategy.py`: Breakout strategy
   - `market_making_strategy.py`: Market making strategy
+  - `mm_order_tracker.py`: MM order tracking and stale order management
+  - `mm_position_closer.py`: MM position close and take-profit management
 - `validation/`: Pre-trade validation
   - `margin_validator.py`: Margin and configuration validation
+  - `strategy_validator.py`: Strategy parameter validation
 - `docs/`: Documentation
   - `technical-notes/`: Technical detail documents
 
@@ -487,6 +523,19 @@ risk_guardrails:
   cooldown_after_stop: 3600       # --cooldown-after-stop  / env COOLDOWN_AFTER_STOP
   risk_level: "green"             # --risk-level  / env RISK_LEVEL  (green|yellow|red|black)
   metrics_cache_ttl: 2.0          # env METRICS_CACHE_TTL  (seconds; recommend 10+ for 6+ coins)
+  meta_cache_ttl: 3600            # env META_CACHE_TTL  (seconds; asset metadata cache)
+  mids_cache_ttl: 5.0             # env MIDS_CACHE_TTL  (seconds; mid price cache)
+
+margin_validation:
+  min_order_value_default: 50     # env MIN_ORDER_VALUE_DEFAULT
+  min_order_value_btc: 100        # env MIN_ORDER_VALUE_BTC
+  min_order_value_eth: 100        # env MIN_ORDER_VALUE_ETH
+  initial_margin_multiplier: 3.0  # env INITIAL_MARGIN_MULTIPLIER
+  margin_safety_buffer: 1.5       # env MARGIN_SAFETY_BUFFER
+
+logging:
+  log_format: "text"              # env LOG_FORMAT  (text|json)
+  log_level: "INFO"               # env LOG_LEVEL  (DEBUG|INFO|WARNING|ERROR|CRITICAL)
 
 hip3:
   env:
