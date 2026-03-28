@@ -4,6 +4,7 @@ Simple script to check Hyperliquid account balance and positions
 """
 
 from config import Config
+from coin_utils import make_hip3_coin
 import requests
 import logging
 import sys
@@ -34,8 +35,8 @@ def _collect_positions(user_state: dict, prefix: str = "") -> list:
     for pos in user_state.get('assetPositions', []):
         p = pos['position']
         coin = p['coin']
-        if prefix and ":" not in coin:
-            coin = f"{prefix}:{coin}"
+        if prefix:
+            coin = make_hip3_coin(prefix, coin)
         result.append({
             'coin': coin,
             'size': float(p['szi']),

@@ -16,6 +16,7 @@ from hip3.dex_registry import DEXRegistry
 from hip3.multi_dex_market_data import MultiDexMarketData
 from order_manager import OrderManager, OrderStatus
 from rate_limiter import api_wrapper
+from coin_utils import make_hip3_coin
 
 logger = logging.getLogger(__name__)
 
@@ -81,8 +82,7 @@ class MultiDexOrderManager(OrderManager):
                 user_state = self.market_data_ext.get_user_state(self.account_address, dex=dex)
                 for p in user_state.get("assetPositions", []):
                     pos = dict(p["position"])
-                    if ":" not in pos.get("coin", ""):
-                        pos["coin"] = f"{dex}:{pos['coin']}"
+                    pos["coin"] = make_hip3_coin(dex, pos.get("coin", ""))
                     all_positions.append(pos)
             except Exception as e:
                 logger.error(f"Error fetching positions for DEX '{dex}': {e}")
@@ -125,8 +125,7 @@ class MultiDexOrderManager(OrderManager):
                 dex_orders = self.market_data_ext.get_open_orders_dex(self.account_address, dex=dex)
                 for order in dex_orders:
                     o = dict(order)
-                    if ":" not in o.get("coin", ""):
-                        o["coin"] = f"{dex}:{o['coin']}"
+                    o["coin"] = make_hip3_coin(dex, o.get("coin", ""))
                     if filter_coin_name and o["coin"] != coin:
                         continue
                     all_orders.append(o)
@@ -159,7 +158,7 @@ class MultiDexOrderManager(OrderManager):
                     order_coin_name = order["coin"]
                     if filter_coin_name and order_coin_name != filter_coin_name:
                         continue
-                    full_coin = f"{dex}:{order_coin_name}" if ":" not in order_coin_name else order_coin_name
+                    full_coin = make_hip3_coin(dex, order_coin_name)
                     if self.cancel_order(int(order["oid"]), full_coin):
                         cancelled += 1
             except Exception as e:

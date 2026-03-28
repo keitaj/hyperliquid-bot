@@ -8,6 +8,7 @@ Standard HL perps use index 0..N directly (not HIP-3).
 import logging
 import requests
 from typing import Any, Dict, List, Optional, Tuple
+from coin_utils import is_hip3 as _is_hip3, parse_coin as _parse_coin
 
 logger = logging.getLogger(__name__)
 
@@ -71,8 +72,7 @@ class DEXRegistry:
                 for j, asset in enumerate(universe):
                     coin = asset["name"]
                     # Meta API may return "dex:coin" format; store bare coin name only
-                    if ":" in coin:
-                        _, coin = coin.split(":", 1)
+                    _, coin = _parse_coin(coin)
                     sz_decimals = asset.get("szDecimals", 3)
                     asset_id = 100000 + i * 10000 + j
                     assets[coin] = {
@@ -105,17 +105,11 @@ class DEXRegistry:
 
     def is_hip3(self, coin: str) -> bool:
         """Returns True if coin uses "dex:coin" HIP-3 format."""
-        return ":" in coin
+        return _is_hip3(coin)
 
     def parse_coin(self, coin: str) -> Tuple[Optional[str], str]:
-        """
-        Split "dex:coin" → (dex, coin_name).
-        "BTC" → (None, "BTC")
-        """
-        if ":" in coin:
-            dex, coin_name = coin.split(":", 1)
-            return dex, coin_name
-        return None, coin
+        """Split "dex:coin" → (dex, coin_name).  "BTC" → (None, "BTC")."""
+        return _parse_coin(coin)
 
     def get_asset_id(self, dex: str, coin: str) -> Optional[int]:
         """Integer asset ID for a HIP-3 asset (used in order placement)."""
