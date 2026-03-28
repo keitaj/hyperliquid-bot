@@ -11,6 +11,15 @@ from rate_limiter import api_wrapper
 logger = logging.getLogger(__name__)
 
 
+def round_price(px: float) -> float:
+    """Round price to 5 significant figures and 6 decimal places.
+
+    This is the standard rounding format for Hyperliquid perpetual prices.
+    All price values sent to the API should pass through this function.
+    """
+    return round(float(f"{px:.5g}"), 6)
+
+
 class OrderSide(Enum):
     BUY = "buy"
     SELL = "sell"
@@ -105,8 +114,7 @@ class OrderManager:
             else:
                 limit_price = mid_price * (1 - slippage)
 
-            # Round to 5 sig figs + 6 decimals (Hyperliquid perp format)
-            limit_price = round(float(f"{limit_price:.5g}"), 6)
+            limit_price = round_price(limit_price)
         except Exception as e:
             logger.error(f"Error calculating market price for {coin} ({side.value}, slippage={slippage}): {e}")
             return None

@@ -14,8 +14,8 @@ from typing import Dict, List, Optional
 
 from strategies.base_strategy import BaseStrategy
 from strategies.mm_order_tracker import OrderTracker
-from strategies.mm_position_closer import PositionCloser, _round_price
-from order_manager import OrderSide
+from strategies.mm_position_closer import PositionCloser
+from order_manager import OrderSide, round_price
 
 logger = logging.getLogger(__name__)
 
@@ -185,8 +185,8 @@ class MarketMakingStrategy(BaseStrategy):
     def _get_spread_prices(self, mid_price: float) -> tuple:
         """Return ``(buy_price, sell_price)`` based on ``spread_bps``."""
         offset = mid_price * (self.spread_bps / 10_000)
-        buy_price = _round_price(mid_price - offset)
-        sell_price = _round_price(mid_price + offset)
+        buy_price = round_price(mid_price - offset)
+        sell_price = round_price(mid_price + offset)
         return buy_price, sell_price
 
     # ------------------------------------------------------------------ #

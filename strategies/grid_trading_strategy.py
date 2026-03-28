@@ -3,6 +3,7 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 import numpy as np
 from strategies.base_strategy import BaseStrategy
+from order_manager import round_price
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +141,7 @@ class GridTradingStrategy(BaseStrategy):
 
     def _calculate_limit_price(self, market_data, side: str) -> float:
         if hasattr(self, '_current_signal') and 'grid_price' in self._current_signal:
-            return self._current_signal['grid_price']
+            return round_price(self._current_signal['grid_price'])
         return super()._calculate_limit_price(market_data, side)
 
     def execute_signal(self, coin: str, signal: Dict):
