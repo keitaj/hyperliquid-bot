@@ -42,8 +42,10 @@ class MultiDexOrderManager(OrderManager):
         market_data: MultiDexMarketData,
         hip3_dexes: Optional[List[str]] = None,
         default_slippage: float = 0.01,
+        mids_cache_ttl: float = 5.0,
     ):
-        super().__init__(exchange, info, account_address, default_slippage=default_slippage)
+        super().__init__(exchange, info, account_address,
+                         default_slippage=default_slippage, mids_cache_ttl=mids_cache_ttl)
         self.registry = registry
         self.market_data_ext = market_data
         self.hip3_dexes: List[str] = hip3_dexes or []

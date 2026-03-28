@@ -28,8 +28,8 @@ class MultiDexMarketData(MarketDataManager):
     and asset_to_sz_decimals are already populated for HIP-3 assets.
     """
 
-    def __init__(self, info, registry: DEXRegistry, api_url: str):
-        super().__init__(info)
+    def __init__(self, info, registry: DEXRegistry, api_url: str, meta_cache_ttl: float = 3600):
+        super().__init__(info, meta_cache_ttl=meta_cache_ttl)
         self.registry = registry
         self.api_url = api_url.rstrip("/")
 

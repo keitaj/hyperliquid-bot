@@ -87,6 +87,12 @@ class Config:
     # How long (seconds) to cache risk metrics before re-fetching from the API.
     METRICS_CACHE_TTL: float = float(os.getenv("METRICS_CACHE_TTL", "2.0"))
 
+    # How long (seconds) to cache asset metadata (sz_decimals etc.).
+    META_CACHE_TTL: float = float(os.getenv("META_CACHE_TTL", "3600"))
+
+    # How long (seconds) to cache mid prices in OrderManager.
+    MIDS_CACHE_TTL: float = float(os.getenv("MIDS_CACHE_TTL", "5.0"))
+
     # Timeout (seconds) for Hyperliquid API calls.
     API_TIMEOUT: float = float(os.getenv("API_TIMEOUT", "10"))
 

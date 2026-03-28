@@ -43,15 +43,16 @@ class Order:
 
 
 class OrderManager:
-    _MIDS_CACHE_TTL = 5.0  # seconds
 
-    def __init__(self, exchange: Exchange, info: Info, account_address: str, default_slippage: float = 0.01):
+    def __init__(self, exchange: Exchange, info: Info, account_address: str,
+                 default_slippage: float = 0.01, mids_cache_ttl: float = 5.0):
         self.exchange = exchange
         self.info = info
         self.account_address = account_address
         self.default_slippage = default_slippage
         self.active_orders: Dict[int, Order] = {}
         self._mids_cache: Dict[str, tuple] = {}
+        self._mids_cache_ttl = mids_cache_ttl
 
     def create_limit_order(
         self,
@@ -177,7 +178,7 @@ class OrderManager:
         """Return all_mids for a DEX, using a short-lived cache."""
         now = time.time()
         cached = self._mids_cache.get(dex)
-        if cached and (now - cached[0]) < self._MIDS_CACHE_TTL:
+        if cached and (now - cached[0]) < self._mids_cache_ttl:
             return cached[1]
 
         mids = api_wrapper.call(self.info.all_mids, dex=dex) if dex else api_wrapper.call(self.info.all_mids)

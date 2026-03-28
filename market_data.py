@@ -21,11 +21,12 @@ class MarketData:
 
 
 class MarketDataManager:
-    def __init__(self, info: Info):
+    def __init__(self, info: Info, meta_cache_ttl: float = 3600):
         self.info = info
         self._cache = {}
         self._meta_cache = None
         self._meta_cache_time = None
+        self._meta_cache_ttl = meta_cache_ttl
 
     def get_all_mids(self) -> Dict[str, float]:
         try:
@@ -37,9 +38,8 @@ class MarketDataManager:
     def get_meta(self) -> Dict:
         """Get meta information including sz_decimals for all assets"""
         try:
-            # Cache meta data for 1 hour
             if self._meta_cache and self._meta_cache_time:
-                if (datetime.now() - self._meta_cache_time).total_seconds() < 3600:
+                if (datetime.now() - self._meta_cache_time).total_seconds() < self._meta_cache_ttl:
                     return self._meta_cache
 
             meta = api_wrapper.call(self.info.meta)
