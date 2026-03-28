@@ -108,7 +108,7 @@ class OrderManager:
             # Round to 5 sig figs + 6 decimals (Hyperliquid perp format)
             limit_price = round(float(f"{limit_price:.5g}"), 6)
         except Exception as e:
-            logger.error(f"Error calculating market price for {coin}: {e}")
+            logger.error(f"Error calculating market price for {coin} ({side.value}, slippage={slippage}): {e}")
             return None
 
         order = Order(
@@ -170,7 +170,10 @@ class OrderManager:
             return None
 
         except Exception as e:
-            logger.error(f"Error placing order: {e}")
+            logger.error(
+                f"Error placing order for {order.coin} ({order.side.value} "
+                f"sz={order.size} px={order.price}): {e}"
+            )
             order.status = OrderStatus.REJECTED
             return None
 
@@ -208,8 +211,8 @@ class OrderManager:
                     base_coin = coin.split(":")[-1]
                     if base_coin in dex_mids:
                         return float(dex_mids[base_coin])
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"HIP-3 DEX mids lookup failed for {coin} (dex={dex}): {e}")
 
             return 0.0
         except Exception as e:
@@ -231,7 +234,7 @@ class OrderManager:
             return False
 
         except Exception as e:
-            logger.error(f"Error cancelling order {order_id}: {e}")
+            logger.error(f"Error cancelling order {order_id} for {coin}: {e}")
             return False
 
     def cancel_all_orders(self, coin: Optional[str] = None) -> int:
@@ -296,7 +299,7 @@ class OrderManager:
                 del self.active_orders[order_id]
 
         except Exception as e:
-            logger.error(f"Error updating order status: {e}")
+            logger.error(f"Error updating order status ({len(self.active_orders)} active orders): {e}")
 
     def get_position(self, coin: str) -> Optional[Dict]:
         try:

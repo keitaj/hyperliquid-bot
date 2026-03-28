@@ -58,10 +58,10 @@ class MarketDataManager:
                 for asset in meta['universe']:
                     if asset['name'] == coin:
                         return asset['szDecimals']
-            # Default to 3 if not found
+            logger.warning(f"sz_decimals not found for {coin}, using default=3")
             return 3
         except Exception as e:
-            logger.error(f"Error getting sz_decimals for {coin}: {e}")
+            logger.error(f"Error getting sz_decimals for {coin} (using default=3): {e}")
             return 3
 
     def get_l2_snapshot(self, coin: str) -> Dict:
@@ -156,7 +156,7 @@ class MarketDataManager:
             return df
 
         except Exception as e:
-            logger.error(f"Error fetching candles for {coin}: {e}")
+            logger.error(f"Error fetching candles for {coin} (interval={interval}, lookback={lookback}): {e}")
             return pd.DataFrame()
 
     def get_funding_rate(self, coin: str) -> Optional[float]:
