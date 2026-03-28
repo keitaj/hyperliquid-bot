@@ -83,7 +83,7 @@ class OrderManager:
         side: OrderSide,
         size: float,
         reduce_only: bool = False,
-        slippage: float = None
+        slippage: Optional[float] = None
     ) -> Optional[Order]:
         """Place a market order using an aggressive IOC limit order.
 
@@ -173,7 +173,7 @@ class OrderManager:
             order.status = OrderStatus.REJECTED
             return None
 
-    def _get_cached_mids(self, dex: str = '') -> Dict:
+    def _get_cached_mids(self, dex: str = '') -> Dict[str, str]:
         """Return all_mids for a DEX, using a short-lived cache."""
         now = time.time()
         cached = self._mids_cache.get(dex)
@@ -263,7 +263,7 @@ class OrderManager:
             logger.error(f"Error fetching open orders: {e}")
             return []
 
-    def update_order_status(self):
+    def update_order_status(self) -> None:
         try:
             open_orders = self.get_open_orders()
             open_order_ids = {int(o['oid']) for o in open_orders}

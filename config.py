@@ -1,5 +1,5 @@
 import os
-from typing import Optional
+from typing import Dict, Optional
 from dotenv import load_dotenv
 from hyperliquid.utils import constants
 
@@ -107,9 +107,9 @@ class Config:
     MARGIN_SAFETY_BUFFER: float = float(os.getenv("MARGIN_SAFETY_BUFFER", "1.5"))
 
     @classmethod
-    def get_min_order_values(cls) -> dict:
+    def get_min_order_values(cls) -> Dict[str, float]:
         """Return minimum order values dict, merging per-coin env overrides."""
-        values: dict = {'default': cls.MIN_ORDER_VALUE_DEFAULT}
+        values: Dict[str, float] = {'default': cls.MIN_ORDER_VALUE_DEFAULT}
         values['BTC'] = cls.MIN_ORDER_VALUE_BTC
         values['ETH'] = cls.MIN_ORDER_VALUE_ETH
         # Support arbitrary coins via MIN_ORDER_VALUE_<COIN> env vars
@@ -126,7 +126,7 @@ class Config:
     # so it can be changed without restarting the bot.
 
     @classmethod
-    def validate(cls):
+    def validate(cls) -> None:
         if not cls.ACCOUNT_ADDRESS:
             raise ValueError("HYPERLIQUID_ACCOUNT_ADDRESS not found in environment")
         if not cls.PRIVATE_KEY:

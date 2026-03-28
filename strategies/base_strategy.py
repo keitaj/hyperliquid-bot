@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 import logging
+import pandas as pd
 from market_data import MarketDataManager, MarketData
 from order_manager import OrderManager, OrderSide
 from account_utils import get_account_snapshot
@@ -14,11 +15,11 @@ class BaseStrategy(ABC):
         market_data_manager: MarketDataManager,
         order_manager: OrderManager,
         config: Dict
-    ):
+    ) -> None:
         self.market_data = market_data_manager
         self.order_manager = order_manager
         self.config = config
-        self.positions = {}
+        self.positions: Dict[str, Dict] = {}
 
     @abstractmethod
     def generate_signals(self, coin: str) -> Optional[Dict]:
@@ -37,7 +38,8 @@ class BaseStrategy(ABC):
         return coin in self.positions and self.positions[coin]['size'] != 0
 
     def _get_candles_or_none(self, coin: str, min_periods: int,
-                             interval: str = None, lookback: int = None):
+                             interval: Optional[str] = None,
+                             lookback: Optional[int] = None) -> Optional[pd.DataFrame]:
         """Fetch candles and return None if fewer than *min_periods* rows."""
         candles = self.market_data.get_candles(
             coin=coin,
@@ -78,7 +80,7 @@ class BaseStrategy(ABC):
             logger.warning(f"Could not apply account cap: {e}")
         return base_size_usd / mid_price
 
-    def execute_signal(self, coin: str, signal: Dict):
+    def execute_signal(self, coin: str, signal: Dict) -> None:
         if not signal:
             return
 
@@ -131,7 +133,7 @@ class BaseStrategy(ABC):
         else:
             return market_data.ask
 
-    def update_positions(self):
+    def update_positions(self) -> None:
         self.positions = {}
         all_positions = self.order_manager.get_all_positions()
 
@@ -166,7 +168,7 @@ class BaseStrategy(ABC):
 
         return False
 
-    def close_position(self, coin: str):
+    def close_position(self, coin: str) -> None:
         position = self.positions.get(coin)
         if not position:
             return
@@ -188,7 +190,7 @@ class BaseStrategy(ABC):
         if order:
             logger.info(f"Closed position for {coin}: size={size} (rounded to {sz_decimals} decimals)")
 
-    def run(self, coins: List[str]):
+    def run(self, coins: List[str]) -> None:
         self.update_positions()
 
         for coin in coins:

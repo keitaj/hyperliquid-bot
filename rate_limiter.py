@@ -1,6 +1,7 @@
 import os
 import time
 import logging
+from typing import Any, Callable
 from threading import Lock
 from collections import deque
 
@@ -14,7 +15,7 @@ class RateLimiter:
                  requests_per_second: float = 2.0,
                  burst_limit: int = 5,
                  backoff_factor: float = 2.0,
-                 max_backoff: float = 60.0):
+                 max_backoff: float = 60.0) -> None:
         self.requests_per_second = requests_per_second
         self.min_interval = 1.0 / requests_per_second
         self.burst_limit = burst_limit
@@ -78,7 +79,7 @@ class APICallWrapper:
 
     MAX_RETRIES = 3
 
-    def __init__(self, rate_limiter: RateLimiter):
+    def __init__(self, rate_limiter: RateLimiter) -> None:
         self.rate_limiter = rate_limiter
 
     @staticmethod
@@ -95,7 +96,7 @@ class APICallWrapper:
             or "timed out" in error_str
         )
 
-    def call(self, func, *args, **kwargs):
+    def call(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """Execute API call with rate limiting and automatic retry on 429/timeout."""
         last_exception = None
 
