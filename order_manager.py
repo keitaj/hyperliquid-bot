@@ -7,6 +7,7 @@ from enum import Enum
 from hyperliquid.exchange import Exchange
 from hyperliquid.info import Info
 from rate_limiter import api_wrapper
+from coin_utils import is_hip3, parse_coin
 
 logger = logging.getLogger(__name__)
 
@@ -210,13 +211,12 @@ class OrderManager:
                 return float(all_mids[coin])
 
             # HIP-3 "dex:coin" -- try DEX-scoped all_mids
-            if ":" in coin:
-                dex = coin.split(":")[0]
+            if is_hip3(coin):
+                dex, base_coin = parse_coin(coin)
                 try:
                     dex_mids = self._get_cached_mids(dex=dex)
                     if coin in dex_mids:
                         return float(dex_mids[coin])
-                    base_coin = coin.split(":")[-1]
                     if base_coin in dex_mids:
                         return float(dex_mids[base_coin])
                 except Exception as e:
