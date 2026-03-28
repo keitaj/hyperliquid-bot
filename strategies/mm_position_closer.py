@@ -7,7 +7,7 @@ import logging
 import time
 from typing import Dict, Optional, Tuple
 
-from order_manager import OrderSide
+from order_manager import OrderSide, round_price
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +127,7 @@ class PositionCloser:
         market_data = self.market_data.get_market_data(coin)
         if market_data and market_data.mid_price > 0:
             close_side = OrderSide.SELL if size > 0 else OrderSide.BUY
-            close_price = _round_price(market_data.mid_price)
+            close_price = round_price(market_data.mid_price)
             abs_size = round(abs(size), self.market_data.get_sz_decimals(coin))
             if abs_size > 0:
                 try:
@@ -150,9 +150,9 @@ class PositionCloser:
     def _place_take_profit(self, coin: str, size: float, entry_price: float, entry_time: float) -> None:
         close_side = OrderSide.SELL if size > 0 else OrderSide.BUY
         if size > 0:
-            close_price = _round_price(entry_price * (1 + self.spread_bps / 10_000))
+            close_price = round_price(entry_price * (1 + self.spread_bps / 10_000))
         else:
-            close_price = _round_price(entry_price * (1 - self.spread_bps / 10_000))
+            close_price = round_price(entry_price * (1 - self.spread_bps / 10_000))
 
         abs_size = round(abs(size), self.market_data.get_sz_decimals(coin))
         if abs_size <= 0:
@@ -180,8 +180,3 @@ class PositionCloser:
         except Exception as e:
             logger.debug(f"[mm] Could not check close order status for {coin}: {e}")
             return False
-
-
-def _round_price(px: float) -> float:
-    """Round price to 5 significant figures and 6 decimal places (Hyperliquid perp format)."""
-    return round(float(f"{px:.5g}"), 6)

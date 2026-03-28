@@ -3,7 +3,7 @@ from typing import Dict, List, Optional
 import logging
 import pandas as pd
 from market_data import MarketDataManager, MarketData
-from order_manager import OrderManager, OrderSide
+from order_manager import OrderManager, OrderSide, round_price
 from account_utils import get_account_snapshot
 
 logger = logging.getLogger(__name__)
@@ -129,9 +129,9 @@ class BaseStrategy(ABC):
 
     def _calculate_limit_price(self, market_data: MarketData, side: str) -> float:
         if side == 'buy':
-            return market_data.bid
+            return round_price(market_data.bid)
         else:
-            return market_data.ask
+            return round_price(market_data.ask)
 
     def update_positions(self) -> None:
         self.positions = {}
