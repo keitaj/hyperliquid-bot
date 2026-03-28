@@ -7,6 +7,7 @@ import logging
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass, field
 from account_utils import get_account_snapshot
+from config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -22,19 +23,9 @@ class ValidationResult:
 class MarginValidator:
     """Validates margin requirements and trading configuration"""
 
-    # Hyperliquid minimum order values
-    # IMPORTANT: Hyperliquid appears to require higher minimums for initial orders
-    MIN_ORDER_VALUES = {
-        'BTC': 100.0,   # Actual minimum appears to be $100 for BTC
-        'ETH': 100.0,   # Actual minimum appears to be $100 for ETH
-        'default': 50.0
-    }
-
-    # Leverage and margin requirements
+    # Leverage and margin requirements (derived from default leverage)
     DEFAULT_LEVERAGE = 10.0
     MARGIN_REQUIREMENT = 0.1  # 10% for 10x leverage
-    INITIAL_MARGIN_MULTIPLIER = 3.0  # Hyperliquid requires 3x margin for initial orders
-    SAFETY_BUFFER = 1.5  # 50% safety buffer
 
     # Strategy-specific multipliers for risk assessment
     STRATEGY_RISK_MULTIPLIERS = {
@@ -49,6 +40,10 @@ class MarginValidator:
     def __init__(self, info, account_address: str):
         self.info = info
         self.account_address = account_address
+        # Load configurable constants from Config
+        self.MIN_ORDER_VALUES = Config.get_min_order_values()
+        self.INITIAL_MARGIN_MULTIPLIER = Config.INITIAL_MARGIN_MULTIPLIER
+        self.SAFETY_BUFFER = Config.MARGIN_SAFETY_BUFFER
 
     def get_account_info(self) -> Tuple[float, float]:
         """Get account value and available balance.

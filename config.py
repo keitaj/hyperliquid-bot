@@ -90,6 +90,37 @@ class Config:
     # Timeout (seconds) for Hyperliquid API calls.
     API_TIMEOUT: float = float(os.getenv("API_TIMEOUT", "10"))
 
+    # ------------------------------------------------------------------ #
+    # Margin validation constants
+    # ------------------------------------------------------------------ #
+
+    # Minimum order value in USD per coin (JSON dict or single float for default).
+    # Example: MIN_ORDER_VALUE_BTC=100, MIN_ORDER_VALUE_ETH=100, MIN_ORDER_VALUE_DEFAULT=50
+    MIN_ORDER_VALUE_DEFAULT: float = float(os.getenv("MIN_ORDER_VALUE_DEFAULT", "50"))
+    MIN_ORDER_VALUE_BTC: float = float(os.getenv("MIN_ORDER_VALUE_BTC", "100"))
+    MIN_ORDER_VALUE_ETH: float = float(os.getenv("MIN_ORDER_VALUE_ETH", "100"))
+
+    # Margin multiplier Hyperliquid applies to initial orders.
+    INITIAL_MARGIN_MULTIPLIER: float = float(os.getenv("INITIAL_MARGIN_MULTIPLIER", "3.0"))
+
+    # Safety buffer multiplier applied on top of margin calculations.
+    MARGIN_SAFETY_BUFFER: float = float(os.getenv("MARGIN_SAFETY_BUFFER", "1.5"))
+
+    @classmethod
+    def get_min_order_values(cls) -> dict:
+        """Return minimum order values dict, merging per-coin env overrides."""
+        values: dict = {'default': cls.MIN_ORDER_VALUE_DEFAULT}
+        values['BTC'] = cls.MIN_ORDER_VALUE_BTC
+        values['ETH'] = cls.MIN_ORDER_VALUE_ETH
+        # Support arbitrary coins via MIN_ORDER_VALUE_<COIN> env vars
+        for key, val in os.environ.items():
+            if key.startswith("MIN_ORDER_VALUE_") and key not in (
+                "MIN_ORDER_VALUE_DEFAULT", "MIN_ORDER_VALUE_BTC", "MIN_ORDER_VALUE_ETH"
+            ):
+                coin = key[len("MIN_ORDER_VALUE_"):]
+                values[coin] = float(val)
+        return values
+
     # Dynamic risk level: green (100%), yellow (50%), red (pause), black (close all).
     # Read at runtime directly from os.getenv("RISK_LEVEL") by RiskManager,
     # so it can be changed without restarting the bot.
