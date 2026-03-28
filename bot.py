@@ -65,7 +65,10 @@ class HyperliquidBot:
             self.info = self.exchange.info
 
             logger.info("Registered DEXes:\n" + self.registry.summary())
-            self.market_data = MultiDexMarketData(self.info, self.registry, Config.API_URL)
+            self.market_data = MultiDexMarketData(
+                self.info, self.registry, Config.API_URL,
+                meta_cache_ttl=Config.META_CACHE_TTL,
+            )
             self.order_manager = MultiDexOrderManager(
                 exchange=self.exchange,
                 info=self.info,
@@ -74,6 +77,7 @@ class HyperliquidBot:
                 market_data=self.market_data,
                 hip3_dexes=self.hip3_dexes,
                 default_slippage=self.market_order_slippage,
+                mids_cache_ttl=Config.MIDS_CACHE_TTL,
             )
         else:
             self.exchange = Exchange(
@@ -82,9 +86,12 @@ class HyperliquidBot:
                 timeout=self.api_timeout,
             )
             self.info = self.exchange.info
-            self.market_data = MarketDataManager(self.info)
-            self.order_manager = OrderManager(self.exchange, self.info, self.account_address,
-                                              default_slippage=self.market_order_slippage)
+            self.market_data = MarketDataManager(self.info, meta_cache_ttl=Config.META_CACHE_TTL)
+            self.order_manager = OrderManager(
+                self.exchange, self.info, self.account_address,
+                default_slippage=self.market_order_slippage,
+                mids_cache_ttl=Config.MIDS_CACHE_TTL,
+            )
 
         self.risk_config = self._build_risk_config()
         self.risk_manager = RiskManager(
@@ -613,7 +620,10 @@ class HyperliquidBot:
                     perp_dexs=self._build_perp_dexs(),
                 )
                 self.info = self.exchange.info
-                self.market_data = MultiDexMarketData(self.info, self.registry, Config.API_URL)
+                self.market_data = MultiDexMarketData(
+                    self.info, self.registry, Config.API_URL,
+                    meta_cache_ttl=Config.META_CACHE_TTL,
+                )
                 self.order_manager = MultiDexOrderManager(
                     exchange=self.exchange,
                     info=self.info,
@@ -622,6 +632,7 @@ class HyperliquidBot:
                     market_data=self.market_data,
                     hip3_dexes=self.hip3_dexes,
                     default_slippage=self.market_order_slippage,
+                    mids_cache_ttl=Config.MIDS_CACHE_TTL,
                 )
             else:
                 self.exchange = Exchange(
@@ -629,9 +640,12 @@ class HyperliquidBot:
                     base_url=Config.API_URL,
                 )
                 self.info = self.exchange.info
-                self.market_data = MarketDataManager(self.info)
-                self.order_manager = OrderManager(self.exchange, self.info,
-                                                  self.account_address, default_slippage=self.market_order_slippage)
+                self.market_data = MarketDataManager(self.info, meta_cache_ttl=Config.META_CACHE_TTL)
+                self.order_manager = OrderManager(
+                    self.exchange, self.info, self.account_address,
+                    default_slippage=self.market_order_slippage,
+                    mids_cache_ttl=Config.MIDS_CACHE_TTL,
+                )
 
             # Preserve cooldown state across connection resets
             prev_emergency_stop_time = self.risk_manager._emergency_stop_time
