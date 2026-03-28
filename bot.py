@@ -9,7 +9,7 @@ from config import Config
 from market_data import MarketDataManager
 from order_manager import OrderManager
 from risk_manager import RiskManager
-from validation import MarginValidator
+from validation import MarginValidator, validate_strategy_config
 from hip3 import DEXRegistry, MultiDexMarketData, MultiDexOrderManager
 from order_manager import OrderSide
 from strategies import (
@@ -198,6 +198,11 @@ class HyperliquidBot:
 
         # Merge: default config as base, CLI overrides on top
         config = {**default_configs.get(strategy_name, {}), **(strategy_config or {})}
+
+        # Validate strategy parameters early
+        validation_error = validate_strategy_config(strategy_name, config)
+        if validation_error:
+            raise ValueError(validation_error)
 
         # Store strategy name and coins for validation
         self.strategy_name = strategy_name
