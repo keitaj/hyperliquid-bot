@@ -294,7 +294,7 @@ class HyperliquidBot:
             logger.info("User state retrieved successfully")
             return user_state
         except Exception as e:
-            logger.error(f"Error getting user state: {e}")
+            logger.error(f"Error getting user state for {self.account_address}: {e}")
             return {}
 
     def get_all_mids(self) -> Dict[str, float]:
@@ -334,7 +334,8 @@ class HyperliquidBot:
             logger.info(f"Order placed: {order_result}")
             return order_result
         except Exception as e:
-            logger.error(f"Error placing order: {e}")
+            side_str = "buy" if is_buy else "sell"
+            logger.error(f"Error placing {side_str} order for {coin} (sz={sz}, px={limit_px}): {e}")
             return None
 
     def cancel_order(self, coin: str, oid: int) -> Optional[Dict]:
@@ -343,7 +344,7 @@ class HyperliquidBot:
             logger.info(f"Order cancelled: {cancel_result}")
             return cancel_result
         except Exception as e:
-            logger.error(f"Error cancelling order: {e}")
+            logger.error(f"Error cancelling order {oid} for {coin}: {e}")
             return None
 
     def run(self) -> None:
@@ -481,10 +482,14 @@ class HyperliquidBot:
             if not positions:
                 logger.info("No open positions to close")
                 return
+            failed = []
             for pos in positions:
-                self._close_position(pos)
+                if not self._close_position(pos):
+                    failed.append(pos.get('coin', 'UNKNOWN'))
+            if failed:
+                logger.error(f"Failed to close positions for: {', '.join(failed)}")
         except Exception as e:
-            logger.error(f"Error closing all positions: {e}")
+            logger.error(f"Error closing all positions: {e}", exc_info=True)
 
     def _check_per_trade_stops(self) -> None:
         """Close individual positions that exceed the per-trade stop loss."""
@@ -496,7 +501,7 @@ class HyperliquidBot:
             for pos in to_close:
                 self._close_position(pos, reason="Per-trade stop loss")
         except Exception as e:
-            logger.error(f"Error in per-trade stop loss check: {e}")
+            logger.error(f"Error in per-trade stop loss check: {e}", exc_info=True)
 
     def _signal_handler(self, signum: int, frame: Optional[types.FrameType]) -> None:
         logger.info("Received shutdown signal")
@@ -516,7 +521,7 @@ class HyperliquidBot:
             if cancel_thread.is_alive():
                 logger.warning("Order cancellation timed out, forcing shutdown")
         except Exception as e:
-            logger.error(f"Error during shutdown: {e}")
+            logger.error(f"Error during shutdown (order cancellation): {e}", exc_info=True)
 
         # Force exit if still running after a short delay
         import sys
@@ -600,9 +605,9 @@ class HyperliquidBot:
             return True
 
         except Exception as e:
-            logger.error(f"Error during configuration validation: {e}")
-            logger.error("Proceeding with caution...")
-            return True  # Allow to proceed but with warning
+            logger.error(f"Error during configuration validation: {e}", exc_info=True)
+            logger.warning("Proceeding with caution — validation could not complete")
+            return True
 
     def _reset_connections(self) -> None:
         """Reset connections when encountering persistent errors"""
@@ -665,7 +670,8 @@ class HyperliquidBot:
             self.connection_retry_count = 0
 
         except Exception as e:
-            logger.error(f"Failed to reset connections: {e}")
+            logger.error(f"Failed to reset connections (attempt #{self.connection_retry_count + 1}): {e}",
+                         exc_info=True)
             self.connection_retry_count += 1
             if self.connection_retry_count > 5:
                 logger.critical("Max connection retry attempts reached. Exiting...")
