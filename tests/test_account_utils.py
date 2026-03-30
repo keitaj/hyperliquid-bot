@@ -4,7 +4,10 @@ from typing import List, Optional
 from unittest.mock import MagicMock, patch
 import pytest
 
-from account_utils import get_account_snapshot, AccountSnapshot, _COLLATERAL_COINS
+from account_utils import (
+    get_account_snapshot, AccountSnapshot, _COLLATERAL_COINS,
+    invalidate_snapshot_cache,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -45,9 +48,11 @@ def _make_info(
 # mock info methods are invoked normally.
 @pytest.fixture(autouse=True)
 def _bypass_api_wrapper():
+    invalidate_snapshot_cache()
     with patch('account_utils.api_wrapper') as mock_wrapper:
         mock_wrapper.call.side_effect = lambda fn, *a, **kw: fn(*a, **kw)
         yield mock_wrapper
+    invalidate_snapshot_cache()
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +157,53 @@ class TestGetAccountSnapshot:
         snap = get_account_snapshot(info, '0xabc')
 
         assert isinstance(snap, AccountSnapshot)
+
+
+class TestSnapshotCache:
+    """Tests for the TTL-based snapshot cache."""
+
+    def test_cache_avoids_duplicate_api_calls(self):
+        """Second call within TTL should reuse the cached result."""
+        info = _make_info(account_value=500.0, margin_used=100.0)
+        snap1 = get_account_snapshot(info, '0xabc')
+        snap2 = get_account_snapshot(info, '0xabc')
+
+        assert snap1 == snap2
+        # user_state should only be called once (cached on second call)
+        assert info.user_state.call_count == 1
+        assert info.spot_user_state.call_count == 1
+
+    def test_invalidate_cache_forces_refetch(self):
+        """After invalidation, the next call should hit the API again."""
+        info = _make_info(account_value=500.0, margin_used=100.0)
+        get_account_snapshot(info, '0xabc')
+        invalidate_snapshot_cache('0xabc')
+        get_account_snapshot(info, '0xabc')
+
+        assert info.user_state.call_count == 2
+
+    def test_pre_fetched_user_state_skips_api_call(self):
+        """When user_state is passed, info.user_state should not be called."""
+        info = _make_info(account_value=500.0, margin_used=100.0)
+        pre_fetched = {
+            'marginSummary': {
+                'accountValue': '800.0',
+                'totalMarginUsed': '150.0',
+            },
+        }
+        snap = get_account_snapshot(info, '0xabc', user_state=pre_fetched)
+
+        assert snap.account_value == 800.0
+        assert snap.margin_used == 150.0
+        assert info.user_state.call_count == 0
+
+    def test_different_addresses_cached_independently(self):
+        """Cache should be per-address."""
+        info = _make_info(account_value=500.0, margin_used=100.0)
+        get_account_snapshot(info, '0xabc')
+        get_account_snapshot(info, '0xdef')
+
+        assert info.user_state.call_count == 2
 
 
 class TestCollateralCoins:
