@@ -21,9 +21,12 @@ class MarketData:
 
 
 class MarketDataManager:
-    def __init__(self, info: Info, meta_cache_ttl: float = 3600):
+    def __init__(self, info: Info, meta_cache_ttl: float = 3600,
+                 market_data_cache_ttl: float = 2.0):
         self.info = info
-        self._cache = {}
+        self._cache: Dict[str, MarketData] = {}
+        self._cache_time: Dict[str, float] = {}
+        self._cache_ttl = market_data_cache_ttl
         self._meta_cache = None
         self._meta_cache_time = None
         self._meta_cache_ttl = meta_cache_ttl
@@ -73,6 +76,12 @@ class MarketDataManager:
 
     def get_market_data(self, coin: str) -> Optional[MarketData]:
         try:
+            # Return cached data if still fresh
+            now = time.monotonic()
+            cached_time = self._cache_time.get(coin, 0.0)
+            if now - cached_time < self._cache_ttl and coin in self._cache:
+                return self._cache[coin]
+
             l2_data = self.get_l2_snapshot(coin)
             if not l2_data or 'levels' not in l2_data:
                 return None
@@ -102,6 +111,7 @@ class MarketDataManager:
             )
 
             self._cache[coin] = market_data
+            self._cache_time[coin] = now
             return market_data
 
         except Exception as e:
