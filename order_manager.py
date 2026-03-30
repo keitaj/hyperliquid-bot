@@ -55,7 +55,8 @@ class Order:
 class OrderManager:
 
     def __init__(self, exchange: Exchange, info: Info, account_address: str,
-                 default_slippage: float = 0.01, mids_cache_ttl: float = 5.0):
+                 default_slippage: float = 0.01, mids_cache_ttl: float = 5.0,
+                 user_state_cache_ttl: float = 2.0):
         self.exchange = exchange
         self.info = info
         self.account_address = account_address
@@ -63,6 +64,9 @@ class OrderManager:
         self.active_orders: Dict[int, Order] = {}
         self._mids_cache: Dict[str, tuple] = {}
         self._mids_cache_ttl = mids_cache_ttl
+        self._user_state_cache: Optional[Dict] = None
+        self._user_state_cache_time: float = 0.0
+        self._user_state_cache_ttl = user_state_cache_ttl
 
     def create_limit_order(
         self,
@@ -309,9 +313,20 @@ class OrderManager:
         except Exception as e:
             logger.error(f"Error updating order status ({len(self.active_orders)} active orders): {e}")
 
+    def _get_cached_user_state(self) -> Dict:
+        """Return user_state, using a short-lived cache to avoid redundant API calls."""
+        now = time.time()
+        if self._user_state_cache and (now - self._user_state_cache_time) < self._user_state_cache_ttl:
+            return self._user_state_cache
+
+        user_state = api_wrapper.call(self.info.user_state, self.account_address)
+        self._user_state_cache = user_state
+        self._user_state_cache_time = now
+        return user_state
+
     def get_position(self, coin: str) -> Optional[Dict]:
         try:
-            user_state = api_wrapper.call(self.info.user_state, self.account_address)
+            user_state = self._get_cached_user_state()
 
             if 'assetPositions' in user_state:
                 for position in user_state['assetPositions']:
@@ -325,7 +340,7 @@ class OrderManager:
 
     def get_all_positions(self) -> List[Dict]:
         try:
-            user_state = api_wrapper.call(self.info.user_state, self.account_address)
+            user_state = self._get_cached_user_state()
 
             if 'assetPositions' in user_state:
                 return [p['position'] for p in user_state['assetPositions']]
