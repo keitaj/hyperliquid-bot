@@ -133,7 +133,13 @@ class MarketMakingStrategy(BaseStrategy):
     # ------------------------------------------------------------------ #
 
     def _place_orders(self, coin: str) -> None:
-        """Place a buy and a sell limit order symmetrically around mid price."""
+        """Place a buy and a sell limit order symmetrically around mid price.
+
+        Uses ``bulk_place_orders`` so that both orders are sent in a
+        single API call (1 weight instead of 2).
+        """
+        from order_manager import Order
+
         if coin in self._closer.tracked_coins:
             return
 
@@ -159,28 +165,36 @@ class MarketMakingStrategy(BaseStrategy):
             return
 
         current_count = self._tracker.get_order_count(coin)
-        orders_to_place = []
+        sides_and_prices = []
 
         if current_count < self.max_open_orders:
-            orders_to_place.append((OrderSide.BUY, buy_price))
+            sides_and_prices.append((OrderSide.BUY, buy_price))
 
-        if current_count + len(orders_to_place) < self.max_open_orders:
-            orders_to_place.append((OrderSide.SELL, sell_price))
+        if current_count + len(sides_and_prices) < self.max_open_orders:
+            sides_and_prices.append((OrderSide.SELL, sell_price))
 
-        for side, price in orders_to_place:
-            try:
-                order = self.order_manager.create_limit_order(
-                    coin=coin, side=side, size=size,
-                    price=price, reduce_only=False, post_only=True,
+        if not sides_and_prices:
+            return
+
+        order_objects = [
+            Order(
+                id=None, coin=coin, side=side, size=size,
+                price=price,
+                order_type={"limit": {"tif": "Alo"}},
+                reduce_only=False,
+            )
+            for side, price in sides_and_prices
+        ]
+
+        results = self.order_manager.bulk_place_orders(order_objects)
+
+        for (side, price), order in zip(sides_and_prices, results):
+            if order and order.id is not None:
+                self._tracker.record_order(coin, order.id, side.value)
+                logger.info(
+                    f"[mm] Placed {side.value} limit {coin} "
+                    f"size={size} price={price:.6f} (oid={order.id})"
                 )
-                if order and order.id is not None:
-                    self._tracker.record_order(coin, order.id, side.value)
-                    logger.info(
-                        f"[mm] Placed {side.value} limit {coin} "
-                        f"size={size} price={price:.6f} (oid={order.id})"
-                    )
-            except Exception as e:
-                logger.error(f"[mm] Failed to place {side.value} order for {coin}: {e}")
 
     def _get_spread_prices(self, mid_price: float) -> tuple:
         """Return ``(buy_price, sell_price)`` based on ``spread_bps``."""
