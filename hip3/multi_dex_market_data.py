@@ -16,6 +16,7 @@ from typing import Dict, List, Optional
 
 from hip3.dex_registry import DEXRegistry
 from market_data import MarketDataManager
+from rate_limiter import api_wrapper
 
 logger = logging.getLogger(__name__)
 
@@ -77,17 +78,21 @@ class MultiDexMarketData(MarketDataManager):
             logger.error(f"Error fetching open orders (dex={dex}): {e}")
             return []
 
+    def _fetch_user_fills_dex(self, address: str, dex: str) -> List[Dict]:
+        """Raw HTTP call for user fills (SDK user_fills has no dex param)."""
+        resp = requests.post(
+            f"{self.api_url}/info",
+            json={"type": "userFills", "user": address, "dex": dex},
+            headers={"Content-Type": "application/json"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
     def get_user_fills_dex(self, address: str, dex: str) -> List[Dict]:
-        """User fills for a specific HIP-3 DEX (direct HTTP — SDK user_fills has no dex param)."""
+        """User fills for a specific HIP-3 DEX, routed through the rate limiter."""
         try:
-            resp = requests.post(
-                f"{self.api_url}/info",
-                json={"type": "userFills", "user": address, "dex": dex},
-                headers={"Content-Type": "application/json"},
-                timeout=15,
-            )
-            resp.raise_for_status()
-            return resp.json()
+            return api_wrapper.call(self._fetch_user_fills_dex, address, dex)
         except Exception as e:
             logger.error(f"Error fetching fills for DEX '{dex}': {e}")
             return []
