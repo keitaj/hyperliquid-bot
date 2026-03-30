@@ -136,6 +136,23 @@ class OrderManager:
 
         return self._place_order(order)
 
+    @staticmethod
+    def _extract_oid(status_info: Dict) -> Optional[int]:
+        """Extract order ID from a single status entry.
+
+        Handles the various response formats:
+        - ``{'oid': 123}``              (immediately filled)
+        - ``{'resting': {'oid': 123}}`` (limit order on book)
+        - ``{'filled': {'oid': 123}}``  (IOC filled)
+        """
+        if 'oid' in status_info:
+            return int(status_info['oid'])
+        if 'resting' in status_info:
+            return int(status_info['resting']['oid'])
+        if 'filled' in status_info:
+            return int(status_info['filled']['oid'])
+        return None
+
     def _place_order(self, order: Order) -> Optional[Order]:
         try:
             result = api_wrapper.call(
@@ -154,27 +171,19 @@ class OrderManager:
                     if 'statuses' in order_data and order_data['statuses']:
                         status_info = order_data['statuses'][0]
 
-                        # Extract oid from various response formats:
-                        # - {'oid': 123}           (immediately filled)
-                        # - {'resting': {'oid': 123}}  (limit order on book)
-                        # - {'filled': {'oid': 123}}   (IOC filled)
-                        oid = None
-                        if 'oid' in status_info:
-                            oid = int(status_info['oid'])
-                        elif 'resting' in status_info:
-                            oid = int(status_info['resting']['oid'])
-                        elif 'filled' in status_info:
-                            oid = int(status_info['filled']['oid'])
-
+                        oid = self._extract_oid(status_info)
                         if oid is not None:
                             order.id = oid
                             self.active_orders[order.id] = order
-                            logger.info(f"Order placed successfully: {order.id}")
+                            logger.info(
+                                "Order placed successfully: %d", order.id
+                            )
                             return order
 
-                        # Check for error in status
                         if 'error' in status_info:
-                            logger.error(f"Order rejected: {status_info['error']}")
+                            logger.error(
+                                "Order rejected: %s", status_info['error']
+                            )
                             order.status = OrderStatus.REJECTED
                             return None
 
@@ -184,11 +193,82 @@ class OrderManager:
 
         except Exception as e:
             logger.error(
-                f"Error placing order for {order.coin} ({order.side.value} "
-                f"sz={order.size} px={order.price}): {e}"
+                f"Error placing order for {order.coin} "
+                f"({order.side.value} sz={order.size} px={order.price}): {e}"
             )
             order.status = OrderStatus.REJECTED
             return None
+
+    def bulk_place_orders(self, orders: List[Order]) -> List[Optional[Order]]:
+        """Place multiple orders in a single API call.
+
+        Uses ``exchange.bulk_orders`` so that N orders cost only
+        ``1 + floor(N/40)`` IP weight instead of N.
+
+        Returns a list parallel to *orders*: the :class:`Order` on
+        success, ``None`` on failure.
+        """
+        if not orders:
+            return []
+
+        order_requests = [
+            {
+                "coin": o.coin,
+                "is_buy": o.side == OrderSide.BUY,
+                "sz": o.size,
+                "limit_px": o.price,
+                "order_type": o.order_type,
+                "reduce_only": o.reduce_only,
+            }
+            for o in orders
+        ]
+
+        results: List[Optional[Order]] = [None] * len(orders)
+
+        try:
+            result = api_wrapper.call(
+                self.exchange.bulk_orders, order_requests
+            )
+
+            if (
+                result
+                and result.get('status') == 'ok'
+                and 'response' in result
+                and 'data' in result['response']
+            ):
+                statuses = result['response']['data'].get('statuses', [])
+                for i, status_info in enumerate(statuses):
+                    if i >= len(orders):
+                        break
+
+                    if 'error' in status_info:
+                        logger.error(
+                            "Bulk order [%d] rejected: %s",
+                            i, status_info['error'],
+                        )
+                        orders[i].status = OrderStatus.REJECTED
+                        continue
+
+                    oid = self._extract_oid(status_info)
+                    if oid is not None:
+                        orders[i].id = oid
+                        self.active_orders[oid] = orders[i]
+                        results[i] = orders[i]
+                    else:
+                        orders[i].status = OrderStatus.REJECTED
+            else:
+                logger.error("Bulk orders failed: %s", result)
+                for o in orders:
+                    o.status = OrderStatus.REJECTED
+
+        except Exception as e:
+            logger.error(
+                "Error in bulk orders (%d orders): %s", len(orders), e
+            )
+            for o in orders:
+                o.status = OrderStatus.REJECTED
+
+        return results
 
     def _get_cached_mids(self, dex: str = '') -> Dict[str, str]:
         """Return all_mids for a DEX, using a short-lived cache."""
