@@ -152,6 +152,7 @@ class RiskManager:
                 self.info,
                 self.account_address,
                 last_known_balance=self._last_known_balance,
+                user_state=user_state,
             )
             account_value = snapshot.account_value
             total_margin_used = snapshot.margin_used
