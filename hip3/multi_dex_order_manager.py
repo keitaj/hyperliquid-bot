@@ -154,13 +154,14 @@ class MultiDexOrderManager(OrderManager):
         for dex in target_dexes:
             try:
                 dex_orders = self.market_data_ext.get_open_orders_dex(self.account_address, dex=dex)
+                to_cancel = []
                 for order in dex_orders:
                     order_coin_name = order["coin"]
                     if filter_coin_name and order_coin_name != filter_coin_name:
                         continue
                     full_coin = make_hip3_coin(dex, order_coin_name)
-                    if self.cancel_order(int(order["oid"]), full_coin):
-                        cancelled += 1
+                    to_cancel.append({"coin": full_coin, "oid": int(order["oid"])})
+                cancelled += self.bulk_cancel_orders(to_cancel)
             except Exception as e:
                 logger.error(f"Error cancelling orders for DEX '{dex}': {e}")
 
