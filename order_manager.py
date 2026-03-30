@@ -249,23 +249,71 @@ class OrderManager:
             logger.error(f"Error cancelling order {order_id} for {coin}: {e}")
             return False
 
-    def cancel_all_orders(self, coin: Optional[str] = None) -> int:
-        cancelled_count = 0
+    def bulk_cancel_orders(self, cancel_requests: List[Dict]) -> int:
+        """Cancel multiple orders in a single API call using bulk_cancel.
 
+        Parameters
+        ----------
+        cancel_requests :
+            List of dicts with ``coin`` and ``oid`` keys.
+
+        Returns
+        -------
+        Number of successfully cancelled orders.
+        """
+        if not cancel_requests:
+            return 0
+
+        try:
+            result = api_wrapper.call(self.exchange.bulk_cancel, cancel_requests)
+
+            cancelled = 0
+            if result and result.get('status') == 'ok':
+                statuses = (
+                    result.get('response', {}).get('data', {}).get('statuses', [])
+                )
+                for i, status in enumerate(statuses):
+                    if status == 'success':
+                        cancelled += 1
+                        if i < len(cancel_requests):
+                            oid = cancel_requests[i]['oid']
+                            if oid in self.active_orders:
+                                self.active_orders[oid].status = OrderStatus.CANCELLED
+                                del self.active_orders[oid]
+
+                if cancelled < len(cancel_requests):
+                    logger.warning(
+                        "Bulk cancel: %d/%d succeeded", cancelled, len(cancel_requests)
+                    )
+            else:
+                logger.error(f"Bulk cancel failed: {result}")
+
+            return cancelled
+
+        except Exception as e:
+            logger.error(f"Error in bulk cancel ({len(cancel_requests)} orders): {e}")
+            return 0
+
+    def cancel_all_orders(self, coin: Optional[str] = None) -> int:
         try:
             open_orders = api_wrapper.call(self.info.open_orders, self.account_address)
 
-            for order in open_orders:
-                if coin is None or order['coin'] == coin:
-                    if self.cancel_order(int(order['oid']), order['coin']):
-                        cancelled_count += 1
+            to_cancel = [
+                {"coin": o['coin'], "oid": int(o['oid'])}
+                for o in open_orders
+                if coin is None or o['coin'] == coin
+            ]
 
+            if not to_cancel:
+                return 0
+
+            cancelled_count = self.bulk_cancel_orders(to_cancel)
             logger.info(f"Cancelled {cancelled_count} orders")
             return cancelled_count
 
         except Exception as e:
             logger.error(f"Error cancelling all orders: {e}")
-            return cancelled_count
+            return 0
 
     def get_open_orders(self, coin: Optional[str] = None) -> List[Dict]:
         try:

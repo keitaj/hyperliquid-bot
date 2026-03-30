@@ -57,6 +57,8 @@ class OrderTracker:
             logger.error(f"[mm] Error fetching open orders for {coin}: {e}")
             return
 
+        to_cancel: List[Tuple[int, str]] = []  # (oid, side) pairs to bulk cancel
+
         for oid, side, place_time in tracked:
             if oid not in open_oids:
                 logger.debug(f"[mm] Order {oid} ({side} {coin}) no longer open")
@@ -69,12 +71,18 @@ class OrderTracker:
 
             age = now - place_time
             if age >= self.refresh_interval_seconds:
-                try:
-                    self.order_manager.cancel_order(oid, coin)
-                    logger.info(f"[mm] Cancelled stale {side} order {oid} for {coin} (age={age:.0f}s)")
-                except Exception as e:
-                    logger.error(f"[mm] Failed to cancel order {oid} for {coin}: {e}")
+                to_cancel.append((oid, side))
             else:
                 still_active.append((oid, side, place_time))
+
+        if to_cancel:
+            cancel_requests = [{"coin": coin, "oid": oid} for oid, _ in to_cancel]
+            cancelled = self.order_manager.bulk_cancel_orders(cancel_requests)
+            for oid, side in to_cancel:
+                logger.info(f"[mm] Cancelled stale {side} order {oid} for {coin}")
+            if cancelled < len(to_cancel):
+                logger.warning(
+                    f"[mm] Bulk cancel: {cancelled}/{len(to_cancel)} succeeded for {coin}"
+                )
 
         self._tracked_orders[coin] = still_active
