@@ -3,7 +3,7 @@
 from unittest.mock import MagicMock, patch
 import pytest
 
-from order_manager import OrderManager, Order, OrderSide, OrderStatus
+from order_manager import OrderManager, Order, OrderSide
 
 
 @pytest.fixture(autouse=True)
