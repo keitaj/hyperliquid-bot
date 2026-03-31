@@ -18,6 +18,7 @@ from validation import MarginValidator, validate_strategy_config  # noqa: E402
 from hip3 import DEXRegistry, MultiDexMarketData, MultiDexOrderManager  # noqa: E402
 from order_manager import OrderSide  # noqa: E402
 from rate_limiter import API_ERRORS  # noqa: E402
+from circuit_breaker import CircuitBreaker  # noqa: E402
 from strategies import (  # noqa: E402
     SimpleMAStrategy,
     RSIStrategy,
@@ -45,6 +46,7 @@ class HyperliquidBot:
         self.main_loop_interval = main_loop_interval
         self.market_order_slippage = market_order_slippage
         self.api_timeout = Config.API_TIMEOUT
+        self.circuit_breaker = CircuitBreaker(threshold=5, recovery_seconds=60.0)
 
         # ------------------------------------------------------------------ #
         # HIP-3 Multi-DEX setup
@@ -403,6 +405,15 @@ class HyperliquidBot:
         risk_checks = self.risk_manager.check_risk_limits()
         action = risk_checks.get('action', 'none')
 
+        if risk_checks.get('reason'):
+            self.circuit_breaker.record_success("risk_metrics")
+        elif not risk_checks['all_checks_passed'] and action == 'block_new_orders' and risk_checks.get('reason') == 'No metrics available':
+            self.circuit_breaker.record_failure("risk_metrics")
+            if self.circuit_breaker.is_tripped("risk_metrics"):
+                logger.error("Risk metrics unavailable for too long — cancelling all orders")
+                self.order_manager.cancel_all_orders()
+                return
+
         if not risk_checks['all_checks_passed']:
             logger.warning(f"Risk limits exceeded: {risk_checks.get('reason')}")
             self.order_manager.cancel_all_orders()
@@ -434,16 +445,29 @@ class HyperliquidBot:
             # pause, cooldown: orders already cancelled above
             return
 
+        self.circuit_breaker.record_success("risk_metrics")
         self.order_manager.update_order_status()
 
         # Per-trade stop loss check (every cycle, if enabled)
         self._check_per_trade_stops()
 
-        self.strategy.run(self.coins)
+        # Strategy execution with circuit breaker
+        if self.circuit_breaker.is_tripped("strategy"):
+            logger.warning("Strategy circuit breaker tripped — skipping signal generation")
+        else:
+            try:
+                self.strategy.run(self.coins)
+                self.circuit_breaker.record_success("strategy")
+            except API_ERRORS as e:
+                logger.error(f"Strategy execution failed: {e}")
+                self.circuit_breaker.record_failure("strategy")
 
         if int(time.time()) % 60 == 0:
             risk_summary = self.risk_manager.get_risk_summary()
+            cb_status = self.circuit_breaker.get_status()
             logger.info(f"Risk summary: {risk_summary}")
+            if cb_status:
+                logger.info(f"Circuit breaker status: {cb_status}")
 
     # ------------------------------------------------------------------ #
     #  Position management helpers
