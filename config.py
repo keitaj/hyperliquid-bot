@@ -62,6 +62,14 @@ class Config:
         else None
     )
 
+    # Force close ALL positions when leverage exceeds this value.
+    # Disabled by default – set explicitly to enable.
+    FORCE_CLOSE_LEVERAGE: Optional[float] = (
+        float(os.getenv("FORCE_CLOSE_LEVERAGE"))
+        if os.getenv("FORCE_CLOSE_LEVERAGE") is not None
+        else None
+    )
+
     # Absolute dollar daily loss that triggers an automatic bot stop.
     # Disabled by default – set explicitly to enable.
     DAILY_LOSS_LIMIT: Optional[float] = (

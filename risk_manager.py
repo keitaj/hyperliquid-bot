@@ -56,6 +56,7 @@ class RiskManager:
         self.max_position_pct: float = config.get('max_position_pct', 0.2)
         self.max_margin_usage: float = config.get('max_margin_usage', 0.8)
         self.force_close_margin: Optional[float] = config.get('force_close_margin', None)
+        self.force_close_leverage: Optional[float] = config.get('force_close_leverage', None)
         self.daily_loss_limit: Optional[float] = config.get('daily_loss_limit', None)
         self.per_trade_stop_loss: Optional[float] = config.get('per_trade_stop_loss', None)
         self.max_open_positions: int = config.get('max_open_positions', 5)
@@ -312,6 +313,16 @@ class RiskManager:
                 reasons.append(
                     f"Margin ratio {metrics.margin_ratio:.2%} >= force_close threshold "
                     f"{self.force_close_margin:.2%}"
+                )
+
+        # --- Force close leverage (opt-in) ------------------------------------
+        if self.force_close_leverage is not None:
+            if metrics.leverage >= self.force_close_leverage:
+                force_close_all = True
+                _escalate("force_close")
+                reasons.append(
+                    f"Leverage {metrics.leverage:.2f}x >= force_close threshold "
+                    f"{self.force_close_leverage:.2f}x"
                 )
 
         # --- Daily absolute loss limit (opt-in) ------------------------------
