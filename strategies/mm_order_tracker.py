@@ -25,7 +25,7 @@ class OrderTracker:
         return len(self._tracked_orders.get(coin, []))
 
     def record_order(self, coin: str, oid: int, side: str) -> None:
-        now = time.time()
+        now = time.monotonic()
         if coin not in self._tracked_orders:
             self._tracked_orders[coin] = []
         self._tracked_orders[coin].append((oid, side, now))
@@ -49,7 +49,7 @@ class OrderTracker:
         if not tracked:
             return
 
-        now = time.time()
+        now = time.monotonic()
         still_active: List[Tuple[int, str, float]] = []
 
         try:

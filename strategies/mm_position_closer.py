@@ -72,7 +72,7 @@ class PositionCloser:
         """
         size = position['size']
         entry_price = position['entry_price']
-        now = time.time()
+        now = time.monotonic()
 
         # Register position if not tracked
         if coin not in self._open_positions:

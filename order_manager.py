@@ -272,7 +272,7 @@ class OrderManager:
 
     def _get_cached_mids(self, dex: str = '') -> Dict[str, str]:
         """Return all_mids for a DEX, using a short-lived cache."""
-        now = time.time()
+        now = time.monotonic()
         cached = self._mids_cache.get(dex)
         if cached and (now - cached[0]) < self._mids_cache_ttl:
             return cached[1]
@@ -443,7 +443,7 @@ class OrderManager:
 
     def _get_cached_user_state(self) -> Dict:
         """Return user_state, using a short-lived cache to avoid redundant API calls."""
-        now = time.time()
+        now = time.monotonic()
         if self._user_state_cache and (now - self._user_state_cache_time) < self._user_state_cache_ttl:
             return self._user_state_cache
 
