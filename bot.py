@@ -17,6 +17,7 @@ from risk_manager import RiskManager  # noqa: E402
 from validation import MarginValidator, validate_strategy_config  # noqa: E402
 from hip3 import DEXRegistry, MultiDexMarketData, MultiDexOrderManager  # noqa: E402
 from order_manager import OrderSide  # noqa: E402
+from rate_limiter import API_ERRORS  # noqa: E402
 from strategies import (  # noqa: E402
     SimpleMAStrategy,
     RSIStrategy,
@@ -293,7 +294,7 @@ class HyperliquidBot:
             user_state = api_wrapper.call(self.info.user_state, self.account_address)
             logger.info("User state retrieved successfully")
             return user_state
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error getting user state for {self.account_address}: {e}")
             return {}
 
@@ -301,7 +302,7 @@ class HyperliquidBot:
         try:
             all_mids = self.info.all_mids()
             return all_mids
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error getting market prices: {e}")
             return {}
 
@@ -309,7 +310,7 @@ class HyperliquidBot:
         try:
             open_orders = self.info.open_orders(self.account_address)
             return open_orders
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error getting open orders: {e}")
             return []
 
@@ -333,7 +334,7 @@ class HyperliquidBot:
             )
             logger.info(f"Order placed: {order_result}")
             return order_result
-        except Exception as e:
+        except API_ERRORS as e:
             side_str = "buy" if is_buy else "sell"
             logger.error(f"Error placing {side_str} order for {coin} (sz={sz}, px={limit_px}): {e}")
             return None
@@ -343,7 +344,7 @@ class HyperliquidBot:
             cancel_result = self.exchange.cancel(coin=coin, oid=oid)
             logger.info(f"Order cancelled: {cancel_result}")
             return cancel_result
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error cancelling order {oid} for {coin}: {e}")
             return None
 
@@ -488,7 +489,7 @@ class HyperliquidBot:
                     failed.append(pos.get('coin', 'UNKNOWN'))
             if failed:
                 logger.error(f"Failed to close positions for: {', '.join(failed)}")
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error closing all positions: {e}", exc_info=True)
 
     def _check_per_trade_stops(self) -> None:
@@ -500,7 +501,7 @@ class HyperliquidBot:
             to_close = self.risk_manager.check_per_trade_stop_loss(positions)
             for pos in to_close:
                 self._close_position(pos, reason="Per-trade stop loss")
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error in per-trade stop loss check: {e}", exc_info=True)
 
     def _signal_handler(self, signum: int, frame: Optional[types.FrameType]) -> None:
@@ -604,7 +605,7 @@ class HyperliquidBot:
             logger.info("")
             return True
 
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error during configuration validation: {e}", exc_info=True)
             logger.warning("Proceeding with caution — validation could not complete")
             return True

@@ -2,6 +2,7 @@ import logging
 from typing import Dict, Optional
 import pandas as pd
 from strategies.base_strategy import BaseStrategy
+from rate_limiter import API_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -145,7 +146,7 @@ class MACDStrategy(BaseStrategy):
 
             return None
 
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error generating MACD signals for {coin}: {e}")
             return None
 
@@ -176,6 +177,6 @@ class MACDStrategy(BaseStrategy):
             logger.info(f"Calculated position size for {coin}: {position_size} (Histogram: {histogram_strength:.4f}%)")
             return position_size
 
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error calculating position size for {coin}: {e}")
             return 0

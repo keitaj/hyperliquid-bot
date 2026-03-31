@@ -106,7 +106,7 @@ class TestGetAccountSnapshot:
         info = _make_info(
             account_value=500.0,
             margin_used=100.0,
-            spot_raises=RuntimeError("429 Too Many Requests"),
+            spot_raises=ConnectionError("429 Too Many Requests"),
         )
         snap = get_account_snapshot(info, '0xabc', last_known_balance=750.0)
 
@@ -118,7 +118,7 @@ class TestGetAccountSnapshot:
         info = _make_info(
             account_value=500.0,
             margin_used=100.0,
-            spot_raises=RuntimeError("429"),
+            spot_raises=ConnectionError("429"),
         )
         snap = get_account_snapshot(info, '0xabc')
 

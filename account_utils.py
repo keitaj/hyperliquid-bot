@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from rate_limiter import api_wrapper
+from rate_limiter import api_wrapper, API_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +113,7 @@ def get_account_snapshot(
         for bal in spot_state.get('balances', []):
             if bal.get('coin', '') in _COLLATERAL_COINS:
                 account_value += float(bal.get('total', 0))
-    except Exception as e:
+    except API_ERRORS as e:
         if last_known_balance is not None:
             account_value = last_known_balance
             logger.debug(

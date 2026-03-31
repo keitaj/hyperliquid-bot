@@ -257,7 +257,7 @@ class TestMultiDexUpdateOrderStatus:
 
         mock_wrapper.call.return_value = []  # open_orders
         om.market_data_ext.get_open_orders_dex.return_value = []
-        om.market_data_ext.get_user_fills_dex.side_effect = Exception("API error")
+        om.market_data_ext.get_user_fills_dex.side_effect = ConnectionError("API error")
 
         om.update_order_status()
 

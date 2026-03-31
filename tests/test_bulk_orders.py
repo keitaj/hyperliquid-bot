@@ -81,7 +81,7 @@ class TestBulkPlaceOrders:
     def test_bulk_api_error(self):
         """API exception marks all orders as rejected."""
         mgr = _make_order_manager()
-        mgr.exchange.bulk_orders.side_effect = Exception("network error")
+        mgr.exchange.bulk_orders.side_effect = ConnectionError("network error")
 
         orders = [_make_order(), _make_order()]
         results = mgr.bulk_place_orders(orders)

@@ -84,7 +84,7 @@ class TestBulkCancelOrders:
     def test_bulk_cancel_api_error(self):
         """API exception returns 0."""
         mgr = _make_order_manager()
-        mgr.exchange.bulk_cancel.side_effect = Exception("network error")
+        mgr.exchange.bulk_cancel.side_effect = ConnectionError("network error")
 
         result = mgr.bulk_cancel_orders([{'coin': 'BTC', 'oid': 100}])
 

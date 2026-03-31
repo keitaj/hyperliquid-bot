@@ -8,6 +8,7 @@ import time
 from typing import Dict, Optional, Tuple
 
 from order_manager import OrderSide, round_price
+from rate_limiter import API_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,7 @@ class PositionCloser:
         if close_oid is not None:
             try:
                 self.order_manager.cancel_order(close_oid, coin)
-            except Exception as e:
+            except API_ERRORS as e:
                 logger.debug(f"[mm] Could not cancel leftover close order for {coin}: {e}")
         self._open_positions.pop(coin, None)
 
@@ -105,7 +106,7 @@ class PositionCloser:
         if close_oid is not None:
             try:
                 self.order_manager.cancel_order(close_oid, coin)
-            except Exception as e:
+            except API_ERRORS as e:
                 logger.debug(f"[mm] Could not cancel close order for {coin}: {e}")
 
         # Check if taker fallback should be used
@@ -142,7 +143,7 @@ class PositionCloser:
                             f"maker close at {close_price:.6f} (oid={order.id})"
                         )
                         return
-                except Exception as e:
+                except API_ERRORS as e:
                     logger.debug(f"[mm] Maker close failed for {coin}: {e}")
 
         logger.info(f"[mm] Position {coin} held {age:.0f}s — maker close pending, will retry next cycle")
@@ -169,7 +170,7 @@ class PositionCloser:
                     f"[mm] Placed take-profit {close_side.value} for {coin} "
                     f"size={abs_size} price={close_price:.6f} (oid={order.id})"
                 )
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"[mm] Failed to place close order for {coin}: {e}")
 
     def _is_order_alive(self, coin: str, oid: int) -> bool:
@@ -177,6 +178,6 @@ class PositionCloser:
             open_orders = self.order_manager.get_open_orders(coin)
             open_oids = {int(o['oid']) for o in open_orders}
             return oid in open_oids
-        except Exception as e:
+        except API_ERRORS as e:
             logger.debug(f"[mm] Could not check close order status for {coin}: {e}")
             return False

@@ -14,6 +14,8 @@ import logging
 import requests
 from typing import Dict, List, Optional
 
+from rate_limiter import API_ERRORS
+
 from hip3.dex_registry import DEXRegistry
 from market_data import MarketDataManager
 from rate_limiter import api_wrapper
@@ -54,7 +56,7 @@ class MultiDexMarketData(MarketDataManager):
         try:
             result = self.info.all_mids(dex=dex or "")
             return {k: float(v) for k, v in result.items()}
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error fetching mids (dex={dex}): {e}")
             return {}
 
@@ -66,7 +68,7 @@ class MultiDexMarketData(MarketDataManager):
         """Clearinghouse state for an account, optionally scoped to a HIP-3 DEX."""
         try:
             return self.info.user_state(address, dex=dex or "")
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error fetching user state (dex={dex}): {e}")
             return {}
 
@@ -74,7 +76,7 @@ class MultiDexMarketData(MarketDataManager):
         """Open orders for an account, optionally scoped to a HIP-3 DEX."""
         try:
             return self.info.open_orders(address, dex=dex or "")
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error fetching open orders (dex={dex}): {e}")
             return []
 
@@ -93,6 +95,6 @@ class MultiDexMarketData(MarketDataManager):
         """User fills for a specific HIP-3 DEX, routed through the rate limiter."""
         try:
             return api_wrapper.call(self._fetch_user_fills_dex, address, dex)
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error fetching fills for DEX '{dex}': {e}")
             return []

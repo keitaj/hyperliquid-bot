@@ -13,6 +13,7 @@ import logging
 from typing import Dict, List, Optional
 
 from hip3.dex_registry import DEXRegistry
+from rate_limiter import API_ERRORS
 from hip3.multi_dex_market_data import MultiDexMarketData
 from order_manager import OrderManager, OrderStatus
 from rate_limiter import api_wrapper
@@ -84,7 +85,7 @@ class MultiDexOrderManager(OrderManager):
                     pos = dict(p["position"])
                     pos["coin"] = make_hip3_coin(dex, pos.get("coin", ""))
                     all_positions.append(pos)
-            except Exception as e:
+            except API_ERRORS as e:
                 logger.error(f"Error fetching positions for DEX '{dex}': {e}")
 
         return all_positions
@@ -115,7 +116,7 @@ class MultiDexOrderManager(OrderManager):
                 if filter_coin_name:
                     hl_orders = [o for o in hl_orders if o["coin"] == filter_coin_name]
                 all_orders.extend(hl_orders)
-            except Exception as e:
+            except API_ERRORS as e:
                 logger.error(f"Error fetching HL open orders: {e}")
 
         # HIP-3 DEX orders
@@ -129,7 +130,7 @@ class MultiDexOrderManager(OrderManager):
                     if filter_coin_name and o["coin"] != coin:
                         continue
                     all_orders.append(o)
-            except Exception as e:
+            except API_ERRORS as e:
                 logger.error(f"Error fetching open orders for DEX '{dex}': {e}")
 
         return all_orders
@@ -162,7 +163,7 @@ class MultiDexOrderManager(OrderManager):
                     full_coin = make_hip3_coin(dex, order_coin_name)
                     to_cancel.append({"coin": full_coin, "oid": int(order["oid"])})
                 cancelled += self.bulk_cancel_orders(to_cancel)
-            except Exception as e:
+            except API_ERRORS as e:
                 logger.error(f"Error cancelling orders for DEX '{dex}': {e}")
 
         logger.info(f"Cancelled {cancelled} orders across all DEXes")
@@ -218,12 +219,12 @@ class MultiDexOrderManager(OrderManager):
                             order.status = OrderStatus.CANCELLED
                         del self.active_orders[order_id]
 
-                except Exception as e:
+                except API_ERRORS as e:
                     logger.error(f"Error checking fills for DEX '{dex}': {e}")
                     # Still clean up orders to avoid retrying indefinitely
                     for order_id, order in orders:
                         order.status = OrderStatus.CANCELLED
                         del self.active_orders[order_id]
 
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error updating order status: {e}")

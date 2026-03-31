@@ -105,7 +105,7 @@ class TestCloseAllPositions:
 
     def test_exception_does_not_raise(self):
         bot = _make_bot()
-        bot.order_manager.get_all_positions.side_effect = Exception("API error")
+        bot.order_manager.get_all_positions.side_effect = ConnectionError("API error")
         # Should not raise
         bot._close_all_positions()
 
@@ -146,6 +146,6 @@ class TestCheckPerTradeStops:
     def test_exception_does_not_raise(self):
         bot = _make_bot()
         bot.risk_manager.per_trade_stop_loss = 0.05
-        bot.order_manager.get_all_positions.side_effect = Exception("API error")
+        bot.order_manager.get_all_positions.side_effect = ConnectionError("API error")
         # Should not raise
         bot._check_per_trade_stops()

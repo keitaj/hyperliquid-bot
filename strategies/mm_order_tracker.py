@@ -4,6 +4,8 @@ import logging
 import time
 from typing import Dict, List, Optional, Set, Tuple
 
+from rate_limiter import API_ERRORS
+
 logger = logging.getLogger(__name__)
 
 
@@ -53,7 +55,7 @@ class OrderTracker:
         try:
             open_orders = self.order_manager.get_open_orders(coin)
             open_oids = {int(o['oid']) for o in open_orders}
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"[mm] Error fetching open orders for {coin}: {e}")
             return
 

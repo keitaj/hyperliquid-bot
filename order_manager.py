@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from hyperliquid.exchange import Exchange
 from hyperliquid.info import Info
-from rate_limiter import api_wrapper
+from rate_limiter import api_wrapper, API_ERRORS
 from coin_utils import is_hip3, parse_coin
 
 logger = logging.getLogger(__name__)
@@ -120,7 +120,7 @@ class OrderManager:
                 limit_price = mid_price * (1 - slippage)
 
             limit_price = round_price(limit_price)
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error calculating market price for {coin} ({side.value}, slippage={slippage}): {e}")
             return None
 
@@ -191,7 +191,7 @@ class OrderManager:
             order.status = OrderStatus.REJECTED
             return None
 
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(
                 f"Error placing order for {order.coin} "
                 f"({order.side.value} sz={order.size} px={order.price}): {e}"
@@ -261,7 +261,7 @@ class OrderManager:
                 for o in orders:
                     o.status = OrderStatus.REJECTED
 
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(
                 "Error in bulk orders (%d orders): %s", len(orders), e
             )
@@ -303,11 +303,11 @@ class OrderManager:
                         return float(dex_mids[coin])
                     if base_coin in dex_mids:
                         return float(dex_mids[base_coin])
-                except Exception as e:
+                except API_ERRORS as e:
                     logger.debug(f"HIP-3 DEX mids lookup failed for {coin} (dex={dex}): {e}")
 
             return 0.0
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error fetching mid price for {coin}: {e}")
             return 0.0
 
@@ -325,7 +325,7 @@ class OrderManager:
             logger.error(f"Failed to cancel order {order_id}: {result}")
             return False
 
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error cancelling order {order_id} for {coin}: {e}")
             return False
 
@@ -370,7 +370,7 @@ class OrderManager:
 
             return cancelled
 
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error in bulk cancel ({len(cancel_requests)} orders): {e}")
             return 0
 
@@ -391,7 +391,7 @@ class OrderManager:
             logger.info(f"Cancelled {cancelled_count} orders")
             return cancelled_count
 
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error cancelling all orders: {e}")
             return 0
 
@@ -403,7 +403,7 @@ class OrderManager:
                 return [o for o in open_orders if o['coin'] == coin]
             return open_orders
 
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error fetching open orders: {e}")
             return []
 
@@ -438,7 +438,7 @@ class OrderManager:
                     order.status = OrderStatus.CANCELLED
                 del self.active_orders[order_id]
 
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error updating order status ({len(self.active_orders)} active orders): {e}")
 
     def _get_cached_user_state(self) -> Dict:
@@ -462,7 +462,7 @@ class OrderManager:
                         return position['position']
             return None
 
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error fetching position for {coin}: {e}")
             return None
 
@@ -474,6 +474,6 @@ class OrderManager:
                 return [p['position'] for p in user_state['assetPositions']]
             return []
 
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error fetching positions: {e}")
             return []
