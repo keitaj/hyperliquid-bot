@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 import logging
+import math
 import pandas as pd
 from market_data import MarketDataManager, MarketData
 from order_manager import OrderManager, OrderSide, round_price
@@ -29,6 +30,38 @@ class BaseStrategy(ABC):
     @abstractmethod
     def calculate_position_size(self, coin: str, signal: Dict) -> float:
         pass
+
+    # ------------------------------------------------------------------ #
+    # Signal validation
+    # ------------------------------------------------------------------ #
+
+    def _validate_signal(self, signal: Optional[Dict]) -> Optional[Dict]:
+        """Validate a signal dict. Return the signal if valid, or None."""
+        if not signal:
+            return None
+
+        # Validate side
+        side = signal.get('side')
+        if side not in ('buy', 'sell'):
+            logger.warning(f"Invalid signal side: {side!r} (must be 'buy' or 'sell')")
+            return None
+
+        # Validate confidence
+        confidence = signal.get('confidence', 0.5)
+        if not isinstance(confidence, (int, float)) or not math.isfinite(confidence):
+            logger.warning(f"Invalid signal confidence: {confidence!r} (must be a finite number)")
+            return None
+        if not (0.0 <= confidence <= 1.0):
+            logger.warning(f"Invalid signal confidence: {confidence!r} (must be in [0.0, 1.0])")
+            return None
+
+        # Validate order_type
+        order_type = signal.get('order_type', 'limit')
+        if order_type not in ('market', 'limit'):
+            logger.warning(f"Invalid signal order_type: {order_type!r} (must be 'market' or 'limit')")
+            return None
+
+        return signal
 
     # ------------------------------------------------------------------ #
     # Shared signal helpers
@@ -82,6 +115,10 @@ class BaseStrategy(ABC):
         return base_size_usd / mid_price
 
     def execute_signal(self, coin: str, signal: Dict) -> None:
+        if not signal:
+            return
+
+        signal = self._validate_signal(signal)
         if not signal:
             return
 
@@ -194,5 +231,6 @@ class BaseStrategy(ABC):
                 self.close_position(coin)
             else:
                 signal = self.generate_signals(coin)
+                signal = self._validate_signal(signal)
                 if signal:
                     self.execute_signal(coin, signal)
