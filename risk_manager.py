@@ -1,6 +1,7 @@
 import logging
 import os
-from typing import Dict, List, Optional
+from collections import deque
+from typing import Deque, Dict, List, Optional
 from dataclasses import dataclass
 from datetime import datetime
 from rate_limiter import api_wrapper
@@ -62,7 +63,7 @@ class RiskManager:
         self.metrics_cache_ttl: float = config.get('metrics_cache_ttl', 2.0)
 
         # Tracking state
-        self.risk_metrics_history: List[RiskMetrics] = []
+        self.risk_metrics_history: Deque[RiskMetrics] = deque(maxlen=500)
         self.starting_balance: Optional[float] = None
         self.daily_starting_balance: Optional[float] = None
         self.last_reset_date = datetime.now().date()
@@ -219,8 +220,6 @@ class RiskManager:
                 self.last_reset_date = datetime.now().date()
 
             self.risk_metrics_history.append(metrics)
-            if len(self.risk_metrics_history) > 1000:
-                self.risk_metrics_history = self.risk_metrics_history[-500:]
 
             return metrics
 
