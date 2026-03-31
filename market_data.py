@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import pandas as pd
 from hyperliquid.info import Info
-from rate_limiter import api_wrapper
+from rate_limiter import api_wrapper, API_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ class MarketDataManager:
     def get_all_mids(self) -> Dict[str, float]:
         try:
             return api_wrapper.call(self.info.all_mids)
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error fetching mid prices: {e}")
             return {}
 
@@ -49,7 +49,7 @@ class MarketDataManager:
             self._meta_cache = meta
             self._meta_cache_time = datetime.now()
             return meta
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error fetching meta data: {e}")
             return {}
 
@@ -63,14 +63,14 @@ class MarketDataManager:
                         return asset['szDecimals']
             logger.warning(f"sz_decimals not found for {coin}, using default=3")
             return 3
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error getting sz_decimals for {coin} (using default=3): {e}")
             return 3
 
     def get_l2_snapshot(self, coin: str) -> Dict:
         try:
             return api_wrapper.call(self.info.l2_snapshot, coin)
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error fetching L2 snapshot for {coin}: {e}")
             return {}
 
@@ -114,7 +114,7 @@ class MarketDataManager:
             self._cache_time[coin] = now
             return market_data
 
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error getting market data for {coin}: {e}")
             return None
 
@@ -165,7 +165,7 @@ class MarketDataManager:
 
             return df
 
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error fetching candles for {coin} (interval={interval}, lookback={lookback}): {e}")
             return pd.DataFrame()
 
@@ -175,7 +175,7 @@ class MarketDataManager:
             if coin in funding_data:
                 return float(funding_data[coin])
             return None
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error fetching funding rate for {coin}: {e}")
             return None
 
@@ -185,6 +185,6 @@ class MarketDataManager:
             if coin in oi_data:
                 return float(oi_data[coin])
             return None
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error fetching open interest for {coin}: {e}")
             return None

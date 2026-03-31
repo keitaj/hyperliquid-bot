@@ -8,6 +8,7 @@ from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass, field
 from account_utils import get_account_snapshot
 from config import Config
+from rate_limiter import API_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ class MarginValidator:
         try:
             snapshot = get_account_snapshot(self.info, self.account_address)
             return snapshot.account_value, snapshot.account_value - snapshot.margin_used
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error getting account info: {e}")
             return 0.0, 0.0
 

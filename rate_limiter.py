@@ -1,11 +1,25 @@
 import os
 import time
 import logging
-from typing import Any, Callable
+from typing import Any, Callable, Tuple, Type
 from threading import Lock
 from collections import deque
 
+from hyperliquid.utils.error import Error as HyperliquidAPIError
+
 logger = logging.getLogger(__name__)
+
+# Expected exceptions from API calls.  Catch these for graceful degradation;
+# programming errors (AttributeError, NameError, etc.) will propagate.
+API_ERRORS: Tuple[Type[BaseException], ...] = (
+    HyperliquidAPIError,  # SDK: ClientError (4xx), ServerError (5xx)
+    ValueError,           # SDK signing / parameter validation; data parsing
+    KeyError,             # Unexpected API response structure
+    TypeError,            # Unexpected data types from API
+    ConnectionError,      # Network connectivity
+    TimeoutError,         # Network timeout
+    OSError,              # Low-level I/O (includes requests.RequestException)
+)
 
 
 class RateLimiter:

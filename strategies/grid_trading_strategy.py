@@ -3,6 +3,7 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 import numpy as np
 from strategies.base_strategy import BaseStrategy
+from rate_limiter import API_ERRORS
 from order_manager import round_price
 
 logger = logging.getLogger(__name__)
@@ -135,7 +136,7 @@ class GridTradingStrategy(BaseStrategy):
 
             return None
 
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error generating grid signals for {coin}: {e}")
             return None
 
@@ -166,6 +167,6 @@ class GridTradingStrategy(BaseStrategy):
             logger.info(f"Grid position size for {coin}: {position_size}")
             return position_size
 
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error calculating grid position size for {coin}: {e}")
             return 0

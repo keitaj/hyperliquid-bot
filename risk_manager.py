@@ -4,7 +4,7 @@ from collections import deque
 from typing import Deque, Dict, List, Optional
 from dataclasses import dataclass
 from datetime import datetime
-from rate_limiter import api_wrapper
+from rate_limiter import api_wrapper, API_ERRORS
 from account_utils import get_account_snapshot
 
 logger = logging.getLogger(__name__)
@@ -190,7 +190,7 @@ class RiskManager:
                             float(pos_data.get('szi', 0)) * float(pos_data.get('entryPx', 0)),
                         ))
                         total_position_value += abs(pos_val)
-                except Exception as e:
+                except API_ERRORS as e:
                     logger.debug("Could not fetch HIP-3 positions for DEX '%s': %s", dex, e)
 
             # Recompute derived values with HIP-3 data included
@@ -223,7 +223,7 @@ class RiskManager:
 
             return metrics
 
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error getting risk metrics: {e}")
             return None
 

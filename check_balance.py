@@ -5,6 +5,7 @@ Simple script to check Hyperliquid account balance and positions
 
 from config import Config
 from coin_utils import make_hip3_coin
+from rate_limiter import API_ERRORS
 import requests
 import logging
 import sys
@@ -78,7 +79,7 @@ def main():
 
                 if 'marginSummary' in dex_state:
                     perps_value += float(dex_state['marginSummary'].get('accountValue', 0))
-            except Exception as e:
+            except API_ERRORS as e:
                 logger.debug(f"Could not fetch DEX {dex} state: {e}")
 
         position_value = sum(p['position_value'] for p in all_positions)

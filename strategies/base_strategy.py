@@ -5,6 +5,7 @@ import pandas as pd
 from market_data import MarketDataManager, MarketData
 from order_manager import OrderManager, OrderSide, round_price
 from account_utils import get_account_snapshot
+from rate_limiter import API_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,7 @@ class BaseStrategy(ABC):
                 max_size_usd = snapshot.account_value * cap_pct
                 if base_size_usd > max_size_usd:
                     return max_size_usd / mid_price
-        except Exception as e:
+        except API_ERRORS as e:
             logger.warning(f"Could not apply account cap: {e}")
         return base_size_usd / mid_price
 
@@ -124,7 +125,7 @@ class BaseStrategy(ABC):
                 logger.info(
                     f"Executed {side} order for {coin}: size={position_size} (rounded to {sz_decimals} decimals)")
 
-        except Exception as e:
+        except API_ERRORS as e:
             logger.error(f"Error executing signal for {coin}: {e}")
 
     def _calculate_limit_price(self, market_data: MarketData, side: str) -> float:

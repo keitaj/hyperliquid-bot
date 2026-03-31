@@ -8,6 +8,8 @@ Standard HL perps use index 0..N directly (not HIP-3).
 import logging
 import requests
 from typing import Any, Dict, List, Optional, Tuple
+
+from rate_limiter import API_ERRORS
 from coin_utils import is_hip3 as _is_hip3, parse_coin as _parse_coin
 
 logger = logging.getLogger(__name__)
@@ -47,7 +49,7 @@ class DEXRegistry:
         """
         try:
             perp_dexes = self._post({"type": "perpDexs"})
-        except Exception as e:
+        except API_ERRORS as e:
             raise RuntimeError(f"Failed to fetch perpDexs: {e}") from e
 
         if not isinstance(perp_dexes, list):
@@ -91,7 +93,7 @@ class DEXRegistry:
                     f"with {len(assets)} assets: {list(assets.keys())}"
                 )
 
-            except Exception as e:
+            except API_ERRORS as e:
                 logger.error(f"Failed to load meta for DEX '{dex_name}': {e}")
 
         if target_dexes:

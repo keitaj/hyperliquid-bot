@@ -16,6 +16,7 @@ from strategies.base_strategy import BaseStrategy
 from strategies.mm_order_tracker import OrderTracker
 from strategies.mm_position_closer import PositionCloser
 from order_manager import OrderSide, round_price
+from rate_limiter import API_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +102,7 @@ class MarketMakingStrategy(BaseStrategy):
                 if self._tracker.get_order_count(coin) < self.max_open_orders:
                     self._place_orders(coin)
 
-            except Exception as e:
+            except API_ERRORS as e:
                 logger.error(f"[mm] Error processing {coin}: {e}")
 
     # ------------------------------------------------------------------ #
