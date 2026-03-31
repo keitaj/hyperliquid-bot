@@ -7,10 +7,10 @@ Standard HL perps use index 0..N directly (not HIP-3).
 """
 import logging
 import requests
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from rate_limiter import API_ERRORS
-from coin_utils import is_hip3 as _is_hip3, parse_coin as _parse_coin
+from coin_utils import parse_coin as _parse_coin
 
 logger = logging.getLogger(__name__)
 
@@ -104,14 +104,6 @@ class DEXRegistry:
     # ------------------------------------------------------------------ #
     # Lookup helpers
     # ------------------------------------------------------------------ #
-
-    def is_hip3(self, coin: str) -> bool:
-        """Returns True if coin uses "dex:coin" HIP-3 format."""
-        return _is_hip3(coin)
-
-    def parse_coin(self, coin: str) -> Tuple[Optional[str], str]:
-        """Split "dex:coin" → (dex, coin_name).  "BTC" → (None, "BTC")."""
-        return _parse_coin(coin)
 
     def get_asset_id(self, dex: str, coin: str) -> Optional[int]:
         """Integer asset ID for a HIP-3 asset (used in order placement)."""

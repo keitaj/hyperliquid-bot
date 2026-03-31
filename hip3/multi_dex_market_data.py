@@ -15,6 +15,7 @@ import requests
 from typing import Dict, List, Optional
 
 from rate_limiter import API_ERRORS
+from coin_utils import is_hip3, parse_coin
 
 from hip3.dex_registry import DEXRegistry
 from market_data import MarketDataManager
@@ -42,12 +43,12 @@ class MultiDexMarketData(MarketDataManager):
 
     def get_sz_decimals(self, coin: str) -> int:
         """Returns size decimal precision. Handles "dex:coin" format via SDK."""
-        if self.registry.is_hip3(coin):
+        if is_hip3(coin):
             asset_id = self.info.coin_to_asset.get(coin)
             if asset_id is not None:
                 return self.info.asset_to_sz_decimals.get(asset_id, 3)
             # Fallback to registry
-            dex, coin_name = self.registry.parse_coin(coin)
+            dex, coin_name = parse_coin(coin)
             return self.registry.get_sz_decimals(dex, coin_name)
         return super().get_sz_decimals(coin)
 

@@ -17,7 +17,7 @@ from rate_limiter import API_ERRORS
 from hip3.multi_dex_market_data import MultiDexMarketData
 from order_manager import OrderManager, OrderStatus
 from rate_limiter import api_wrapper
-from coin_utils import make_hip3_coin
+from coin_utils import is_hip3, make_hip3_coin, parse_coin
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +61,8 @@ class MultiDexOrderManager(OrderManager):
 
     def get_position(self, coin: str) -> Optional[Dict]:
         """Returns position for a coin. Handles "dex:coin" format."""
-        if self.registry.is_hip3(coin):
-            dex, coin_name = self.registry.parse_coin(coin)
+        if is_hip3(coin):
+            dex, coin_name = parse_coin(coin)
             user_state = self.market_data_ext.get_user_state(self.account_address, dex=dex)
             for p in user_state.get("assetPositions", []):
                 pos_coin = p["position"]["coin"]
@@ -102,8 +102,8 @@ class MultiDexOrderManager(OrderManager):
         filter_dex: Optional[str] = None
         filter_coin_name: Optional[str] = None
         if coin:
-            if self.registry.is_hip3(coin):
-                filter_dex, filter_coin_name = self.registry.parse_coin(coin)
+            if is_hip3(coin):
+                filter_dex, filter_coin_name = parse_coin(coin)
             else:
                 filter_coin_name = coin
 
@@ -143,13 +143,13 @@ class MultiDexOrderManager(OrderManager):
         """Cancel all open orders across standard HL + all configured HIP-3 DEXes."""
         cancelled = 0
 
-        if coin is None or not self.registry.is_hip3(coin):
+        if coin is None or not is_hip3(coin):
             cancelled += super().cancel_all_orders(coin)
 
         filter_dex: Optional[str] = None
         filter_coin_name: Optional[str] = None
-        if coin and self.registry.is_hip3(coin):
-            filter_dex, filter_coin_name = self.registry.parse_coin(coin)
+        if coin and is_hip3(coin):
+            filter_dex, filter_coin_name = parse_coin(coin)
 
         target_dexes = [filter_dex] if filter_dex else self.hip3_dexes
         for dex in target_dexes:
@@ -191,8 +191,8 @@ class MultiDexOrderManager(OrderManager):
             by_dex: Dict[Optional[str], list] = {}  # None = standard HL
             for order_id, order in disappeared:
                 dex: Optional[str] = None
-                if self.registry.is_hip3(order.coin):
-                    dex, _ = self.registry.parse_coin(order.coin)
+                if is_hip3(order.coin):
+                    dex, _ = parse_coin(order.coin)
                 by_dex.setdefault(dex, []).append((order_id, order))
 
             # Fetch fills once per DEX and build oid->total_size lookup

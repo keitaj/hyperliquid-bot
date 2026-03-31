@@ -216,10 +216,6 @@ class TestMultiDexUpdateOrderStatus:
 
         om = self._make_multi_dex_om({101: hl_order, 201: hip3_order_1, 202: hip3_order_2})
 
-        # Registry: BTC is not HIP-3, xyz:GOLD and xyz:SILVER are
-        om.registry.is_hip3.side_effect = lambda c: c.startswith("xyz:")
-        om.registry.parse_coin.side_effect = lambda c: c.split(":", 1)
-
         # open_orders returns empty (all disappeared)
         mock_wrapper.call.side_effect = [
             [],  # get_open_orders -> open_orders for HL
@@ -252,9 +248,6 @@ class TestMultiDexUpdateOrderStatus:
         hip3_order = _make_order(201, coin="xyz:GOLD")
         om = self._make_multi_dex_om({201: hip3_order})
 
-        om.registry.is_hip3.return_value = True
-        om.registry.parse_coin.return_value = ("xyz", "GOLD")
-
         mock_wrapper.call.return_value = []  # open_orders
         om.market_data_ext.get_open_orders_dex.return_value = []
         om.market_data_ext.get_user_fills_dex.side_effect = ConnectionError("API error")
@@ -269,8 +262,6 @@ class TestMultiDexUpdateOrderStatus:
         """When all orders are still open, no fills should be fetched."""
         order = _make_order(101, coin="BTC")
         om = self._make_multi_dex_om({101: order})
-
-        om.registry.is_hip3.return_value = False
 
         mock_wrapper.call.return_value = [{"oid": 101, "coin": "BTC"}]
         om.market_data_ext.get_open_orders_dex.return_value = []
