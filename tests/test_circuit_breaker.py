@@ -1,7 +1,6 @@
 """Unit tests for CircuitBreaker."""
 
 import time
-from unittest.mock import patch
 from circuit_breaker import CircuitBreaker
 
 

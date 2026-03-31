@@ -407,7 +407,8 @@ class HyperliquidBot:
 
         if risk_checks.get('reason'):
             self.circuit_breaker.record_success("risk_metrics")
-        elif not risk_checks['all_checks_passed'] and action == 'block_new_orders' and risk_checks.get('reason') == 'No metrics available':
+        elif (not risk_checks['all_checks_passed'] and action == 'block_new_orders'
+              and risk_checks.get('reason') == 'No metrics available'):
             self.circuit_breaker.record_failure("risk_metrics")
             if self.circuit_breaker.is_tripped("risk_metrics"):
                 logger.error("Risk metrics unavailable for too long — cancelling all orders")

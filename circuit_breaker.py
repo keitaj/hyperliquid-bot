@@ -10,7 +10,7 @@ The breaker auto-recovers after *recovery_seconds* of no new failures.
 
 import logging
 import time
-from typing import Dict, Optional, Tuple
+from typing import Dict, Tuple
 
 logger = logging.getLogger(__name__)
 
