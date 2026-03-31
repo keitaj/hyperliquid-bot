@@ -67,6 +67,10 @@ class MarketDataManager:
             logger.error(f"Error getting sz_decimals for {coin} (using default=3): {e}")
             return 3
 
+    def round_size(self, coin: str, size: float) -> float:
+        """Round *size* to the sz_decimals precision for *coin*."""
+        return round(size, self.get_sz_decimals(coin))
+
     def get_l2_snapshot(self, coin: str) -> Dict:
         try:
             return api_wrapper.call(self.info.l2_snapshot, coin)

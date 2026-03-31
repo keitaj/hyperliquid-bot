@@ -18,6 +18,11 @@ def _make_bot():
     bot.market_data = MagicMock()
     bot.risk_manager = MagicMock()
 
+    # round_size delegates to get_sz_decimals; wire the mock accordingly
+    bot.market_data.round_size.side_effect = (
+        lambda coin, size: round(size, bot.market_data.get_sz_decimals(coin))
+    )
+
     # Bind the real methods to the mock object
     bot._close_position = HyperliquidBot._close_position.__get__(bot)
     bot._close_all_positions = HyperliquidBot._close_all_positions.__get__(bot)

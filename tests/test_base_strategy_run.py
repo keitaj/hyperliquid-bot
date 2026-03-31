@@ -21,6 +21,9 @@ def _make_strategy(config=None, test_signal=None, test_position_size=100.0):
         'stop_loss_percent': 2,
     }
     market_data = MagicMock()
+    market_data.round_size.side_effect = (
+        lambda coin, size: round(size, market_data.get_sz_decimals(coin))
+    )
     order_manager = MagicMock()
     strategy = ConcreteStrategy(market_data, order_manager, config)
     strategy._test_signal = test_signal

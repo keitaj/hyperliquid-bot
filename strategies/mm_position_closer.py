@@ -129,7 +129,7 @@ class PositionCloser:
         if market_data and market_data.mid_price > 0:
             close_side = OrderSide.SELL if size > 0 else OrderSide.BUY
             close_price = round_price(market_data.mid_price)
-            abs_size = round(abs(size), self.market_data.get_sz_decimals(coin))
+            abs_size = self.market_data.round_size(coin, abs(size))
             if abs_size > 0:
                 try:
                     order = self.order_manager.create_limit_order(
@@ -155,7 +155,7 @@ class PositionCloser:
         else:
             close_price = round_price(entry_price * (1 - self.spread_bps / 10_000))
 
-        abs_size = round(abs(size), self.market_data.get_sz_decimals(coin))
+        abs_size = self.market_data.round_size(coin, abs(size))
         if abs_size <= 0:
             return
 

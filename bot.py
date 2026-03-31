@@ -459,8 +459,7 @@ class HyperliquidBot:
         close_side = OrderSide.SELL if size > 0 else OrderSide.BUY
         abs_size = abs(size)
 
-        sz_decimals = self.market_data.get_sz_decimals(coin)
-        abs_size = round(abs_size, sz_decimals)
+        abs_size = self.market_data.round_size(coin, abs_size)
 
         order = self.order_manager.create_market_order(
             coin=coin,

@@ -160,8 +160,7 @@ class MarketMakingStrategy(BaseStrategy):
             logger.debug(f"[mm] Position size is 0 for {coin}, skipping")
             return
 
-        sz_decimals = self.market_data.get_sz_decimals(coin)
-        size = round(size, sz_decimals)
+        size = self.market_data.round_size(coin, size)
         if size <= 0:
             return
 
