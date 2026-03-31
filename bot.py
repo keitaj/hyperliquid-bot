@@ -279,6 +279,7 @@ class HyperliquidBot:
             'max_position_pct': Config.MAX_POSITION_PCT,
             'max_margin_usage': Config.MAX_MARGIN_USAGE,
             'force_close_margin': Config.FORCE_CLOSE_MARGIN,
+            'force_close_leverage': Config.FORCE_CLOSE_LEVERAGE,
             'daily_loss_limit': Config.DAILY_LOSS_LIMIT,
             'per_trade_stop_loss': Config.PER_TRADE_STOP_LOSS,
             'max_open_positions': Config.MAX_OPEN_POSITIONS,
@@ -860,6 +861,8 @@ if __name__ == "__main__":
                         help='Stop new orders above this margin usage (default: 0.8)')
     parser.add_argument('--force-close-margin', type=float,
                         help='Force close ALL positions above this margin ratio (disabled by default)')
+    parser.add_argument('--force-close-leverage', type=float,
+                        help='Force close ALL positions above this leverage (disabled by default)')
     parser.add_argument('--daily-loss-limit', type=float,
                         help='Absolute $ daily loss to auto-stop the bot (disabled by default)')
     parser.add_argument('--per-trade-stop-loss', type=float,
@@ -1033,6 +1036,8 @@ if __name__ == "__main__":
         Config.MAX_MARGIN_USAGE = args.max_margin_usage
     if args.force_close_margin is not None:
         Config.FORCE_CLOSE_MARGIN = args.force_close_margin
+    if args.force_close_leverage is not None:
+        Config.FORCE_CLOSE_LEVERAGE = args.force_close_leverage
     if args.daily_loss_limit is not None:
         Config.DAILY_LOSS_LIMIT = args.daily_loss_limit
     if args.per_trade_stop_loss is not None:
