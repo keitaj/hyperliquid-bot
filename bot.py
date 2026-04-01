@@ -18,6 +18,7 @@ from validation import MarginValidator, validate_strategy_config  # noqa: E402
 from hip3 import DEXRegistry, MultiDexMarketData, MultiDexOrderManager  # noqa: E402
 from position_closer import close_position_market  # noqa: E402
 from rate_limiter import API_ERRORS  # noqa: E402
+from exceptions import TransientError, DataError, ConfigurationError  # noqa: E402
 from circuit_breaker import CircuitBreaker  # noqa: E402
 from strategies import (  # noqa: E402
     SimpleMAStrategy,
@@ -388,10 +389,22 @@ class HyperliquidBot:
                 consecutive_errors = 0  # Reset on successful iteration
                 time.sleep(self.main_loop_interval)
 
+            except TransientError as e:
+                consecutive_errors += 1
+                wait = min(consecutive_errors * 5, 60)
+                logger.error(f"Transient error (#{consecutive_errors}), retry in {wait}s: {e}")
+                time.sleep(wait)
+
+            except (DataError, ConfigurationError) as e:
+                consecutive_errors += 1
+                logger.error(f"Non-transient error (#{consecutive_errors}): {e}")
+                time.sleep(10)
+
             except ConnectionError as e:
                 consecutive_errors += 1
+                wait = min(consecutive_errors * 5, 60)
                 logger.error(f"Connection error (#{consecutive_errors}): {e}")
-                time.sleep(min(consecutive_errors * 5, 60))  # Exponential backoff
+                time.sleep(wait)
 
             except KeyboardInterrupt:
                 logger.info("Stopping bot...")
@@ -400,7 +413,7 @@ class HyperliquidBot:
             except Exception as e:
                 consecutive_errors += 1
                 logger.error(f"Error in main loop (#{consecutive_errors}): {e}")
-                time.sleep(10)  # Longer delay on error
+                time.sleep(10)
 
     def _trading_loop(self) -> None:
         risk_checks = self.risk_manager.check_risk_limits()
@@ -460,6 +473,9 @@ class HyperliquidBot:
             try:
                 self.strategy.run(self.coins)
                 self.circuit_breaker.record_success("strategy")
+            except TransientError as e:
+                logger.warning(f"Strategy execution hit transient error: {e}")
+                self.circuit_breaker.record_failure("strategy")
             except API_ERRORS as e:
                 logger.error(f"Strategy execution failed: {e}")
                 self.circuit_breaker.record_failure("strategy")

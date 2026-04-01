@@ -7,6 +7,7 @@ from enum import Enum
 from hyperliquid.exchange import Exchange
 from hyperliquid.info import Info
 from rate_limiter import api_wrapper, API_ERRORS
+from exceptions import ConfigurationError
 from coin_utils import is_hip3, parse_coin
 
 logger = logging.getLogger(__name__)
@@ -191,6 +192,13 @@ class OrderManager:
             order.status = OrderStatus.REJECTED
             return None
 
+        except ConfigurationError as e:
+            logger.error(
+                f"Invalid order parameters for {order.coin} "
+                f"({order.side.value} sz={order.size} px={order.price}): {e}"
+            )
+            order.status = OrderStatus.REJECTED
+            return None
         except API_ERRORS as e:
             logger.error(
                 f"Error placing order for {order.coin} "

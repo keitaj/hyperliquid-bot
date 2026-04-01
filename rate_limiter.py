@@ -1,17 +1,30 @@
 import os
 import time
 import logging
-from typing import Any, Callable, Tuple, Type
+from typing import Any, Callable, Optional, Tuple, Type
 from threading import Lock
 from collections import deque
 
 from hyperliquid.utils.error import Error as HyperliquidAPIError
 
+from exceptions import (
+    HyperliquidBotError,
+    TransientError,
+    RateLimitError,
+    NetworkError,
+    DataError,
+    ConfigurationError,
+)
+
 logger = logging.getLogger(__name__)
 
 # Expected exceptions from API calls.  Catch these for graceful degradation;
 # programming errors (AttributeError, NameError, etc.) will propagate.
+#
+# Includes both raw SDK/stdlib exceptions (for code that bypasses
+# APICallWrapper) and the custom hierarchy (raised by APICallWrapper.call).
 API_ERRORS: Tuple[Type[BaseException], ...] = (
+    HyperliquidBotError,  # Custom hierarchy (TransientError, DataError, …)
     HyperliquidAPIError,  # SDK: ClientError (4xx), ServerError (5xx)
     ValueError,           # SDK signing / parameter validation; data parsing
     KeyError,             # Unexpected API response structure
@@ -97,22 +110,52 @@ class APICallWrapper:
         self.rate_limiter = rate_limiter
 
     @staticmethod
-    def _is_rate_limit_error(e: Exception) -> bool:
-        error_str = str(e)
-        return "429" in error_str or "rate limit" in error_str.lower()
+    def _classify(e: Exception) -> HyperliquidBotError:
+        """Wrap a raw exception into the custom hierarchy.
 
-    @staticmethod
-    def _is_timeout_error(e: Exception) -> bool:
-        error_str = str(e).lower()
-        return (
-            "timeout" in error_str
-            or "connection aborted" in error_str
-            or "timed out" in error_str
-        )
+        The original exception is stored as ``__cause__`` so the full
+        traceback is preserved.
+        """
+        error_str = str(e)
+        error_lower = error_str.lower()
+
+        def _chain(cls: type) -> HyperliquidBotError:
+            wrapped = cls(error_str)
+            wrapped.__cause__ = e
+            return wrapped
+
+        # Rate-limit detection
+        if "429" in error_str or "rate limit" in error_lower:
+            return _chain(RateLimitError)
+
+        # Network / timeout detection
+        if isinstance(e, (ConnectionError, TimeoutError)):
+            return _chain(NetworkError)
+        if isinstance(e, OSError):
+            return _chain(NetworkError)
+
+        # Data errors — unexpected API response structure
+        if isinstance(e, (KeyError, TypeError)):
+            return _chain(DataError)
+
+        # SDK / signing errors
+        if isinstance(e, ValueError):
+            return _chain(ConfigurationError)
+
+        # HyperliquidAPIError — classify by message
+        if isinstance(e, HyperliquidAPIError):
+            if "429" in error_str or "rate limit" in error_lower:
+                return _chain(RateLimitError)
+            if any(kw in error_lower for kw in ("timeout", "timed out")):
+                return _chain(NetworkError)
+            return _chain(DataError)
+
+        # Fallback: treat unknown as transient to be safe
+        return _chain(TransientError)
 
     def call(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """Execute API call with rate limiting and automatic retry on 429/timeout."""
-        last_exception = None
+        last_exception: Optional[Exception] = None
 
         for attempt in range(1, self.MAX_RETRIES + 1):
             self.rate_limiter.wait_if_needed()
@@ -121,9 +164,10 @@ class APICallWrapper:
                 self.rate_limiter.on_success()
                 return result
             except Exception as e:
-                last_exception = e
+                classified = self._classify(e)
+                last_exception = classified
 
-                if self._is_rate_limit_error(e):
+                if isinstance(classified, RateLimitError):
                     self.rate_limiter.on_429_error()
                     if attempt < self.MAX_RETRIES:
                         logger.warning(
@@ -133,21 +177,22 @@ class APICallWrapper:
                         time.sleep(self.rate_limiter._current_backoff)
                         continue
                     logger.error("Rate limited after %d attempts, giving up", self.MAX_RETRIES)
-                    raise
+                    raise classified
 
-                if self._is_timeout_error(e):
+                if isinstance(classified, NetworkError):
                     if attempt < self.MAX_RETRIES:
                         wait = min(2.0 * attempt, 5.0)
                         logger.warning(
-                            "Timeout (attempt %d/%d), retrying after %.1fs",
+                            "Network error (attempt %d/%d), retrying after %.1fs",
                             attempt, self.MAX_RETRIES, wait,
                         )
                         time.sleep(wait)
                         continue
-                    logger.error("Timeout after %d attempts, giving up", self.MAX_RETRIES)
-                    raise
+                    logger.error("Network error after %d attempts, giving up", self.MAX_RETRIES)
+                    raise classified
 
-                raise
+                # Non-transient errors (DataError, ConfigurationError): fail immediately
+                raise classified
 
         raise last_exception  # pragma: no cover
 

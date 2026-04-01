@@ -4,6 +4,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from rate_limiter import APICallWrapper, RateLimiter
+from exceptions import (
+    RateLimitError,
+    NetworkError,
+    ConfigurationError,
+)
 
 
 def _make_wrapper(max_backoff=1.0):
@@ -46,7 +51,7 @@ class TestRetryOn429:
         error = Exception("429 Too Many Requests")
         func = MagicMock(side_effect=error)
 
-        with pytest.raises(Exception, match="429"):
+        with pytest.raises(RateLimitError, match="429"):
             wrapper.call(func)
 
         assert func.call_count == APICallWrapper.MAX_RETRIES
@@ -55,7 +60,7 @@ class TestRetryOn429:
         wrapper = _make_wrapper()
         func = MagicMock(side_effect=ValueError("something broke"))
 
-        with pytest.raises(ValueError, match="something broke"):
+        with pytest.raises(ConfigurationError, match="something broke"):
             wrapper.call(func)
 
         assert func.call_count == 1
@@ -65,7 +70,7 @@ class TestRetryOn429:
         wrapper = _make_wrapper()
         func = MagicMock(side_effect=[ValueError("bad data"), "ok"])
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ConfigurationError):
             wrapper.call(func)
 
         assert func.call_count == 1
@@ -113,19 +118,24 @@ class TestRetryOn429:
             assert c.kwargs == {"key": "val"}
 
 
-class TestIsRateLimitError:
+class TestClassify:
 
-    def test_429_in_message(self):
-        assert APICallWrapper._is_rate_limit_error(Exception("429 Too Many Requests"))
+    def test_429_classified_as_rate_limit(self):
+        result = APICallWrapper._classify(Exception("429 Too Many Requests"))
+        assert isinstance(result, RateLimitError)
 
-    def test_rate_limit_in_message(self):
-        assert APICallWrapper._is_rate_limit_error(Exception("Rate Limit Exceeded"))
+    def test_rate_limit_message_classified(self):
+        result = APICallWrapper._classify(Exception("Rate Limit Exceeded"))
+        assert isinstance(result, RateLimitError)
 
-    def test_rate_limit_lowercase(self):
-        assert APICallWrapper._is_rate_limit_error(Exception("rate limit"))
+    def test_rate_limit_lowercase_classified(self):
+        result = APICallWrapper._classify(Exception("rate limit"))
+        assert isinstance(result, RateLimitError)
 
-    def test_unrelated_error(self):
-        assert not APICallWrapper._is_rate_limit_error(Exception("connection timeout"))
+    def test_connection_timeout_classified_as_network(self):
+        result = APICallWrapper._classify(ConnectionError("connection timeout"))
+        assert isinstance(result, NetworkError)
 
-    def test_empty_message(self):
-        assert not APICallWrapper._is_rate_limit_error(Exception(""))
+    def test_empty_message_not_rate_limit(self):
+        result = APICallWrapper._classify(Exception(""))
+        assert not isinstance(result, RateLimitError)
