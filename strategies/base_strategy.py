@@ -5,6 +5,7 @@ import math
 import pandas as pd
 from market_data import MarketDataManager, MarketData
 from order_manager import OrderManager, OrderSide, round_price
+from position_closer import close_position_market
 from account_utils import get_account_snapshot
 from rate_limiter import API_ERRORS
 
@@ -208,20 +209,9 @@ class BaseStrategy(ABC):
         if not position:
             return
 
-        size = abs(position['size'])
-        side = OrderSide.SELL if position['size'] > 0 else OrderSide.BUY
-
-        size = self.market_data.round_size(coin, size)
-
-        order = self.order_manager.create_market_order(
-            coin=coin,
-            side=side,
-            size=size,
-            reduce_only=True
+        close_position_market(
+            coin, position['size'], self.market_data, self.order_manager,
         )
-
-        if order:
-            logger.info(f"Closed position for {coin}: size={size}")
 
     def run(self, coins: List[str]) -> None:
         self.update_positions()

@@ -16,7 +16,7 @@ from order_manager import OrderManager  # noqa: E402
 from risk_manager import RiskManager  # noqa: E402
 from validation import MarginValidator, validate_strategy_config  # noqa: E402
 from hip3 import DEXRegistry, MultiDexMarketData, MultiDexOrderManager  # noqa: E402
-from order_manager import OrderSide  # noqa: E402
+from position_closer import close_position_market  # noqa: E402
 from rate_limiter import API_ERRORS  # noqa: E402
 from circuit_breaker import CircuitBreaker  # noqa: E402
 from strategies import (  # noqa: E402
@@ -479,27 +479,9 @@ class HyperliquidBot:
         """Market-close a single position. Returns True on success."""
         coin = pos.get('coin', '')
         size = float(pos.get('szi', 0))
-        if size == 0:
-            return False
-
-        close_side = OrderSide.SELL if size > 0 else OrderSide.BUY
-        abs_size = abs(size)
-
-        abs_size = self.market_data.round_size(coin, abs_size)
-
-        order = self.order_manager.create_market_order(
-            coin=coin,
-            side=close_side,
-            size=abs_size,
-            reduce_only=True,
+        return close_position_market(
+            coin, size, self.market_data, self.order_manager, reason=reason,
         )
-        if order:
-            prefix = f"{reason}: " if reason else ""
-            logger.info(f"{prefix}Closed position for {coin}: size={abs_size}")
-            return True
-        else:
-            logger.error(f"Failed to close position for {coin}")
-            return False
 
     def _close_all_positions(self) -> None:
         """Market-close every open position."""
