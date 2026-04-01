@@ -16,7 +16,6 @@ from order_manager import OrderManager  # noqa: E402
 from risk_manager import RiskManager  # noqa: E402
 from validation import MarginValidator, validate_strategy_config  # noqa: E402
 from hip3 import DEXRegistry, MultiDexMarketData, MultiDexOrderManager  # noqa: E402
-from order_manager import OrderSide  # noqa: E402
 from position_closer import close_position_market  # noqa: E402
 from rate_limiter import API_ERRORS  # noqa: E402
 from circuit_breaker import CircuitBreaker  # noqa: E402

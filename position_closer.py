@@ -6,8 +6,6 @@ closes) and BaseStrategy (TP/SL closes) so that the core
 """
 
 import logging
-from typing import Optional
-
 from order_manager import OrderManager, OrderSide
 from market_data import MarketDataManager
 
