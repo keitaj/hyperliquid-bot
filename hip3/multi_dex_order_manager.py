@@ -10,7 +10,7 @@ As of hyperliquid-python-sdk 0.22.0:
 Coins are represented as "dex:coin" strings for HIP-3 (e.g. "xyz:GOLD", "flx:NVDA").
 """
 import logging
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from hip3.dex_registry import DEXRegistry
 from rate_limiter import API_ERRORS
@@ -56,6 +56,64 @@ class MultiDexOrderManager(OrderManager):
         logger.info(f"MultiDexOrderManager ready — {n} assets in coin_to_asset (incl. HIP-3)")
 
     # ------------------------------------------------------------------ #
+    # Shared HIP-3 helpers
+    # ------------------------------------------------------------------ #
+
+    def _resolve_target_dexes(
+        self, coin: Optional[str],
+    ) -> tuple:
+        """Parse an optional coin filter into (filter_dex, filter_coin_name, target_dexes).
+
+        Returns
+        -------
+        tuple[Optional[str], Optional[str], list[str]]
+            (filter_dex, filter_coin_name, target_dexes)
+        """
+        filter_dex: Optional[str] = None
+        filter_coin_name: Optional[str] = None
+        if coin:
+            if is_hip3(coin):
+                filter_dex, filter_coin_name = parse_coin(coin)
+            else:
+                filter_coin_name = coin
+        target_dexes = [filter_dex] if filter_dex else self.hip3_dexes
+        return filter_dex, filter_coin_name, target_dexes
+
+    def _collect_hip3_items(
+        self,
+        dexes: List[str],
+        fetch_fn: Callable[[str], list],
+        error_context: str,
+    ) -> List[Dict]:
+        """Iterate DEXes, fetch items, prefix coins, and handle errors.
+
+        Parameters
+        ----------
+        dexes : list[str]
+            DEX names to iterate.
+        fetch_fn : callable(dex) -> list[dict]
+            Returns raw items for a single DEX.  Each item must have a
+            ``"coin"`` key with the bare coin name.
+        error_context : str
+            Label for error log messages (e.g. ``"positions"``, ``"open orders"``).
+
+        Returns
+        -------
+        list[dict]
+            Collected items with ``"coin"`` prefixed as ``"dex:coin"``.
+        """
+        results: List[Dict] = []
+        for dex in dexes:
+            try:
+                for item in fetch_fn(dex):
+                    prefixed = dict(item)
+                    prefixed["coin"] = make_hip3_coin(dex, prefixed.get("coin", ""))
+                    results.append(prefixed)
+            except API_ERRORS as e:
+                logger.error(f"Error fetching {error_context} for DEX '{dex}': {e}")
+        return results
+
+    # ------------------------------------------------------------------ #
     # Position queries — aggregate standard HL + all configured HIP-3 DEXes
     # ------------------------------------------------------------------ #
 
@@ -78,16 +136,13 @@ class MultiDexOrderManager(OrderManager):
         """
         all_positions = super().get_all_positions()
 
-        for dex in self.hip3_dexes:
-            try:
-                user_state = self.market_data_ext.get_user_state(self.account_address, dex=dex)
-                for p in user_state.get("assetPositions", []):
-                    pos = dict(p["position"])
-                    pos["coin"] = make_hip3_coin(dex, pos.get("coin", ""))
-                    all_positions.append(pos)
-            except API_ERRORS as e:
-                logger.error(f"Error fetching positions for DEX '{dex}': {e}")
+        def fetch_positions(dex: str) -> list:
+            state = self.market_data_ext.get_user_state(self.account_address, dex=dex)
+            return [p["position"] for p in state.get("assetPositions", [])]
 
+        all_positions.extend(
+            self._collect_hip3_items(self.hip3_dexes, fetch_positions, "positions")
+        )
         return all_positions
 
     # ------------------------------------------------------------------ #
@@ -99,13 +154,7 @@ class MultiDexOrderManager(OrderManager):
         Returns open orders across standard HL + all configured HIP-3 DEXes.
         Optionally filtered by coin (supports "dex:coin" format).
         """
-        filter_dex: Optional[str] = None
-        filter_coin_name: Optional[str] = None
-        if coin:
-            if is_hip3(coin):
-                filter_dex, filter_coin_name = parse_coin(coin)
-            else:
-                filter_coin_name = coin
+        filter_dex, filter_coin_name, target_dexes = self._resolve_target_dexes(coin)
 
         all_orders: List[Dict] = []
 
@@ -120,18 +169,13 @@ class MultiDexOrderManager(OrderManager):
                 logger.error(f"Error fetching HL open orders: {e}")
 
         # HIP-3 DEX orders
-        target_dexes = [filter_dex] if filter_dex else self.hip3_dexes
-        for dex in target_dexes:
-            try:
-                dex_orders = self.market_data_ext.get_open_orders_dex(self.account_address, dex=dex)
-                for order in dex_orders:
-                    o = dict(order)
-                    o["coin"] = make_hip3_coin(dex, o.get("coin", ""))
-                    if filter_coin_name and o["coin"] != coin:
-                        continue
-                    all_orders.append(o)
-            except API_ERRORS as e:
-                logger.error(f"Error fetching open orders for DEX '{dex}': {e}")
+        def fetch_orders(dex: str) -> list:
+            return self.market_data_ext.get_open_orders_dex(self.account_address, dex=dex)
+
+        hip3_orders = self._collect_hip3_items(target_dexes, fetch_orders, "open orders")
+        if filter_coin_name:
+            hip3_orders = [o for o in hip3_orders if o["coin"] == coin]
+        all_orders.extend(hip3_orders)
 
         return all_orders
 
@@ -146,25 +190,18 @@ class MultiDexOrderManager(OrderManager):
         if coin is None or not is_hip3(coin):
             cancelled += super().cancel_all_orders(coin)
 
-        filter_dex: Optional[str] = None
-        filter_coin_name: Optional[str] = None
-        if coin and is_hip3(coin):
-            filter_dex, filter_coin_name = parse_coin(coin)
+        filter_dex, filter_coin_name, target_dexes = self._resolve_target_dexes(coin)
 
-        target_dexes = [filter_dex] if filter_dex else self.hip3_dexes
-        for dex in target_dexes:
-            try:
-                dex_orders = self.market_data_ext.get_open_orders_dex(self.account_address, dex=dex)
-                to_cancel = []
-                for order in dex_orders:
-                    order_coin_name = order["coin"]
-                    if filter_coin_name and order_coin_name != filter_coin_name:
-                        continue
-                    full_coin = make_hip3_coin(dex, order_coin_name)
-                    to_cancel.append({"coin": full_coin, "oid": int(order["oid"])})
-                cancelled += self.bulk_cancel_orders(to_cancel)
-            except API_ERRORS as e:
-                logger.error(f"Error cancelling orders for DEX '{dex}': {e}")
+        def fetch_orders(dex: str) -> list:
+            return self.market_data_ext.get_open_orders_dex(self.account_address, dex=dex)
+
+        hip3_orders = self._collect_hip3_items(target_dexes, fetch_orders, "orders to cancel")
+        if filter_coin_name:
+            hip3_orders = [o for o in hip3_orders if o["coin"] == coin]
+
+        to_cancel = [{"coin": o["coin"], "oid": int(o["oid"])} for o in hip3_orders]
+        if to_cancel:
+            cancelled += self.bulk_cancel_orders(to_cancel)
 
         logger.info(f"Cancelled {cancelled} orders across all DEXes")
         return cancelled
