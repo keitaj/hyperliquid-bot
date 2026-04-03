@@ -273,7 +273,6 @@ class HyperliquidBot:
         return {
             # Legacy parameters (fixed defaults for backwards compatibility)
             'max_leverage': 3.0,
-            'max_position_size_pct': 0.2,
             'max_drawdown_pct': 0.1,
             'daily_loss_limit_pct': 0.05,
             # Configurable guardrails
@@ -301,56 +300,6 @@ class HyperliquidBot:
         except API_ERRORS as e:
             logger.error(f"Error getting user state for {self.account_address}: {e}")
             return {}
-
-    def get_all_mids(self) -> Dict[str, float]:
-        try:
-            all_mids = self.info.all_mids()
-            return all_mids
-        except API_ERRORS as e:
-            logger.error(f"Error getting market prices: {e}")
-            return {}
-
-    def get_open_orders(self) -> List[Dict]:
-        try:
-            open_orders = self.info.open_orders(self.account_address)
-            return open_orders
-        except API_ERRORS as e:
-            logger.error(f"Error getting open orders: {e}")
-            return []
-
-    def place_order(
-        self,
-        coin: str,
-        is_buy: bool,
-        sz: float,
-        limit_px: float,
-        order_type: Dict,
-        reduce_only: bool = False
-    ) -> Optional[Dict]:
-        try:
-            order_result = self.exchange.order(
-                coin=coin,
-                is_buy=is_buy,
-                sz=sz,
-                limit_px=limit_px,
-                order_type=order_type,
-                reduce_only=reduce_only
-            )
-            logger.info(f"Order placed: {order_result}")
-            return order_result
-        except API_ERRORS as e:
-            side_str = "buy" if is_buy else "sell"
-            logger.error(f"Error placing {side_str} order for {coin} (sz={sz}, px={limit_px}): {e}")
-            return None
-
-    def cancel_order(self, coin: str, oid: int) -> Optional[Dict]:
-        try:
-            cancel_result = self.exchange.cancel(coin=coin, oid=oid)
-            logger.info(f"Order cancelled: {cancel_result}")
-            return cancel_result
-        except API_ERRORS as e:
-            logger.error(f"Error cancelling order {oid} for {coin}: {e}")
-            return None
 
     def run(self) -> None:
         logger.info("Starting Hyperliquid trading bot...")

@@ -10,7 +10,6 @@ from risk_manager import RiskManager, RiskMetrics
 def _make_config(**overrides):
     base = {
         'max_leverage': 3.0,
-        'max_position_size_pct': 0.2,
         'max_drawdown_pct': 0.1,
         'daily_loss_limit_pct': 0.05,
         'max_position_pct': 0.2,
