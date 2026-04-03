@@ -53,49 +53,7 @@ class HyperliquidBot:
         # HIP-3 Multi-DEX setup
         # ------------------------------------------------------------------ #
         self.hip3_dexes: List[str] = Config.TRADING_DEXES
-        self.registry = DEXRegistry(Config.API_URL)
-
-        if self.hip3_dexes:
-            # Discover coins for each DEX (used to build trading_coins list)
-            self.registry.discover(self.hip3_dexes)
-
-            self.exchange = Exchange(
-                wallet=self._load_wallet(),
-                base_url=Config.API_URL,
-                perp_dexs=self._build_perp_dexs(),
-                timeout=self.api_timeout,
-            )
-            # Reuse the Info object created inside Exchange to avoid duplicate API calls.
-            self.info = self.exchange.info
-
-            logger.info("Registered DEXes:\n" + self.registry.summary())
-            self.market_data = MultiDexMarketData(
-                self.info, self.registry, Config.API_URL,
-                meta_cache_ttl=Config.META_CACHE_TTL,
-            )
-            self.order_manager = MultiDexOrderManager(
-                exchange=self.exchange,
-                info=self.info,
-                account_address=self.account_address,
-                registry=self.registry,
-                market_data=self.market_data,
-                hip3_dexes=self.hip3_dexes,
-                default_slippage=self.market_order_slippage,
-                mids_cache_ttl=Config.MIDS_CACHE_TTL,
-            )
-        else:
-            self.exchange = Exchange(
-                wallet=self._load_wallet(),
-                base_url=Config.API_URL,
-                timeout=self.api_timeout,
-            )
-            self.info = self.exchange.info
-            self.market_data = MarketDataManager(self.info, meta_cache_ttl=Config.META_CACHE_TTL)
-            self.order_manager = OrderManager(
-                self.exchange, self.info, self.account_address,
-                default_slippage=self.market_order_slippage,
-                mids_cache_ttl=Config.MIDS_CACHE_TTL,
-            )
+        self._init_connections()
 
         self.risk_config = self._build_risk_config()
         self.risk_manager = RiskManager(
@@ -266,6 +224,52 @@ class HyperliquidBot:
     def _load_wallet(self) -> Any:
         from eth_account import Account
         return Account.from_key(Config.PRIVATE_KEY)
+
+    def _init_connections(self) -> None:
+        """Create Exchange, Info, MarketData, and OrderManager instances.
+
+        Handles both standard Hyperliquid and HIP-3 multi-DEX modes.
+        Called from ``__init__`` and ``_reset_connections``.
+        """
+        self.registry = DEXRegistry(Config.API_URL)
+
+        if self.hip3_dexes:
+            self.registry.discover(self.hip3_dexes)
+            self.exchange = Exchange(
+                wallet=self._load_wallet(),
+                base_url=Config.API_URL,
+                perp_dexs=self._build_perp_dexs(),
+                timeout=self.api_timeout,
+            )
+            self.info = self.exchange.info
+            logger.info("Registered DEXes:\n" + self.registry.summary())
+            self.market_data = MultiDexMarketData(
+                self.info, self.registry, Config.API_URL,
+                meta_cache_ttl=Config.META_CACHE_TTL,
+            )
+            self.order_manager = MultiDexOrderManager(
+                exchange=self.exchange,
+                info=self.info,
+                account_address=self.account_address,
+                registry=self.registry,
+                market_data=self.market_data,
+                hip3_dexes=self.hip3_dexes,
+                default_slippage=self.market_order_slippage,
+                mids_cache_ttl=Config.MIDS_CACHE_TTL,
+            )
+        else:
+            self.exchange = Exchange(
+                wallet=self._load_wallet(),
+                base_url=Config.API_URL,
+                timeout=self.api_timeout,
+            )
+            self.info = self.exchange.info
+            self.market_data = MarketDataManager(self.info, meta_cache_ttl=Config.META_CACHE_TTL)
+            self.order_manager = OrderManager(
+                self.exchange, self.info, self.account_address,
+                default_slippage=self.market_order_slippage,
+                mids_cache_ttl=Config.MIDS_CACHE_TTL,
+            )
 
     @staticmethod
     def _build_risk_config() -> Dict:
@@ -590,42 +594,7 @@ class HyperliquidBot:
             logger.info("Resetting connections due to persistent errors...")
             time.sleep(5)  # Give some time before reconnecting
 
-            # Re-initialize connections
-            if self.hip3_dexes:
-                self.registry = DEXRegistry(Config.API_URL)
-                self.registry.discover(self.hip3_dexes)
-                self.exchange = Exchange(
-                    wallet=self._load_wallet(),
-                    base_url=Config.API_URL,
-                    perp_dexs=self._build_perp_dexs(),
-                )
-                self.info = self.exchange.info
-                self.market_data = MultiDexMarketData(
-                    self.info, self.registry, Config.API_URL,
-                    meta_cache_ttl=Config.META_CACHE_TTL,
-                )
-                self.order_manager = MultiDexOrderManager(
-                    exchange=self.exchange,
-                    info=self.info,
-                    account_address=self.account_address,
-                    registry=self.registry,
-                    market_data=self.market_data,
-                    hip3_dexes=self.hip3_dexes,
-                    default_slippage=self.market_order_slippage,
-                    mids_cache_ttl=Config.MIDS_CACHE_TTL,
-                )
-            else:
-                self.exchange = Exchange(
-                    wallet=self._load_wallet(),
-                    base_url=Config.API_URL,
-                )
-                self.info = self.exchange.info
-                self.market_data = MarketDataManager(self.info, meta_cache_ttl=Config.META_CACHE_TTL)
-                self.order_manager = OrderManager(
-                    self.exchange, self.info, self.account_address,
-                    default_slippage=self.market_order_slippage,
-                    mids_cache_ttl=Config.MIDS_CACHE_TTL,
-                )
+            self._init_connections()
 
             # Preserve cooldown state across connection resets
             prev_emergency_stop_time = self.risk_manager._emergency_stop_time
