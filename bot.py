@@ -826,149 +826,75 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Build strategy config from command line arguments
+    # Build strategy config from command line arguments.
+    # Each list maps CLI arg names to config keys (same name when identical).
+    # For renamed keys use a (arg_name, config_key) tuple.
+    _COMMON_PARAMS = [
+        'position_size_usd', 'max_positions', 'take_profit_percent',
+        'stop_loss_percent', 'candle_interval', 'account_cap_pct',
+    ]
+    _STRATEGY_PARAMS = {
+        'simple_ma': ['fast_ma_period', 'slow_ma_period'],
+        'rsi': [
+            'rsi_period', 'oversold_threshold', 'overbought_threshold',
+            'rsi_extreme_low', 'rsi_moderate_low',
+            'size_multiplier_extreme', 'size_multiplier_moderate',
+        ],
+        'bollinger_bands': [
+            'bb_period', 'std_dev', 'squeeze_threshold',
+            'volatility_expansion_threshold',
+            'high_band_width_threshold', 'high_band_width_multiplier',
+            'low_band_width_threshold', 'low_band_width_multiplier',
+        ],
+        'macd': [
+            'fast_ema', 'slow_ema', 'signal_ema', 'divergence_lookback',
+            'histogram_strength_high', 'histogram_strength_low',
+            'histogram_multiplier_high', 'histogram_multiplier_low',
+        ],
+        'grid_trading': [
+            'grid_levels', 'grid_spacing_pct', 'position_size_per_grid',
+            'range_period', 'range_pct_threshold', 'volatility_threshold',
+            'grid_recalc_bars', 'grid_saturation_threshold',
+            'grid_boundary_margin_low', 'grid_boundary_margin_high',
+        ],
+        'breakout': [
+            'lookback_period', 'volume_multiplier',
+            'breakout_confirmation_bars', 'atr_period',
+            'pivot_window', 'avg_volume_lookback',
+            'stop_loss_atr_multiplier', 'position_stop_loss_atr_multiplier',
+            'strong_breakout_multiplier',
+            'high_atr_threshold', 'low_atr_threshold',
+            'high_atr_multiplier', 'low_atr_multiplier',
+        ],
+        'market_making': [
+            'spread_bps', 'order_size_usd', 'max_open_orders',
+            ('refresh_interval', 'refresh_interval_seconds'),
+            ('max_position_age', 'max_position_age_seconds'),
+            ('taker_fallback_age', 'taker_fallback_age_seconds'),
+        ],
+    }
+
+    def _collect_params(params, source, dest):
+        """Copy non-None CLI args into *dest* dict."""
+        for entry in params:
+            if isinstance(entry, tuple):
+                arg_name, config_key = entry
+            else:
+                arg_name, config_key = entry, entry
+            val = getattr(source, arg_name, None)
+            if val is not None:
+                dest[config_key] = val
+
     strategy_config = {}
+    _collect_params(_COMMON_PARAMS, args, strategy_config)
+    _collect_params(_STRATEGY_PARAMS.get(args.strategy, []), args, strategy_config)
 
-    # Common parameters
-    if args.position_size_usd is not None:
-        strategy_config['position_size_usd'] = args.position_size_usd
-    if args.max_positions is not None:
-        strategy_config['max_positions'] = args.max_positions
-    if args.take_profit_percent is not None:
-        strategy_config['take_profit_percent'] = args.take_profit_percent
-    if args.stop_loss_percent is not None:
-        strategy_config['stop_loss_percent'] = args.stop_loss_percent
-    if args.candle_interval is not None:
-        strategy_config['candle_interval'] = args.candle_interval
-    if args.account_cap_pct is not None:
-        strategy_config['account_cap_pct'] = args.account_cap_pct
-
-    # Strategy-specific parameters
-    if args.strategy == 'simple_ma':
-        if args.fast_ma_period is not None:
-            strategy_config['fast_ma_period'] = args.fast_ma_period
-        if args.slow_ma_period is not None:
-            strategy_config['slow_ma_period'] = args.slow_ma_period
-
-    elif args.strategy == 'rsi':
-        if args.rsi_period is not None:
-            strategy_config['rsi_period'] = args.rsi_period
-        if args.oversold_threshold is not None:
-            strategy_config['oversold_threshold'] = args.oversold_threshold
-        if args.overbought_threshold is not None:
-            strategy_config['overbought_threshold'] = args.overbought_threshold
-        if args.rsi_extreme_low is not None:
-            strategy_config['rsi_extreme_low'] = args.rsi_extreme_low
-        if args.rsi_moderate_low is not None:
-            strategy_config['rsi_moderate_low'] = args.rsi_moderate_low
-        if args.size_multiplier_extreme is not None:
-            strategy_config['size_multiplier_extreme'] = args.size_multiplier_extreme
-        if args.size_multiplier_moderate is not None:
-            strategy_config['size_multiplier_moderate'] = args.size_multiplier_moderate
-
-    elif args.strategy == 'bollinger_bands':
-        if args.bb_period is not None:
-            strategy_config['bb_period'] = args.bb_period
-        if args.std_dev is not None:
-            strategy_config['std_dev'] = args.std_dev
-        if args.squeeze_threshold is not None:
-            strategy_config['squeeze_threshold'] = args.squeeze_threshold
-        if args.volatility_expansion_threshold is not None:
-            strategy_config['volatility_expansion_threshold'] = args.volatility_expansion_threshold
-        if args.high_band_width_threshold is not None:
-            strategy_config['high_band_width_threshold'] = args.high_band_width_threshold
-        if args.high_band_width_multiplier is not None:
-            strategy_config['high_band_width_multiplier'] = args.high_band_width_multiplier
-        if args.low_band_width_threshold is not None:
-            strategy_config['low_band_width_threshold'] = args.low_band_width_threshold
-        if args.low_band_width_multiplier is not None:
-            strategy_config['low_band_width_multiplier'] = args.low_band_width_multiplier
-
-    elif args.strategy == 'macd':
-        if args.fast_ema is not None:
-            strategy_config['fast_ema'] = args.fast_ema
-        if args.slow_ema is not None:
-            strategy_config['slow_ema'] = args.slow_ema
-        if args.signal_ema is not None:
-            strategy_config['signal_ema'] = args.signal_ema
-        if args.divergence_lookback is not None:
-            strategy_config['divergence_lookback'] = args.divergence_lookback
-        if args.histogram_strength_high is not None:
-            strategy_config['histogram_strength_high'] = args.histogram_strength_high
-        if args.histogram_strength_low is not None:
-            strategy_config['histogram_strength_low'] = args.histogram_strength_low
-        if args.histogram_multiplier_high is not None:
-            strategy_config['histogram_multiplier_high'] = args.histogram_multiplier_high
-        if args.histogram_multiplier_low is not None:
-            strategy_config['histogram_multiplier_low'] = args.histogram_multiplier_low
-
-    elif args.strategy == 'grid_trading':
-        if args.grid_levels is not None:
-            strategy_config['grid_levels'] = args.grid_levels
-        if args.grid_spacing_pct is not None:
-            strategy_config['grid_spacing_pct'] = args.grid_spacing_pct
-        if args.position_size_per_grid is not None:
-            strategy_config['position_size_per_grid'] = args.position_size_per_grid
-        if args.range_period is not None:
-            strategy_config['range_period'] = args.range_period
-        if args.range_pct_threshold is not None:
-            strategy_config['range_pct_threshold'] = args.range_pct_threshold
-        if args.volatility_threshold is not None:
-            strategy_config['volatility_threshold'] = args.volatility_threshold
-        if args.grid_recalc_bars is not None:
-            strategy_config['grid_recalc_bars'] = args.grid_recalc_bars
-        if args.grid_saturation_threshold is not None:
-            strategy_config['grid_saturation_threshold'] = args.grid_saturation_threshold
-        if args.grid_boundary_margin_low is not None:
-            strategy_config['grid_boundary_margin_low'] = args.grid_boundary_margin_low
-        if args.grid_boundary_margin_high is not None:
-            strategy_config['grid_boundary_margin_high'] = args.grid_boundary_margin_high
-
-    elif args.strategy == 'breakout':
-        if args.lookback_period is not None:
-            strategy_config['lookback_period'] = args.lookback_period
-        if args.volume_multiplier is not None:
-            strategy_config['volume_multiplier'] = args.volume_multiplier
-        if args.breakout_confirmation_bars is not None:
-            strategy_config['breakout_confirmation_bars'] = args.breakout_confirmation_bars
-        if args.atr_period is not None:
-            strategy_config['atr_period'] = args.atr_period
-        if args.pivot_window is not None:
-            strategy_config['pivot_window'] = args.pivot_window
-        if args.avg_volume_lookback is not None:
-            strategy_config['avg_volume_lookback'] = args.avg_volume_lookback
-        if args.stop_loss_atr_multiplier is not None:
-            strategy_config['stop_loss_atr_multiplier'] = args.stop_loss_atr_multiplier
-        if args.position_stop_loss_atr_multiplier is not None:
-            strategy_config['position_stop_loss_atr_multiplier'] = args.position_stop_loss_atr_multiplier
-        if args.strong_breakout_multiplier is not None:
-            strategy_config['strong_breakout_multiplier'] = args.strong_breakout_multiplier
-        if args.high_atr_threshold is not None:
-            strategy_config['high_atr_threshold'] = args.high_atr_threshold
-        if args.low_atr_threshold is not None:
-            strategy_config['low_atr_threshold'] = args.low_atr_threshold
-        if args.high_atr_multiplier is not None:
-            strategy_config['high_atr_multiplier'] = args.high_atr_multiplier
-        if args.low_atr_multiplier is not None:
-            strategy_config['low_atr_multiplier'] = args.low_atr_multiplier
-
-    elif args.strategy == 'market_making':
-        if args.spread_bps is not None:
-            strategy_config['spread_bps'] = args.spread_bps
-        if args.order_size_usd is not None:
-            strategy_config['order_size_usd'] = args.order_size_usd
-        if args.max_open_orders is not None:
-            strategy_config['max_open_orders'] = args.max_open_orders
-        if args.refresh_interval is not None:
-            strategy_config['refresh_interval_seconds'] = args.refresh_interval
+    # market_making: boolean flags that need special handling
+    if args.strategy == 'market_making':
         if args.no_close_immediately:
             strategy_config['close_immediately'] = False
-        if hasattr(args, 'max_position_age') and args.max_position_age is not None:
-            strategy_config['max_position_age_seconds'] = args.max_position_age
-        if hasattr(args, 'maker_only') and args.maker_only:
+        if getattr(args, 'maker_only', False):
             strategy_config['maker_only'] = True
-        if hasattr(args, 'taker_fallback_age') and args.taker_fallback_age is not None:
-            strategy_config['taker_fallback_age_seconds'] = args.taker_fallback_age
 
     # Apply CLI overrides for DEX settings
     if args.dex is not None:
@@ -979,22 +905,15 @@ if __name__ == "__main__":
         Config.ENABLE_STANDARD_HL = False
 
     # Apply CLI overrides for risk guardrails (CLI > env > default)
-    if args.max_position_pct is not None:
-        Config.MAX_POSITION_PCT = args.max_position_pct
-    if args.max_margin_usage is not None:
-        Config.MAX_MARGIN_USAGE = args.max_margin_usage
-    if args.force_close_margin is not None:
-        Config.FORCE_CLOSE_MARGIN = args.force_close_margin
-    if args.force_close_leverage is not None:
-        Config.FORCE_CLOSE_LEVERAGE = args.force_close_leverage
-    if args.daily_loss_limit is not None:
-        Config.DAILY_LOSS_LIMIT = args.daily_loss_limit
-    if args.per_trade_stop_loss is not None:
-        Config.PER_TRADE_STOP_LOSS = args.per_trade_stop_loss
-    if args.max_open_positions is not None:
-        Config.MAX_OPEN_POSITIONS = args.max_open_positions
-    if args.cooldown_after_stop is not None:
-        Config.COOLDOWN_AFTER_STOP = args.cooldown_after_stop
+    _RISK_PARAMS = [
+        'max_position_pct', 'max_margin_usage', 'force_close_margin',
+        'force_close_leverage', 'daily_loss_limit', 'per_trade_stop_loss',
+        'max_open_positions', 'cooldown_after_stop',
+    ]
+    for param in _RISK_PARAMS:
+        val = getattr(args, param, None)
+        if val is not None:
+            setattr(Config, param.upper(), val)
     if args.risk_level is not None:
         os.environ["RISK_LEVEL"] = args.risk_level
 
