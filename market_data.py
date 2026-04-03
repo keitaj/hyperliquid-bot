@@ -28,7 +28,7 @@ class MarketDataManager:
         self._cache_time: Dict[str, float] = {}
         self._cache_ttl = market_data_cache_ttl
         self._meta_cache = None
-        self._meta_cache_time = None
+        self._meta_cache_time: float = 0.0
         self._meta_cache_ttl = meta_cache_ttl
 
     def get_all_mids(self) -> Dict[str, float]:
@@ -41,13 +41,13 @@ class MarketDataManager:
     def get_meta(self) -> Dict:
         """Get meta information including sz_decimals for all assets"""
         try:
-            if self._meta_cache and self._meta_cache_time:
-                if (datetime.now() - self._meta_cache_time).total_seconds() < self._meta_cache_ttl:
-                    return self._meta_cache
+            now = time.monotonic()
+            if self._meta_cache and (now - self._meta_cache_time) < self._meta_cache_ttl:
+                return self._meta_cache
 
             meta = api_wrapper.call(self.info.meta)
             self._meta_cache = meta
-            self._meta_cache_time = datetime.now()
+            self._meta_cache_time = now
             return meta
         except API_ERRORS as e:
             logger.error(f"Error fetching meta data: {e}")
