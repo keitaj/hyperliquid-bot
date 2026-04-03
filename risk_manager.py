@@ -49,7 +49,6 @@ class RiskManager:
 
         # Legacy parameters (backwards compatible)
         self.max_leverage = config.get('max_leverage', 3.0)
-        self.max_position_size_pct = config.get('max_position_size_pct', 0.2)
         self.max_drawdown_pct = config.get('max_drawdown_pct', 0.1)
         self.daily_loss_limit_pct = config.get('daily_loss_limit_pct', 0.05)
 
