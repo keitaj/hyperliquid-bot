@@ -419,15 +419,18 @@ class HyperliquidBot:
         risk_checks = self.risk_manager.check_risk_limits()
         action = risk_checks.get('action', 'none')
 
-        if risk_checks.get('reason'):
-            self.circuit_breaker.record_success("risk_metrics")
-        elif (not risk_checks['all_checks_passed'] and action == 'block_new_orders'
-              and risk_checks.get('reason') == 'No metrics available'):
+        metrics_unavailable = (
+            not risk_checks['all_checks_passed']
+            and risk_checks.get('reason') == 'No metrics available'
+        )
+        if metrics_unavailable:
             self.circuit_breaker.record_failure("risk_metrics")
             if self.circuit_breaker.is_tripped("risk_metrics"):
                 logger.error("Risk metrics unavailable for too long — cancelling all orders")
                 self.order_manager.cancel_all_orders()
                 return
+        else:
+            self.circuit_breaker.record_success("risk_metrics")
 
         if not risk_checks['all_checks_passed']:
             logger.warning(f"Risk limits exceeded: {risk_checks.get('reason')}")
@@ -460,7 +463,6 @@ class HyperliquidBot:
             # pause, cooldown: orders already cancelled above
             return
 
-        self.circuit_breaker.record_success("risk_metrics")
         self.order_manager.update_order_status()
 
         # Per-trade stop loss check (every cycle, if enabled)
