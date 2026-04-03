@@ -1,5 +1,6 @@
 """Tests for risk manager metrics cache TTL."""
 import os
+import time
 from datetime import datetime
 from unittest.mock import patch
 from dataclasses import dataclass
@@ -35,20 +36,21 @@ class TestMetricsCacheTTL:
             def __init__(self, cache_ttl):
                 self.metrics_cache_ttl = cache_ttl
                 self.risk_metrics_history = []
+                self._last_metrics_time = 0.0
                 self.fetch_count = 0
 
             def get_current_metrics(self):
                 self.fetch_count += 1
                 metrics = FakeRiskMetrics(timestamp=datetime.now())
                 self.risk_metrics_history.append(metrics)
+                self._last_metrics_time = time.monotonic()
                 return metrics
 
             def _get_cached_metrics(self):
                 if self.risk_metrics_history:
-                    last = self.risk_metrics_history[-1]
-                    age = (datetime.now() - last.timestamp).total_seconds()
+                    age = time.monotonic() - self._last_metrics_time
                     if age < self.metrics_cache_ttl:
-                        return last
+                        return self.risk_metrics_history[-1]
                 return self.get_current_metrics()
 
         return FakeCacheManager(ttl)

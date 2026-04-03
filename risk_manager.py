@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 from collections import deque
 from typing import Deque, Dict, List, Optional
 from dataclasses import dataclass
@@ -65,6 +66,7 @@ class RiskManager:
 
         # Tracking state
         self.risk_metrics_history: Deque[RiskMetrics] = deque(maxlen=500)
+        self._last_metrics_time: float = 0.0
         self.starting_balance: Optional[float] = None
         self.daily_starting_balance: Optional[float] = None
         self.last_reset_date = datetime.now().date()
@@ -132,10 +134,9 @@ class RiskManager:
     def _get_cached_metrics(self) -> Optional[RiskMetrics]:
         """Return the most recent metrics if fresh enough, else fetch new ones."""
         if self.risk_metrics_history:
-            last = self.risk_metrics_history[-1]
-            age = (datetime.now() - last.timestamp).total_seconds()
+            age = time.monotonic() - self._last_metrics_time
             if age < self.metrics_cache_ttl:
-                return last
+                return self.risk_metrics_history[-1]
         return self.get_current_metrics()
 
     def get_current_metrics(self) -> Optional[RiskMetrics]:
@@ -221,6 +222,7 @@ class RiskManager:
                 self.last_reset_date = datetime.now().date()
 
             self.risk_metrics_history.append(metrics)
+            self._last_metrics_time = time.monotonic()
 
             return metrics
 
