@@ -128,14 +128,26 @@ class MarketDataManager:
             end_time = int(time.time() * 1000)  # Current time in milliseconds
 
             # Calculate start time based on interval and lookback
-            interval_ms = {
-                '1m': 60 * 1000,
-                '5m': 5 * 60 * 1000,
-                '15m': 15 * 60 * 1000,
-                '1h': 60 * 60 * 1000,
-                '4h': 4 * 60 * 60 * 1000,
-                '1d': 24 * 60 * 60 * 1000
-            }.get(interval, 60 * 1000)  # Default to 1m
+            _INTERVAL_MS = {
+                '1m': 60_000,
+                '3m': 3 * 60_000,
+                '5m': 5 * 60_000,
+                '15m': 15 * 60_000,
+                '30m': 30 * 60_000,
+                '1h': 3_600_000,
+                '2h': 2 * 3_600_000,
+                '4h': 4 * 3_600_000,
+                '12h': 12 * 3_600_000,
+                '1d': 86_400_000,
+                '1w': 7 * 86_400_000,
+                '1M': 30 * 86_400_000,
+            }
+            interval_ms = _INTERVAL_MS.get(interval)
+            if interval_ms is None:
+                logger.warning(
+                    "Unknown candle interval '%s', falling back to 1m", interval
+                )
+                interval_ms = 60_000
 
             start_time = end_time - (lookback * interval_ms)
 
