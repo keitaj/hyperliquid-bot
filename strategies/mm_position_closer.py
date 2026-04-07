@@ -1,6 +1,8 @@
 """Position close management for market-making strategy.
 
 Handles take-profit placement, max-age force-close, and taker fallback logic.
+Progressive close pricing tightens the take-profit spread as positions age
+to reduce costly taker force-closes.
 """
 
 import logging
@@ -11,6 +13,11 @@ from order_manager import OrderSide, round_price
 from rate_limiter import API_ERRORS
 
 logger = logging.getLogger(__name__)
+
+# Close pricing tiers: progressively tighter as position ages
+_TIER_FULL_SPREAD = 0   # age 0-50%: full take-profit spread
+_TIER_BREAKEVEN = 1     # age 50-75%: breakeven (0 bps)
+_TIER_LOSS_1BPS = 2     # age 75-100%: accept 1 bps loss to avoid taker
 
 
 class PositionCloser:
@@ -33,8 +40,8 @@ class PositionCloser:
         self.maker_only = maker_only
         self.taker_fallback_age_seconds = taker_fallback_age_seconds
 
-        # coin -> (entry_time, close_oid or None)
-        self._open_positions: Dict[str, Tuple[float, Optional[int]]] = {}
+        # coin -> (entry_time, close_oid or None, tier)
+        self._open_positions: Dict[str, Tuple[float, Optional[int], int]] = {}
 
     @property
     def tracked_coins(self) -> set:
@@ -45,11 +52,31 @@ class PositionCloser:
         entry = self._open_positions.get(coin)
         return entry[1] if entry else None
 
+    def _compute_tier(self, age: float) -> int:
+        """Determine close pricing tier based on position age fraction."""
+        if self.max_position_age_seconds <= 0:
+            return _TIER_FULL_SPREAD
+        age_fraction = age / self.max_position_age_seconds
+        if age_fraction < 0.5:
+            return _TIER_FULL_SPREAD
+        elif age_fraction < 0.75:
+            return _TIER_BREAKEVEN
+        else:
+            return _TIER_LOSS_1BPS
+
+    @staticmethod
+    def _tier_label(tier: int) -> str:
+        return {
+            _TIER_FULL_SPREAD: "full_spread",
+            _TIER_BREAKEVEN: "breakeven",
+            _TIER_LOSS_1BPS: "loss_1bps",
+        }.get(tier, "unknown")
+
     def cleanup_closed(self, coin: str) -> None:
         """Clean up tracking when a position has been closed externally."""
         if coin not in self._open_positions:
             return
-        close_oid = self._open_positions[coin][1]
+        _, close_oid, _ = self._open_positions[coin]
         if close_oid is not None:
             try:
                 self.order_manager.cancel_order(close_oid, coin)
@@ -76,10 +103,10 @@ class PositionCloser:
 
         # Register position if not tracked
         if coin not in self._open_positions:
-            self._open_positions[coin] = (now, None)
+            self._open_positions[coin] = (now, None, _TIER_FULL_SPREAD)
             logger.info(f"[mm] Tracking position for {coin}: size={size:.6f} entry={entry_price:.4f}")
 
-        entry_time, close_oid = self._open_positions[coin]
+        entry_time, close_oid, current_tier = self._open_positions[coin]
         age = now - entry_time
 
         # Check if max age exceeded — force close
@@ -87,14 +114,30 @@ class PositionCloser:
             self._handle_force_close(coin, size, age, entry_time, close_oid, close_position_fn)
             return
 
+        # Determine the correct pricing tier for this age
+        new_tier = self._compute_tier(age)
+
+        # If tier changed and we have an active close order, cancel and re-place
+        if new_tier != current_tier and close_oid is not None:
+            logger.info(
+                f"[mm] {coin} tier change {self._tier_label(current_tier)}"
+                f" -> {self._tier_label(new_tier)}, cancelling close oid={close_oid}"
+            )
+            try:
+                self.order_manager.cancel_order(close_oid, coin)
+            except API_ERRORS as e:
+                logger.debug(f"[mm] Could not cancel close order for {coin}: {e}")
+            self._open_positions[coin] = (entry_time, None, new_tier)
+            close_oid = None
+
         # Check if close order is still alive
         if close_oid is not None:
             if self._is_order_alive(coin, close_oid):
                 return  # Close order still active, wait
             # Close order was filled or cancelled — position should be gone next cycle
-            self._open_positions[coin] = (entry_time, None)
+            self._open_positions[coin] = (entry_time, None, new_tier)
 
-        # Place take-profit close order at entry ± spread
+        # Place take-profit close order with tier-appropriate spread
         self._place_take_profit(coin, size, entry_price, entry_time)
 
     def _handle_force_close(
@@ -137,7 +180,7 @@ class PositionCloser:
                         price=close_price, reduce_only=True, post_only=True,
                     )
                     if order and order.id is not None:
-                        self._open_positions[coin] = (entry_time, order.id)
+                        self._open_positions[coin] = (entry_time, order.id, _TIER_LOSS_1BPS)
                         logger.info(
                             f"[mm] Position {coin} held {age:.0f}s — "
                             f"maker close at {close_price:.6f} (oid={order.id})"
@@ -150,10 +193,22 @@ class PositionCloser:
 
     def _place_take_profit(self, coin: str, size: float, entry_price: float, entry_time: float) -> None:
         close_side = OrderSide.SELL if size > 0 else OrderSide.BUY
-        if size > 0:
-            close_price = round_price(entry_price * (1 + self.spread_bps / 10_000))
+
+        # Progressive close pricing: tighten spread as position ages
+        age = time.monotonic() - entry_time
+        tier = self._compute_tier(age)
+
+        if tier == _TIER_BREAKEVEN:
+            effective_spread_bps = 0
+        elif tier == _TIER_LOSS_1BPS:
+            effective_spread_bps = -1
         else:
-            close_price = round_price(entry_price * (1 - self.spread_bps / 10_000))
+            effective_spread_bps = self.spread_bps
+
+        if size > 0:
+            close_price = round_price(entry_price * (1 + effective_spread_bps / 10_000))
+        else:
+            close_price = round_price(entry_price * (1 - effective_spread_bps / 10_000))
 
         abs_size = self.market_data.round_size(coin, abs(size))
         if abs_size <= 0:
@@ -165,10 +220,12 @@ class PositionCloser:
                 price=close_price, reduce_only=True, post_only=self.maker_only,
             )
             if order and order.id is not None:
-                self._open_positions[coin] = (entry_time, order.id)
+                self._open_positions[coin] = (entry_time, order.id, tier)
                 logger.info(
                     f"[mm] Placed take-profit {close_side.value} for {coin} "
-                    f"size={abs_size} price={close_price:.6f} (oid={order.id})"
+                    f"size={abs_size} price={close_price:.6f} "
+                    f"tier={self._tier_label(tier)} spread={effective_spread_bps}bps "
+                    f"(oid={order.id})"
                 )
         except API_ERRORS as e:
             logger.error(f"[mm] Failed to place close order for {coin}: {e}")
