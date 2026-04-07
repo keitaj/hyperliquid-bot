@@ -184,6 +184,15 @@ class MarketMakingStrategy(BaseStrategy):
 
         buy_price, sell_price = self._get_spread_prices(mid_price)
 
+        # Clamp prices to stay outside BBO for maker-only (Alo) orders
+        if self.maker_only:
+            bbo = self.market_data.get_market_data(coin)
+            if bbo and bbo.bid > 0 and bbo.ask > 0:
+                if buy_price >= bbo.bid:
+                    buy_price = round_price(bbo.bid - bbo.bid * (1 / 10_000))
+                if sell_price <= bbo.ask:
+                    sell_price = round_price(bbo.ask + bbo.ask * (1 / 10_000))
+
         size = self.calculate_position_size(coin, {})
         if size <= 0:
             logger.debug(f"[mm] Position size is 0 for {coin}, skipping")

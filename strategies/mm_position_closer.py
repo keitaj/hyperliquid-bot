@@ -128,7 +128,13 @@ class PositionCloser:
         market_data = self.market_data.get_market_data(coin)
         if market_data and market_data.mid_price > 0:
             close_side = OrderSide.SELL if size > 0 else OrderSide.BUY
-            close_price = round_price(market_data.mid_price)
+            if market_data.bid > 0 and market_data.ask > 0:
+                if close_side == OrderSide.SELL:
+                    close_price = round_price(market_data.ask + market_data.ask * (1 / 10_000))
+                else:
+                    close_price = round_price(market_data.bid - market_data.bid * (1 / 10_000))
+            else:
+                close_price = round_price(market_data.mid_price)
             abs_size = self.market_data.round_size(coin, abs(size))
             if abs_size > 0:
                 try:
@@ -154,6 +160,22 @@ class PositionCloser:
             close_price = round_price(entry_price * (1 + self.spread_bps / 10_000))
         else:
             close_price = round_price(entry_price * (1 - self.spread_bps / 10_000))
+
+        if self.maker_only:
+            md = self.market_data.get_market_data(coin)
+            if md and md.bid > 0 and md.ask > 0:
+                if close_side == OrderSide.SELL and close_price <= md.ask:
+                    logger.debug(
+                        f"[mm] Take-profit sell for {coin} at {close_price:.6f} "
+                        f"would cross ask {md.ask:.6f}, skipping"
+                    )
+                    return
+                if close_side == OrderSide.BUY and close_price >= md.bid:
+                    logger.debug(
+                        f"[mm] Take-profit buy for {coin} at {close_price:.6f} "
+                        f"would cross bid {md.bid:.6f}, skipping"
+                    )
+                    return
 
         abs_size = self.market_data.round_size(coin, abs(size))
         if abs_size <= 0:
