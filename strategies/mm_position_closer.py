@@ -70,7 +70,11 @@ class PositionCloser:
         position : dict with 'size' and 'entry_price' keys
         close_position_fn : callable(coin) that market-closes the position
         """
-        size = position['size']
+        size = position.get('size', 0)
+        if abs(size) == 0:
+            # Position already closed externally — clean up stale tracking
+            self._open_positions.pop(coin, None)
+            return
         entry_price = position['entry_price']
         now = time.monotonic()
 
