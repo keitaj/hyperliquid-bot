@@ -11,8 +11,9 @@ As of hyperliquid-python-sdk 0.22.0, the SDK natively supports HIP-3:
 This class adds only the thin wrappers that are not on the base MarketDataManager.
 """
 import logging
+import time
 import requests
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from rate_limiter import API_ERRORS
 from coin_utils import is_hip3, parse_coin
@@ -32,10 +33,14 @@ class MultiDexMarketData(MarketDataManager):
     and asset_to_sz_decimals are already populated for HIP-3 assets.
     """
 
-    def __init__(self, info, registry: DEXRegistry, api_url: str, meta_cache_ttl: float = 3600):
+    def __init__(self, info, registry: DEXRegistry, api_url: str, meta_cache_ttl: float = 3600,
+                 user_state_cache_ttl: float = 2.0):
         super().__init__(info, meta_cache_ttl=meta_cache_ttl)
         self.registry = registry
         self.api_url = api_url.rstrip("/")
+        # Per-DEX user_state cache: {(address, dex): (timestamp, data)}
+        self._user_state_cache: Dict[Tuple[str, str], Tuple[float, Dict]] = {}
+        self._user_state_cache_ttl = user_state_cache_ttl
 
     # ------------------------------------------------------------------ #
     # Overrides leveraging 0.22.0 SDK native HIP-3 support
@@ -66,9 +71,21 @@ class MultiDexMarketData(MarketDataManager):
     # ------------------------------------------------------------------ #
 
     def get_user_state(self, address: str, dex: Optional[str] = None) -> Dict:
-        """Clearinghouse state for an account, optionally scoped to a HIP-3 DEX."""
+        """Clearinghouse state for an account, optionally scoped to a HIP-3 DEX.
+
+        Results are cached per (address, dex) with a short TTL so that
+        multiple components (RiskManager, OrderManager) calling this in the
+        same bot cycle share a single API call.
+        """
+        cache_key = (address, dex or "")
+        now = time.monotonic()
+        cached = self._user_state_cache.get(cache_key)
+        if cached and (now - cached[0]) < self._user_state_cache_ttl:
+            return cached[1]
         try:
-            return self.info.user_state(address, dex=dex or "")
+            result = self.info.user_state(address, dex=dex or "")
+            self._user_state_cache[cache_key] = (now, result)
+            return result
         except API_ERRORS as e:
             logger.error(f"Error fetching user state (dex={dex}): {e}")
             return {}

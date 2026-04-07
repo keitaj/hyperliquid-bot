@@ -41,11 +41,15 @@ _ACTION_PRIORITY = {
 
 
 class RiskManager:
-    def __init__(self, info, account_address: str, config: Dict, hip3_dexes: Optional[List[str]] = None):
+    def __init__(self, info, account_address: str, config: Dict, hip3_dexes: Optional[List[str]] = None,
+                 market_data=None):
         self.info = info
         self.account_address = account_address
         self.config = config
         self.hip3_dexes: List[str] = hip3_dexes or []
+        # When set, HIP-3 user_state queries go through the shared cache in
+        # MultiDexMarketData instead of making direct API calls per DEX.
+        self._market_data = market_data
 
         # Legacy parameters (backwards compatible)
         self.max_leverage = config.get('max_leverage', 3.0)
@@ -177,9 +181,14 @@ class RiskManager:
             # Include HIP-3 DEX positions in metrics
             for dex in self.hip3_dexes:
                 try:
-                    dex_state = api_wrapper.call(
-                        self.info.user_state, self.account_address, dex=dex
-                    )
+                    if self._market_data is not None:
+                        dex_state = self._market_data.get_user_state(
+                            self.account_address, dex=dex
+                        )
+                    else:
+                        dex_state = api_wrapper.call(
+                            self.info.user_state, self.account_address, dex=dex
+                        )
                     dex_positions = dex_state.get('assetPositions', [])
                     num_positions += len(dex_positions)
                     for pos in dex_positions:
