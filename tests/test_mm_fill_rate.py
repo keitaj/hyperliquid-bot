@@ -9,13 +9,6 @@ from strategies.market_making_strategy import MarketMakingStrategy
 
 def _make_strategy(fill_rate_log_interval=300):
     """Create a MarketMakingStrategy with mocked dependencies."""
-    md = MagicMock()
-    om = MagicMock()
-    config = {
-        'spread_bps': 10,
-        'order_size_usd': 100,
-        'fill_rate_log_interval': fill_rate_log_interval,
-    }
     with patch.object(MarketMakingStrategy, '__init__', lambda self, *a, **k: None):
         strategy = MarketMakingStrategy.__new__(MarketMakingStrategy)
 
