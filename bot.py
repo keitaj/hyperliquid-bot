@@ -408,13 +408,20 @@ class HyperliquidBot:
                 self._close_all_positions()
                 return
 
+            if action == 'cooldown':
+                logger.warning(
+                    "In emergency stop cooldown – exiting so watchdog can restart fresh"
+                )
+                self.running = False
+                return
+
             if action == 'block_new_orders':
                 # Block new orders but continue managing existing positions
                 self.order_manager.update_order_status()
                 self._check_per_trade_stops()
                 return
 
-            # pause, cooldown: orders already cancelled above
+            # pause: orders already cancelled above
             return
 
         self.order_manager.update_order_status()
