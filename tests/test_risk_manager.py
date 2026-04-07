@@ -327,3 +327,84 @@ class TestActionPriority:
         assert result['action'] == 'stop_bot'
         assert result['force_close_all'] is True
         assert result['stop_bot'] is True
+
+
+# ------------------------------------------------------------------ #
+#  HIP-3 market_data integration
+# ------------------------------------------------------------------ #
+
+class TestHIP3MarketDataIntegration:
+
+    @patch("risk_manager.api_wrapper")
+    @patch("risk_manager.get_account_snapshot")
+    def test_uses_market_data_for_hip3_user_state(self, mock_snapshot, mock_wrapper):
+        """When market_data is provided, HIP-3 user_state goes through it."""
+        from account_utils import AccountSnapshot
+
+        mock_snapshot.return_value = AccountSnapshot(
+            account_value=10000.0, margin_used=2000.0,
+        )
+
+        # Standard HL user_state
+        mock_wrapper.call.return_value = {
+            'marginSummary': {'totalNtlPos': '5000'},
+            'assetPositions': [
+                {'position': {'coin': 'BTC', 'unrealizedPnl': '100'}},
+            ],
+        }
+
+        market_data = MagicMock()
+        market_data.get_user_state.return_value = {
+            'assetPositions': [
+                {'position': {'coin': 'GOLD', 'unrealizedPnl': '50',
+                              'marginUsed': '500', 'positionValue': '2000'}},
+            ],
+        }
+
+        config = _make_config()
+        rm = RiskManager(
+            info=MagicMock(), account_address="0xtest", config=config,
+            hip3_dexes=["xyz"], market_data=market_data,
+        )
+
+        metrics = rm.get_current_metrics()
+
+        assert metrics is not None
+        # Should have called market_data.get_user_state, not info.user_state with dex=
+        market_data.get_user_state.assert_called_once_with("0xtest", dex="xyz")
+        assert metrics.num_positions == 2  # 1 BTC + 1 GOLD
+
+    @patch("risk_manager.api_wrapper")
+    @patch("risk_manager.get_account_snapshot")
+    def test_falls_back_to_direct_api_without_market_data(self, mock_snapshot, mock_wrapper):
+        """Without market_data, HIP-3 user_state uses direct API calls."""
+        from account_utils import AccountSnapshot
+
+        mock_snapshot.return_value = AccountSnapshot(
+            account_value=10000.0, margin_used=2000.0,
+        )
+
+        hl_state = {
+            'marginSummary': {'totalNtlPos': '5000'},
+            'assetPositions': [],
+        }
+        dex_state = {
+            'assetPositions': [
+                {'position': {'coin': 'GOLD', 'unrealizedPnl': '50',
+                              'marginUsed': '500', 'positionValue': '2000'}},
+            ],
+        }
+        mock_wrapper.call.side_effect = [hl_state, dex_state]
+
+        config = _make_config()
+        rm = RiskManager(
+            info=MagicMock(), account_address="0xtest", config=config,
+            hip3_dexes=["xyz"],
+        )
+
+        metrics = rm.get_current_metrics()
+
+        assert metrics is not None
+        # Two api_wrapper.call: one for standard HL, one for xyz
+        assert mock_wrapper.call.call_count == 2
+        assert metrics.num_positions == 1  # 1 GOLD

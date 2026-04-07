@@ -313,6 +313,8 @@ class TestMultiDexMarketData:
         mdm._meta_cache = None
         mdm._meta_cache_time = None
         mdm._meta_cache_ttl = 3600
+        mdm._user_state_cache = {}
+        mdm._user_state_cache_ttl = 2.0
         return mdm
 
     def test_get_sz_decimals_hip3_coin_via_sdk(self):
@@ -408,6 +410,62 @@ class TestMultiDexMarketData:
         mdm.info.open_orders.side_effect = requests.exceptions.ConnectionError("fail")
 
         assert mdm.get_open_orders_dex("0xabc", dex="xyz") == []
+
+    def test_get_user_state_caches_per_dex(self):
+        """Repeated get_user_state calls for the same DEX use cache."""
+        mdm = self._make_mdm()
+        expected = {"assetPositions": [{"position": {"coin": "GOLD"}}]}
+        mdm.info.user_state.return_value = expected
+
+        result1 = mdm.get_user_state("0xabc", dex="xyz")
+        result2 = mdm.get_user_state("0xabc", dex="xyz")
+
+        assert result1 == expected
+        assert result2 == expected
+        assert mdm.info.user_state.call_count == 1
+
+    def test_get_user_state_cache_separates_dexes(self):
+        """Different DEXes get separate cache entries."""
+        mdm = self._make_mdm()
+        mdm.info.user_state.side_effect = [
+            {"assetPositions": [{"position": {"coin": "GOLD"}}]},
+            {"assetPositions": [{"position": {"coin": "NVDA"}}]},
+        ]
+
+        result_xyz = mdm.get_user_state("0xabc", dex="xyz")
+        result_flx = mdm.get_user_state("0xabc", dex="flx")
+
+        assert result_xyz["assetPositions"][0]["position"]["coin"] == "GOLD"
+        assert result_flx["assetPositions"][0]["position"]["coin"] == "NVDA"
+        assert mdm.info.user_state.call_count == 2
+
+    def test_get_user_state_cache_expires(self):
+        """After TTL expires, the cache is refreshed."""
+        mdm = self._make_mdm()
+        mdm._user_state_cache_ttl = 0.0  # Expire immediately
+        mdm.info.user_state.return_value = {"assetPositions": []}
+
+        mdm.get_user_state("0xabc", dex="xyz")
+        mdm.get_user_state("0xabc", dex="xyz")
+
+        assert mdm.info.user_state.call_count == 2
+
+    def test_get_user_state_cache_error_not_cached(self):
+        """API errors are not cached — next call retries."""
+        import requests
+        mdm = self._make_mdm()
+        expected = {"assetPositions": []}
+        mdm.info.user_state.side_effect = [
+            requests.exceptions.ConnectionError("fail"),
+            expected,
+        ]
+
+        result1 = mdm.get_user_state("0xabc", dex="xyz")
+        result2 = mdm.get_user_state("0xabc", dex="xyz")
+
+        assert result1 == {}  # Error fallback
+        assert result2 == expected  # Retry succeeded
+        assert mdm.info.user_state.call_count == 2
 
 
 # ===========================================================================

@@ -59,6 +59,7 @@ class HyperliquidBot:
         self.risk_manager = RiskManager(
             self.info, self.account_address, self.risk_config,
             hip3_dexes=self.hip3_dexes,
+            market_data=self.market_data if self.hip3_dexes else None,
         )
 
         # Default strategy configurations
@@ -602,6 +603,7 @@ class HyperliquidBot:
             self.risk_manager = RiskManager(
                 self.info, self.account_address, self.risk_config,
                 hip3_dexes=self.hip3_dexes,
+                market_data=self.market_data if self.hip3_dexes else None,
             )
             self.risk_manager._emergency_stop_time = prev_emergency_stop_time
             self.risk_manager.daily_starting_balance = prev_daily_starting_balance
