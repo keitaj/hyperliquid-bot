@@ -78,6 +78,10 @@ class MarketMakingStrategy(BaseStrategy):
 
         # Detect new fills: a position appearing for a coin that had no
         # position last cycle means at least one maker order was filled.
+        # NOTE: This is a coarse approximation. It undercounts when multiple
+        # fills occur within a single cycle or when close_immediately=True
+        # (positions are closed before the next detection pass). Sufficient
+        # for spread-tuning observability; not intended as exact accounting.
         current_position_coins = set()
         for coin in coins:
             if coin in self.positions and abs(self.positions[coin].get('size', 0)) > 0:
@@ -252,6 +256,12 @@ class MarketMakingStrategy(BaseStrategy):
             fill_rate,
             dict(self._fills_per_coin) if self._fills_per_coin else "none",
         )
+
+        # Reset counters so next log line reflects the latest window only
+        self._orders_placed = 0
+        self._fills_detected = 0
+        self._orders_placed_per_coin.clear()
+        self._fills_per_coin.clear()
 
     # ------------------------------------------------------------------ #
     #  Helpers

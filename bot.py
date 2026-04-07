@@ -409,6 +409,10 @@ class HyperliquidBot:
                 return
 
             if action == 'cooldown':
+                # Cooldown: exit without closing positions. Unlike stop_bot/force_close,
+                # cooldown is triggered by leverage spikes where forced closes could
+                # worsen slippage. Watchdog restarts in ~5min with fresh state;
+                # existing positions are managed on restart.
                 logger.warning(
                     "In emergency stop cooldown – exiting so watchdog can restart fresh"
                 )
