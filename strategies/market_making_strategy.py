@@ -10,6 +10,8 @@ Order tracking and position close management are delegated to
 
 import logging
 import os
+import time
+from collections import defaultdict
 from typing import Dict, List, Optional
 
 from strategies.base_strategy import BaseStrategy
@@ -34,6 +36,15 @@ class MarketMakingStrategy(BaseStrategy):
         self.max_positions: int = config.get('max_positions', 3)
         self.maker_only: bool = config.get('maker_only', False)
         self.account_cap_pct: float = config.get('account_cap_pct', 0.05)
+
+        # ---- Fill rate tracking ---- #
+        self._orders_placed: int = 0
+        self._fills_detected: int = 0
+        self._orders_placed_per_coin: Dict[str, int] = defaultdict(int)
+        self._fills_per_coin: Dict[str, int] = defaultdict(int)
+        self._fill_rate_log_interval: float = config.get('fill_rate_log_interval', 300)
+        self._last_fill_rate_log: float = 0.0
+        self._prev_position_coins: set = set()  # coins that had positions last cycle
 
         # ---- Delegates ---- #
         self._tracker = OrderTracker(
@@ -64,6 +75,24 @@ class MarketMakingStrategy(BaseStrategy):
         4. Place new buy + sell limit orders if no position and capacity.
         """
         self.update_positions()
+
+        # Detect new fills: a position appearing for a coin that had no
+        # position last cycle means at least one maker order was filled.
+        # NOTE: This is a coarse approximation. It undercounts when multiple
+        # fills occur within a single cycle or when close_immediately=True
+        # (positions are closed before the next detection pass). Sufficient
+        # for spread-tuning observability; not intended as exact accounting.
+        current_position_coins = set()
+        for coin in coins:
+            if coin in self.positions and abs(self.positions[coin].get('size', 0)) > 0:
+                current_position_coins.add(coin)
+        new_fills = current_position_coins - self._prev_position_coins
+        for coin in new_fills:
+            self._fills_detected += 1
+            self._fills_per_coin[coin] += 1
+        self._prev_position_coins = current_position_coins
+
+        self._log_fill_rate()
 
         for coin in coins:
             try:
@@ -191,6 +220,8 @@ class MarketMakingStrategy(BaseStrategy):
         for (side, price), order in zip(sides_and_prices, results):
             if order and order.id is not None:
                 self._tracker.record_order(coin, order.id, side.value)
+                self._orders_placed += 1
+                self._orders_placed_per_coin[coin] += 1
                 logger.info(
                     f"[mm] Placed {side.value} limit {coin} "
                     f"size={size} price={price:.6f} (oid={order.id})"
@@ -202,6 +233,35 @@ class MarketMakingStrategy(BaseStrategy):
         buy_price = round_price(mid_price - offset)
         sell_price = round_price(mid_price + offset)
         return buy_price, sell_price
+
+    # ------------------------------------------------------------------ #
+    #  Fill rate observability
+    # ------------------------------------------------------------------ #
+
+    def _log_fill_rate(self) -> None:
+        """Log fill rate statistics periodically."""
+        now = time.monotonic()
+        if now - self._last_fill_rate_log < self._fill_rate_log_interval:
+            return
+        self._last_fill_rate_log = now
+
+        if self._orders_placed == 0:
+            return
+
+        fill_rate = (self._fills_detected / self._orders_placed) * 100
+        logger.info(
+            "[mm] Fill rate: %d/%d (%.1f%%) | per-coin fills: %s",
+            self._fills_detected,
+            self._orders_placed,
+            fill_rate,
+            dict(self._fills_per_coin) if self._fills_per_coin else "none",
+        )
+
+        # Reset counters so next log line reflects the latest window only
+        self._orders_placed = 0
+        self._fills_detected = 0
+        self._orders_placed_per_coin.clear()
+        self._fills_per_coin.clear()
 
     # ------------------------------------------------------------------ #
     #  Helpers
