@@ -7,13 +7,10 @@ import logging
 import time
 from typing import Dict, Optional, Tuple
 
-from order_manager import OrderSide, round_price
+from order_manager import BBO_OFFSET, OrderSide, round_price
 from rate_limiter import API_ERRORS
 
 logger = logging.getLogger(__name__)
-
-# Minimum offset (in fraction) from BBO to avoid post-only rejections
-_BBO_OFFSET = 1 / 10_000  # 1 basis point
 
 
 class PositionCloser:
@@ -137,9 +134,9 @@ class PositionCloser:
             close_side = OrderSide.SELL if size > 0 else OrderSide.BUY
             if market_data.bid > 0 and market_data.ask > 0:
                 if close_side == OrderSide.SELL:
-                    close_price = round_price(market_data.ask * (1 + _BBO_OFFSET))
+                    close_price = round_price(market_data.ask * (1 + BBO_OFFSET))
                 else:
-                    close_price = round_price(market_data.bid * (1 - _BBO_OFFSET))
+                    close_price = round_price(market_data.bid * (1 - BBO_OFFSET))
             else:
                 # No BBO available — skip to avoid rejection at mid_price
                 logger.info(f"[mm] Position {coin} held {age:.0f}s — no BBO, skipping maker close")
@@ -175,13 +172,13 @@ class PositionCloser:
             md = self.market_data.get_market_data(coin)
             if md and md.bid > 0 and md.ask > 0:
                 if close_side == OrderSide.SELL and close_price <= md.ask:
-                    close_price = round_price(md.ask * (1 + _BBO_OFFSET))
+                    close_price = round_price(md.ask * (1 + BBO_OFFSET))
                     logger.debug(
                         f"[mm] Clamped take-profit sell for {coin} to {close_price:.6f} "
                         f"(ask={md.ask:.6f})"
                     )
                 if close_side == OrderSide.BUY and close_price >= md.bid:
-                    close_price = round_price(md.bid * (1 - _BBO_OFFSET))
+                    close_price = round_price(md.bid * (1 - BBO_OFFSET))
                     logger.debug(
                         f"[mm] Clamped take-profit buy for {coin} to {close_price:.6f} "
                         f"(bid={md.bid:.6f})"
