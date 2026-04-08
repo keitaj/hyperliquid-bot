@@ -296,8 +296,8 @@ class TestManageBasicBehavior:
 
         md_obj = MagicMock()
         md_obj.mid_price = 50000.0
-        md_obj.bid = 0
-        md_obj.ask = 0
+        md_obj.bid = 49999.0
+        md_obj.ask = 50001.0
         md.get_market_data.return_value = md_obj
 
         mock_order = MagicMock()
