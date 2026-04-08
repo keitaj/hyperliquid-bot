@@ -13,6 +13,10 @@ from coin_utils import is_hip3, parse_coin
 logger = logging.getLogger(__name__)
 
 
+# Minimum offset from BBO to avoid post-only (Alo) rejections on Hyperliquid.
+BBO_OFFSET = 1 / 10_000  # 1 basis point
+
+
 def round_price(px: float) -> float:
     """Round price to 5 significant figures and 6 decimal places.
 

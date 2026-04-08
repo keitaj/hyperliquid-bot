@@ -17,10 +17,12 @@ from typing import Dict, List, Optional
 from strategies.base_strategy import BaseStrategy
 from strategies.mm_order_tracker import OrderTracker
 from strategies.mm_position_closer import PositionCloser
-from order_manager import OrderSide, round_price
+from order_manager import BBO_OFFSET, OrderSide, round_price
 from rate_limiter import API_ERRORS
 
 logger = logging.getLogger(__name__)
+
+# Minimum offset (in fraction) from BBO to avoid post-only rejections
 
 
 class MarketMakingStrategy(BaseStrategy):
@@ -184,6 +186,13 @@ class MarketMakingStrategy(BaseStrategy):
             return
 
         buy_price, sell_price = self._get_spread_prices(mid_price)
+
+        # Clamp prices to stay outside BBO for maker-only (Alo) orders
+        if self.maker_only and market_data.bid > 0 and market_data.ask > 0:
+            if buy_price >= market_data.bid:
+                buy_price = round_price(market_data.bid * (1 - BBO_OFFSET))
+            if sell_price <= market_data.ask:
+                sell_price = round_price(market_data.ask * (1 + BBO_OFFSET))
 
         size = self.calculate_position_size(coin, {})
         if size <= 0:
