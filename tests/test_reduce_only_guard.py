@@ -24,7 +24,7 @@ class TestZeroSizeWithTrackedPosition:
     def test_cleanup_called_and_tracking_removed(self):
         closer, om, _ = _make_closer()
         # Simulate a tracked position with an active close order
-        closer._open_positions['BTC'] = (time.monotonic() - 30, 42)
+        closer._open_positions['BTC'] = (time.monotonic() - 30, 42, 0)
 
         closer.manage('BTC', {'size': 0, 'entry_price': 50000.0}, MagicMock())
 
@@ -34,7 +34,7 @@ class TestZeroSizeWithTrackedPosition:
 
     def test_close_fn_not_called(self):
         closer, _, _ = _make_closer()
-        closer._open_positions['ETH'] = (time.monotonic() - 10, None)
+        closer._open_positions['ETH'] = (time.monotonic() - 10, None, 0)
         close_fn = MagicMock()
 
         closer.manage('ETH', {'size': 0, 'entry_price': 3000.0}, close_fn)
