@@ -12,8 +12,7 @@ Thank you for your interest in contributing to Hyperliquid Trading Bot!
    ```
 3. Install dependencies:
    ```bash
-   pip install -r requirements.txt
-   pip install -r requirements-dev.txt
+   pip install ".[dev]"
    ```
 4. Create a branch for your change:
    ```bash

@@ -105,7 +105,7 @@ docker run --rm --env-file .env ghcr.io/keitaj/hyperliquid-bot:latest \
 
 #### Install Dependencies
 ```bash
-pip3 install -r requirements.txt
+pip3 install .
 ```
 
 #### Basic Usage

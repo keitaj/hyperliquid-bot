@@ -100,7 +100,7 @@ docker run --rm --env-file .env ghcr.io/keitaj/hyperliquid-bot:latest \
 
 #### 依存関係のインストール
 ```bash
-pip3 install -r requirements.txt
+pip3 install .
 ```
 
 #### 基本的な使い方

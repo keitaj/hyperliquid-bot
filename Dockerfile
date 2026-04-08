@@ -10,9 +10,9 @@ RUN apt-get update && apt-get install -y \
 # Set working directory
 WORKDIR /app
 
-# Copy requirements and install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+# Copy project metadata and install Python dependencies
+COPY pyproject.toml .
+RUN pip install --no-cache-dir --user .
 
 # Production stage
 FROM python:3.11-slim

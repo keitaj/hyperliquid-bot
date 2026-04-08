@@ -1,0 +1,28 @@
+[project]
+name = "hyperliquid-bot"
+version = "0.10.0"
+description = "Automated trading bot for Hyperliquid DEX with HIP-3 multi-DEX support"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "hyperliquid-python-sdk==0.22.0",
+    "python-dotenv==1.2.2",
+    "pandas==3.0.2",
+    "numpy==2.4.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "flake8>=6.0",
+]
+
+[tool.setuptools]
+packages = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.flake8]
+max-line-length = 120
+exclude = [".git", "__pycache__", ".env", "test_market_data.py"]
