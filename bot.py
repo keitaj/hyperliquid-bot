@@ -784,6 +784,9 @@ if __name__ == "__main__":
     parser.add_argument('--taker-fallback-age', type=float,
                         help='Seconds after max-position-age to fall back to taker for force-close. '
                              'Not set = never use taker. 0 = taker at max-position-age. (market_making)')
+    parser.add_argument('--aggressive-loss-bps', type=float,
+                        help='Max loss in bps accepted to avoid taker close (default: 1.0). '
+                             '0 = breakeven only, no loss-accepting tier. (market_making)')
 
     # Risk guardrail parameters
     parser.add_argument('--max-position-pct', type=float,
@@ -853,6 +856,7 @@ if __name__ == "__main__":
             ('refresh_interval', 'refresh_interval_seconds'),
             ('max_position_age', 'max_position_age_seconds'),
             ('taker_fallback_age', 'taker_fallback_age_seconds'),
+            'aggressive_loss_bps',
         ],
     }
 

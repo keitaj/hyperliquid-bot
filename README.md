@@ -292,6 +292,8 @@ The bot handles this automatically at startup:
 | 6 | `breakout` | Support/resistance breakout with volume and ATR confirmation |
 | 7 | `market_making` | Symmetric buy/sell limits around mid price for spread capture |
 
+The `market_making` strategy uses **progressive close pricing**: as a position ages, the take-profit price is tightened from full spread → breakeven (at 50% of max age) → small loss (at 75%), reducing costly taker force-closes. The loss tolerance is configurable via `--aggressive-loss-bps` (default: 1 bps).
+
 All parameters are configurable via CLI flags with sensible defaults.
 Run `python3 bot.py --help` for the full list, or see [Parameter Reference](#parameter-reference-for-ai-agents) below.
 
@@ -508,6 +510,7 @@ strategies:
     max_position_age_seconds: 120      # --max-position-age
     maker_only: false                  # --maker-only
     taker_fallback_age_seconds: null   # --taker-fallback-age  (seconds after max-position-age to fall back to taker; null = never)
+    aggressive_loss_bps: 1.0           # --aggressive-loss-bps (max loss in bps accepted to avoid taker close; 0 = breakeven only)
     account_cap_pct: 0.05              # --account-cap-pct
     max_positions: 3
     take_profit_percent: 1

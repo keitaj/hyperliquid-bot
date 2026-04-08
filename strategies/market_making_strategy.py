@@ -61,6 +61,7 @@ class MarketMakingStrategy(BaseStrategy):
             max_position_age_seconds=config.get('max_position_age_seconds', 120),
             maker_only=self.maker_only,
             taker_fallback_age_seconds=config.get('taker_fallback_age_seconds', None),
+            aggressive_loss_bps=config.get('aggressive_loss_bps', 1.0),
         )
 
     # ------------------------------------------------------------------ #
