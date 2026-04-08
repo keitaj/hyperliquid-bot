@@ -36,6 +36,7 @@ class PositionCloser:
         max_position_age_seconds: float,
         maker_only: bool,
         taker_fallback_age_seconds: Optional[float],
+        aggressive_loss_bps: float = 1.0,
     ) -> None:
         self.order_manager = order_manager
         self.market_data = market_data
@@ -43,6 +44,7 @@ class PositionCloser:
         self.max_position_age_seconds = max_position_age_seconds
         self.maker_only = maker_only
         self.taker_fallback_age_seconds = taker_fallback_age_seconds
+        self.aggressive_loss_bps = aggressive_loss_bps
 
         # coin -> (entry_time, close_oid or None, close_tier)
         self._open_positions: Dict[str, Tuple[float, Optional[int], int]] = {}
@@ -117,7 +119,7 @@ class PositionCloser:
                             f"[mm] Could not cancel close order for tightening {coin}: {e}"
                         )
                         return
-                    self._open_positions[coin] = (entry_time, None, current_tier)
+                    self._open_positions[coin] = (entry_time, None, desired_tier)
                     logger.info(
                         f"[mm] Tightening close for {coin} at age {age:.0f}s "
                         f"(tier {current_tier} -> {desired_tier})"
@@ -180,7 +182,7 @@ class PositionCloser:
                 except API_ERRORS as e:
                     logger.debug(f"[mm] Maker close failed for {coin}: {e}")
 
-        logger.info(f"[mm] Position {coin} held {age:.0f}s — maker close pending, will retry next cycle")
+        logger.info(f"[mm] Position {coin} held {age:.0f}s -- maker close pending, will retry next cycle")
 
     def _get_tier(self, age: float) -> int:
         """Return the close price tier for the given position age."""
@@ -201,7 +203,7 @@ class PositionCloser:
         elif tier == _TIER_BREAKEVEN:
             return 0.0
         else:
-            return -1.0
+            return -self.aggressive_loss_bps
 
     def _place_take_profit(
         self, coin: str, size: float, entry_price: float,
