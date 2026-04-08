@@ -7,7 +7,6 @@
 ## Documentation
 <!-- Check all that apply -->
 - [ ] README updated (if new config options or behavioral changes)
-- [ ] CHANGELOG.md updated
 
 ## Test Plan
 - [ ] All existing tests pass
