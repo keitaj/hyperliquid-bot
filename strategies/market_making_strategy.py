@@ -22,6 +22,9 @@ from rate_limiter import API_ERRORS
 
 logger = logging.getLogger(__name__)
 
+# Minimum offset (in fraction) from BBO to avoid post-only rejections
+_BBO_OFFSET = 1 / 10_000  # 1 basis point
+
 
 class MarketMakingStrategy(BaseStrategy):
 
@@ -185,13 +188,11 @@ class MarketMakingStrategy(BaseStrategy):
         buy_price, sell_price = self._get_spread_prices(mid_price)
 
         # Clamp prices to stay outside BBO for maker-only (Alo) orders
-        if self.maker_only:
-            bbo = self.market_data.get_market_data(coin)
-            if bbo and bbo.bid > 0 and bbo.ask > 0:
-                if buy_price >= bbo.bid:
-                    buy_price = round_price(bbo.bid - bbo.bid * (1 / 10_000))
-                if sell_price <= bbo.ask:
-                    sell_price = round_price(bbo.ask + bbo.ask * (1 / 10_000))
+        if self.maker_only and market_data.bid > 0 and market_data.ask > 0:
+            if buy_price >= market_data.bid:
+                buy_price = round_price(market_data.bid * (1 - _BBO_OFFSET))
+            if sell_price <= market_data.ask:
+                sell_price = round_price(market_data.ask * (1 + _BBO_OFFSET))
 
         size = self.calculate_position_size(coin, {})
         if size <= 0:

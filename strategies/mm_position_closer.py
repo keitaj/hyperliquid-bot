@@ -12,6 +12,9 @@ from rate_limiter import API_ERRORS
 
 logger = logging.getLogger(__name__)
 
+# Minimum offset (in fraction) from BBO to avoid post-only rejections
+_BBO_OFFSET = 1 / 10_000  # 1 basis point
+
 
 class PositionCloser:
     """Manages close orders for filled market-making positions."""
@@ -130,11 +133,13 @@ class PositionCloser:
             close_side = OrderSide.SELL if size > 0 else OrderSide.BUY
             if market_data.bid > 0 and market_data.ask > 0:
                 if close_side == OrderSide.SELL:
-                    close_price = round_price(market_data.ask + market_data.ask * (1 / 10_000))
+                    close_price = round_price(market_data.ask * (1 + _BBO_OFFSET))
                 else:
-                    close_price = round_price(market_data.bid - market_data.bid * (1 / 10_000))
+                    close_price = round_price(market_data.bid * (1 - _BBO_OFFSET))
             else:
-                close_price = round_price(market_data.mid_price)
+                # No BBO available — skip to avoid rejection at mid_price
+                logger.info(f"[mm] Position {coin} held {age:.0f}s — no BBO, skipping maker close")
+                return
             abs_size = self.market_data.round_size(coin, abs(size))
             if abs_size > 0:
                 try:
@@ -161,21 +166,22 @@ class PositionCloser:
         else:
             close_price = round_price(entry_price * (1 - self.spread_bps / 10_000))
 
+        # Clamp take-profit price outside BBO to avoid post-only rejections
         if self.maker_only:
             md = self.market_data.get_market_data(coin)
             if md and md.bid > 0 and md.ask > 0:
                 if close_side == OrderSide.SELL and close_price <= md.ask:
+                    close_price = round_price(md.ask * (1 + _BBO_OFFSET))
                     logger.debug(
-                        f"[mm] Take-profit sell for {coin} at {close_price:.6f} "
-                        f"would cross ask {md.ask:.6f}, skipping"
+                        f"[mm] Clamped take-profit sell for {coin} to {close_price:.6f} "
+                        f"(ask={md.ask:.6f})"
                     )
-                    return
                 if close_side == OrderSide.BUY and close_price >= md.bid:
+                    close_price = round_price(md.bid * (1 - _BBO_OFFSET))
                     logger.debug(
-                        f"[mm] Take-profit buy for {coin} at {close_price:.6f} "
-                        f"would cross bid {md.bid:.6f}, skipping"
+                        f"[mm] Clamped take-profit buy for {coin} to {close_price:.6f} "
+                        f"(bid={md.bid:.6f})"
                     )
-                    return
 
         abs_size = self.market_data.round_size(coin, abs(size))
         if abs_size <= 0:
