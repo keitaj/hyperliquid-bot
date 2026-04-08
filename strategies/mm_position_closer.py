@@ -85,7 +85,7 @@ class PositionCloser:
         """
         size = position.get('size', 0)
         if abs(size) == 0:
-            # Position already closed externally — clean up stale tracking
+            # Position already closed externally -- clean up stale tracking
             self._open_positions.pop(coin, None)
             return
         entry_price = position['entry_price']
@@ -155,7 +155,7 @@ class PositionCloser:
                 use_taker = True
 
         if use_taker:
-            logger.warning(f"[mm] Position {coin} held {age:.0f}s — force closing with taker order")
+            logger.warning(f"[mm] Position {coin} held {age:.0f}s -- force closing with taker order")
             close_position_fn(coin)
             self._open_positions.pop(coin, None)
             return
