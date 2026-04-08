@@ -85,8 +85,8 @@ class PositionCloser:
         """
         size = position.get('size', 0)
         if abs(size) == 0:
-            # Position already closed externally -- clean up stale tracking
-            self._open_positions.pop(coin, None)
+            # Position already closed externally -- cancel orphaned close order and clean up
+            self.cleanup_closed(coin)
             return
         entry_price = position['entry_price']
         now = time.monotonic()
