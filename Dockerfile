@@ -10,9 +10,8 @@ RUN apt-get update && apt-get install -y \
 # Set working directory
 WORKDIR /app
 
-# Copy project files and install Python dependencies
+# Copy project metadata and install Python dependencies
 COPY pyproject.toml .
-COPY README.md .
 RUN pip install --no-cache-dir --user .
 
 # Production stage
