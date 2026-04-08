@@ -1,17 +1,14 @@
 ## Summary
+<!-- 1-3 bullet points describing what this PR does and why -->
 
-<!-- What does this PR do? Keep it brief. -->
+## Breaking Changes
+<!-- List any breaking changes or behavioral differences. Write "None" if not applicable -->
 
-## Changes
-
--
+## Documentation
+<!-- Check all that apply -->
+- [ ] README updated (if new config options or behavioral changes)
+- [ ] CHANGELOG.md updated
 
 ## Test Plan
-
-- [ ] Tests pass (`python -m pytest tests/ -v`)
-- [ ] Lint passes (`flake8 . --max-line-length=120`)
-- [ ] Tested on testnet (if applicable)
-
-## Related Issues
-
-<!-- e.g., Closes #123 -->
+- [ ] All existing tests pass
+- [ ] New tests added for new code paths
