@@ -170,6 +170,15 @@ class GridTradingStrategy(BaseStrategy):
             logger.error(f"Error generating grid signals for {coin}: {e}")
             return None
 
+    def _coin_status(self, coin: str) -> str:
+        """Grid-specific status: ranging state and fill count."""
+        if coin not in self.active_grids:
+            return "no_grid"
+        grid = self.active_grids[coin]
+        filled = len(grid['filled_orders'])
+        total = len(grid['levels'])
+        return f"grid:{filled}/{total}"
+
     def _calculate_limit_price(self, market_data, side: str) -> float:
         if hasattr(self, '_current_signal') and 'grid_price' in self._current_signal:
             return round_price(self._current_signal['grid_price'])

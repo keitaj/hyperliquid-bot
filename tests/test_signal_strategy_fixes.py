@@ -19,6 +19,7 @@ def _make_rsi():
     s.positions = {}
     s.market_data = MagicMock()
     s.order_manager = MagicMock()
+    s._last_rsi = {}
     return s
 
 

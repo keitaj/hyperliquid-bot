@@ -29,6 +29,14 @@ class RSIStrategy(BaseStrategy):
         self.rsi_moderate_low = config.get('rsi_moderate_low', 35)
         self.size_multiplier_extreme = config.get('size_multiplier_extreme', 1.5)
         self.size_multiplier_moderate = config.get('size_multiplier_moderate', 1.2)
+        self._last_rsi: Dict[str, float] = {}  # coin -> last RSI value
+
+    def _coin_status(self, coin: str) -> str:
+        """RSI-specific status: current RSI value."""
+        rsi = self._last_rsi.get(coin)
+        if rsi is None:
+            return "no_data"
+        return f"rsi:{rsi:.0f}"
 
     def calculate_rsi(self, df: pd.DataFrame) -> pd.DataFrame:
         """Calculate RSI and add it as a column to the DataFrame."""
@@ -56,6 +64,8 @@ class RSIStrategy(BaseStrategy):
                     f"RSI for {coin}: NaN (insufficient price movement)"
                 )
                 return None
+
+            self._last_rsi[coin] = current_rsi
 
             logger.debug(
                 f"RSI {coin}: {current_rsi:.1f} (prev={prev_rsi:.1f}, "

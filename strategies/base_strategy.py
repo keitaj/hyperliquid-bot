@@ -25,9 +25,10 @@ class BaseStrategy(ABC):
         self.config = config
         self.positions: Dict[str, Dict] = {}
 
-        # Heartbeat logging for observability
+        # Heartbeat logging for observability (retained for backward compat)
         self._heartbeat_interval: float = config.get('heartbeat_interval', 300)
         self._last_heartbeat: float = 0.0
+        self._max_coin_status_display: int = config.get('max_coin_status_display', 10)
 
     @abstractmethod
     def generate_signals(self, coin: str) -> Optional[Dict]:
@@ -227,19 +228,16 @@ class BaseStrategy(ABC):
         )
 
     def run(self, coins: List[str]) -> None:
-        logger.debug(
-            f"[cycle-start] Processing {len(coins)} coins, "
-            f"{len(self.positions)} existing positions"
-        )
         self.update_positions()
 
         signals_generated = 0
         signals_attempted = 0
+        coin_statuses = []
 
         for coin in coins:
-            logger.debug(f"Processing {coin}")
             if self.should_close_position(coin):
                 self.close_position(coin)
+                coin_statuses.append(f"{coin}:close")
             else:
                 signal = self.generate_signals(coin)
                 signal = self._validate_signal(signal)
@@ -247,16 +245,30 @@ class BaseStrategy(ABC):
                     signals_generated += 1
                     self.execute_signal(coin, signal)
                     signals_attempted += 1
+                    coin_statuses.append(f"{coin}:{signal.get('side', '?')}")
+                else:
+                    coin_statuses.append(f"{coin}:{self._coin_status(coin)}")
 
+        pos_count = len(self.positions)
+
+        # Per-cycle log with coin-level status (truncated for large lists)
+        if len(coin_statuses) <= self._max_coin_status_display:
+            status_str = " | ".join(coin_statuses)
+        else:
+            shown = coin_statuses[:self._max_coin_status_display]
+            status_str = " | ".join(shown) + f" ... +{len(coin_statuses) - self._max_coin_status_display} more"
+        logger.info(
+            f"[cycle] {len(coins)} coins, {signals_generated} signals, "
+            f"{pos_count} pos | {status_str}"
+        )
+
+        # Periodic heartbeat (retained for backward compatibility with
+        # monitoring tools that grep for "[heartbeat]")
         self._log_heartbeat(len(coins), signals_generated, signals_attempted)
 
     def _log_heartbeat(self, coins_checked: int, signals_generated: int,
                        signals_attempted: int) -> None:
-        """Log periodic heartbeat so operators can verify the bot is alive.
-
-        Fires immediately on first call (``_last_heartbeat`` starts at 0)
-        to serve as a startup confirmation signal.
-        """
+        """Emit a periodic ``[heartbeat]`` log line for monitoring tools."""
         now = time.monotonic()
         if now - self._last_heartbeat < self._heartbeat_interval:
             return
@@ -267,3 +279,11 @@ class BaseStrategy(ABC):
             f"{signals_generated} signals, {signals_attempted} attempted, "
             f"{pos_count} positions"
         )
+
+    def _coin_status(self, coin: str) -> str:
+        """Return a short status string for a coin with no signal.
+
+        Subclasses can override to provide strategy-specific details
+        (e.g. RSI value, grid fill count).
+        """
+        return "idle"
