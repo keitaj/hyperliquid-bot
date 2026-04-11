@@ -90,7 +90,7 @@ class BaseStrategy(ABC):
         logger.debug(f"Fetching {lb} candles ({ival}) for {coin}")
         try:
             candles = self.market_data.get_candles(coin=coin, interval=ival, lookback=lb)
-        except Exception as e:
+        except (API_ERRORS, ValueError, KeyError) as e:
             logger.warning(f"Failed to fetch candles for {coin}: {e}")
             return None
         logger.debug(f"Got {len(candles)} candles for {coin}")
