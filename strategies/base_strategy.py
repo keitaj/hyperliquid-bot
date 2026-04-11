@@ -80,11 +80,19 @@ class BaseStrategy(ABC):
     def _get_candles_or_none(self, coin: str, min_periods: int,
                              interval: Optional[str] = None,
                              lookback: Optional[int] = None) -> Optional[pd.DataFrame]:
-        """Fetch candles and return None if fewer than *min_periods* rows."""
+        """Fetch candles and return None if fewer than *min_periods* rows.
+
+        Any exception during the fetch is caught and logged so that a
+        single coin failure does not block the rest of the cycle.
+        """
         ival = interval or getattr(self, 'candle_interval', '15m')
         lb = lookback or getattr(self, 'lookback', min_periods + 10)
         logger.debug(f"Fetching {lb} candles ({ival}) for {coin}")
-        candles = self.market_data.get_candles(coin=coin, interval=ival, lookback=lb)
+        try:
+            candles = self.market_data.get_candles(coin=coin, interval=ival, lookback=lb)
+        except (API_ERRORS, ValueError, KeyError) as e:
+            logger.warning(f"Failed to fetch candles for {coin}: {e}")
+            return None
         logger.debug(f"Got {len(candles)} candles for {coin}")
         if len(candles) < min_periods:
             return None
@@ -219,12 +227,17 @@ class BaseStrategy(ABC):
         )
 
     def run(self, coins: List[str]) -> None:
+        logger.debug(
+            f"[cycle-start] Processing {len(coins)} coins, "
+            f"{len(self.positions)} existing positions"
+        )
         self.update_positions()
 
         signals_generated = 0
         signals_attempted = 0
 
         for coin in coins:
+            logger.debug(f"Processing {coin}")
             if self.should_close_position(coin):
                 self.close_position(coin)
             else:
