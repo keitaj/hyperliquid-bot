@@ -23,6 +23,9 @@ _TIER_NORMAL = 0       # full take-profit spread
 _TIER_BREAKEVEN = 1    # 0 bps (breakeven)
 _TIER_AGGRESSIVE = 2   # -1 bps (accept small loss)
 
+# Clear stale position tracking after this many consecutive close failures
+_GHOST_CLEAR_THRESHOLD = 5
+
 
 class PositionCloser:
     """Manages close orders for filled market-making positions."""
@@ -135,16 +138,17 @@ class PositionCloser:
                 self._open_positions[coin] = (entry_time, None, current_tier)
 
         # Place take-profit close order with price based on position age
-        self._place_take_profit(coin, size, entry_price, entry_time, desired_tier)
+        placed = self._place_take_profit(coin, size, entry_price, entry_time, desired_tier)
 
         # Auto-clear stale tracking after repeated failures to place a close order.
         # This handles ghost positions where the exchange has closed the position
         # but stale cached data causes the bot to keep trying to close it.
+        # Only count when placement was actually attempted (not skipped due to size rounding).
         entry = self._open_positions.get(coin)
-        if entry and entry[1] is None:
+        if placed and entry and entry[1] is None:
             count = self._consecutive_close_failures.get(coin, 0) + 1
             self._consecutive_close_failures[coin] = count
-            if count >= 5:
+            if count >= _GHOST_CLEAR_THRESHOLD:
                 logger.warning(
                     f"[mm] {coin}: {count} consecutive close failures "
                     "— clearing stale position tracking (ghost position)"
@@ -237,7 +241,8 @@ class PositionCloser:
     def _place_take_profit(
         self, coin: str, size: float, entry_price: float,
         entry_time: float, tier: int,
-    ) -> None:
+    ) -> bool:
+        """Place a take-profit close order. Returns True if placement was attempted."""
         effective_spread = self._tier_spread_bps(tier)
         age = time.monotonic() - entry_time
 
@@ -266,7 +271,7 @@ class PositionCloser:
 
         abs_size = self.market_data.round_size(coin, abs(size))
         if abs_size <= 0:
-            return
+            return False  # Size rounding issue, not a placement failure
 
         try:
             order = self.order_manager.create_limit_order(
@@ -285,8 +290,10 @@ class PositionCloser:
                     f"size={abs_size} price={close_price:.6f} "
                     f"spread={effective_spread:.1f}bps age={age:.0f}s (oid={order.id})"
                 )
+                return True
         except API_ERRORS as e:
             logger.error(f"[mm] Failed to place close order for {coin}: {e}")
+        return True  # Placement was attempted even if it failed
 
     def _is_order_alive(self, coin: str, oid: int) -> bool:
         try:

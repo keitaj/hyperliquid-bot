@@ -1,7 +1,7 @@
 """Tests for ghost position bug fixes.
 
 Fix 1: Cache invalidation on API error in MultiDexMarketData.get_user_state()
-Fix 3: Auto-clear stale position tracking after consecutive close failures
+Fix 2: Auto-clear stale position tracking after consecutive close failures
 """
 
 import time
@@ -107,7 +107,7 @@ class TestUserStateCacheInvalidation:
 
 
 # ------------------------------------------------------------------ #
-# Fix 3: Auto-clear after consecutive close failures
+# Fix 2: Auto-clear after consecutive close failures
 # ------------------------------------------------------------------ #
 
 
