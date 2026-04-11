@@ -222,7 +222,7 @@ class BaseStrategy(ABC):
         self.update_positions()
 
         signals_generated = 0
-        signals_executed = 0
+        signals_attempted = 0
 
         for coin in coins:
             if self.should_close_position(coin):
@@ -233,13 +233,17 @@ class BaseStrategy(ABC):
                 if signal:
                     signals_generated += 1
                     self.execute_signal(coin, signal)
-                    signals_executed += 1
+                    signals_attempted += 1
 
-        self._log_heartbeat(len(coins), signals_generated, signals_executed)
+        self._log_heartbeat(len(coins), signals_generated, signals_attempted)
 
     def _log_heartbeat(self, coins_checked: int, signals_generated: int,
-                       signals_executed: int) -> None:
-        """Log periodic heartbeat so operators can verify the bot is alive."""
+                       signals_attempted: int) -> None:
+        """Log periodic heartbeat so operators can verify the bot is alive.
+
+        Fires immediately on first call (``_last_heartbeat`` starts at 0)
+        to serve as a startup confirmation signal.
+        """
         now = time.monotonic()
         if now - self._last_heartbeat < self._heartbeat_interval:
             return
@@ -247,6 +251,6 @@ class BaseStrategy(ABC):
         pos_count = len(self.positions)
         logger.info(
             f"[heartbeat] {coins_checked} coins checked, "
-            f"{signals_generated} signals, {signals_executed} executed, "
+            f"{signals_generated} signals, {signals_attempted} attempted, "
             f"{pos_count} positions"
         )

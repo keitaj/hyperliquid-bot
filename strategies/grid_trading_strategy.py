@@ -91,7 +91,7 @@ class GridTradingStrategy(BaseStrategy):
                 logger.info(
                     f"{coin} not in ranging market "
                     f"(range={price_range['range_pct']:.1f}%, "
-                    f"vol={price_range['volatility']:.3f}), skipping"
+                    f"vol={price_range['volatility']:.3f}), skipping grid strategy"
                 )
                 return None
 
