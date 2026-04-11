@@ -327,6 +327,12 @@ class HyperliquidBot:
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
+        # Reset any rate-limiter backoff accumulated during validation.
+        # Validation makes many API calls and can trigger 429s whose
+        # backoff would otherwise penalise the first trading cycles.
+        from rate_limiter import api_wrapper
+        api_wrapper.rate_limiter.reset_backoff()
+
         consecutive_errors = 0
 
         while self.running:
