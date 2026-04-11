@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 import logging
 import math
+import time
 import pandas as pd
 from market_data import MarketDataManager, MarketData
 from order_manager import OrderManager, OrderSide, round_price
@@ -23,6 +24,10 @@ class BaseStrategy(ABC):
         self.order_manager = order_manager
         self.config = config
         self.positions: Dict[str, Dict] = {}
+
+        # Heartbeat logging for observability
+        self._heartbeat_interval: float = config.get('heartbeat_interval', 300)
+        self._last_heartbeat: float = 0.0
 
     @abstractmethod
     def generate_signals(self, coin: str) -> Optional[Dict]:
@@ -76,11 +81,11 @@ class BaseStrategy(ABC):
                              interval: Optional[str] = None,
                              lookback: Optional[int] = None) -> Optional[pd.DataFrame]:
         """Fetch candles and return None if fewer than *min_periods* rows."""
-        candles = self.market_data.get_candles(
-            coin=coin,
-            interval=interval or getattr(self, 'candle_interval', '15m'),
-            lookback=lookback or getattr(self, 'lookback', min_periods + 10),
-        )
+        ival = interval or getattr(self, 'candle_interval', '15m')
+        lb = lookback or getattr(self, 'lookback', min_periods + 10)
+        logger.debug(f"Fetching {lb} candles ({ival}) for {coin}")
+        candles = self.market_data.get_candles(coin=coin, interval=ival, lookback=lb)
+        logger.debug(f"Got {len(candles)} candles for {coin}")
         if len(candles) < min_periods:
             return None
         return candles
@@ -216,6 +221,9 @@ class BaseStrategy(ABC):
     def run(self, coins: List[str]) -> None:
         self.update_positions()
 
+        signals_generated = 0
+        signals_executed = 0
+
         for coin in coins:
             if self.should_close_position(coin):
                 self.close_position(coin)
@@ -223,4 +231,22 @@ class BaseStrategy(ABC):
                 signal = self.generate_signals(coin)
                 signal = self._validate_signal(signal)
                 if signal:
+                    signals_generated += 1
                     self.execute_signal(coin, signal)
+                    signals_executed += 1
+
+        self._log_heartbeat(len(coins), signals_generated, signals_executed)
+
+    def _log_heartbeat(self, coins_checked: int, signals_generated: int,
+                       signals_executed: int) -> None:
+        """Log periodic heartbeat so operators can verify the bot is alive."""
+        now = time.monotonic()
+        if now - self._last_heartbeat < self._heartbeat_interval:
+            return
+        self._last_heartbeat = now
+        pos_count = len(self.positions)
+        logger.info(
+            f"[heartbeat] {coins_checked} coins checked, "
+            f"{signals_generated} signals, {signals_executed} executed, "
+            f"{pos_count} positions"
+        )
