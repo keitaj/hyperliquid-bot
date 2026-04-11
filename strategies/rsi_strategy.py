@@ -51,6 +51,11 @@ class RSIStrategy(BaseStrategy):
             current_rsi = df['rsi'].iloc[-1]
             prev_rsi = df['rsi'].iloc[-2]
 
+            logger.debug(
+                f"RSI {coin}: {current_rsi:.1f} (prev={prev_rsi:.1f}, "
+                f"oversold={self.oversold_threshold}, overbought={self.overbought_threshold})"
+            )
+
             has_position = self._has_position(coin)
 
             if prev_rsi >= self.oversold_threshold and current_rsi < self.oversold_threshold:

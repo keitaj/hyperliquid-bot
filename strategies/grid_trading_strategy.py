@@ -80,8 +80,19 @@ class GridTradingStrategy(BaseStrategy):
             df = candles
             price_range = self.calculate_price_range(df)
 
+            logger.debug(
+                f"Grid {coin}: price={price_range['current']:.2f} "
+                f"range={price_range['range_pct']:.1f}% "
+                f"vol={price_range['volatility']:.3f} "
+                f"is_ranging={price_range['is_ranging']}"
+            )
+
             if not price_range['is_ranging']:
-                logger.info(f"{coin} not in ranging market, skipping grid strategy")
+                logger.info(
+                    f"{coin} not in ranging market "
+                    f"(range={price_range['range_pct']:.1f}%, "
+                    f"vol={price_range['volatility']:.3f}), skipping grid strategy"
+                )
                 return None
 
             current_price = price_range['current']
