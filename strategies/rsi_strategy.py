@@ -51,6 +51,12 @@ class RSIStrategy(BaseStrategy):
             current_rsi = df['rsi'].iloc[-1]
             prev_rsi = df['rsi'].iloc[-2]
 
+            if pd.isna(current_rsi) or pd.isna(prev_rsi):
+                logger.debug(
+                    f"RSI for {coin}: NaN (insufficient price movement)"
+                )
+                return None
+
             logger.debug(
                 f"RSI {coin}: {current_rsi:.1f} (prev={prev_rsi:.1f}, "
                 f"oversold={self.oversold_threshold}, overbought={self.overbought_threshold})"
@@ -70,6 +76,8 @@ class RSIStrategy(BaseStrategy):
                     }
 
             elif prev_rsi <= self.overbought_threshold and current_rsi > self.overbought_threshold:
+                # NOTE: Only closes long positions. Short positions are not
+                # managed by this strategy (no short-close signal).
                 if self._has_position(coin) and self.positions[coin]['size'] > 0:
                     logger.info(f"RSI overbought signal for {coin}: RSI={current_rsi:.2f}")
                     return {

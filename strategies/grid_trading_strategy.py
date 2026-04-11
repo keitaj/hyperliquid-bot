@@ -137,13 +137,32 @@ class GridTradingStrategy(BaseStrategy):
                             'grid_price': grid_price
                         }
 
-            if len(candles) - candles.index.get_loc(grid_info['last_update']) > self.grid_recalc_bars:
+            # Check if grid needs recalculation
+            try:
+                bars_since_update = (
+                    len(candles) - candles.index.get_loc(grid_info['last_update'])
+                )
+            except KeyError:
+                # Stored index no longer in new candles; force recalculation
+                bars_since_update = self.grid_recalc_bars + 1
+
+            if bars_since_update > self.grid_recalc_bars:
                 self.active_grids[coin] = {
                     'levels': self.calculate_grid_levels(price_range),
                     'filled_orders': {},
                     'last_update': df.index[-1]
                 }
                 logger.info(f"Grid levels recalculated for {coin}")
+
+            # Log grid status for observability
+            if coin in self.active_grids:
+                grid = self.active_grids[coin]
+                total = len(grid['levels'])
+                filled = len(grid['filled_orders'])
+                logger.debug(
+                    f"Grid {coin}: {filled}/{total} levels filled, "
+                    f"price={current_price:.2f}"
+                )
 
             return None
 
