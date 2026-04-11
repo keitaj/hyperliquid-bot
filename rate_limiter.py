@@ -191,7 +191,10 @@ class APICallWrapper:
                     logger.error("Network error after %d attempts, giving up", self.MAX_RETRIES)
                     raise classified
 
-                # Non-transient errors (DataError, ConfigurationError): fail immediately
+                # Non-transient errors (DataError, ConfigurationError): fail immediately.
+                # Reset backoff since this is not a rate-limit issue — keeping
+                # stale backoff would penalise subsequent unrelated API calls.
+                self.rate_limiter.on_success()
                 raise classified
 
         raise last_exception  # pragma: no cover
