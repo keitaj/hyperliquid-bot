@@ -92,13 +92,22 @@ class RateLimiter:
             )
             logger.warning(f"429 error #{self._consecutive_429s}, backoff: {self._current_backoff:.2f}s")
 
-    def on_success(self) -> None:
-        """Called on successful request to reset backoff"""
+    def reset_backoff(self) -> None:
+        """Clear rate-limit backoff state.
+
+        Called after a successful request, or when a non-transient error
+        (e.g. 422 DataError) proves the issue is not rate-limiting.
+        """
         with self._lock:
             if self._consecutive_429s > 0:
-                logger.info("Request successful, resetting backoff")
                 self._consecutive_429s = 0
                 self._current_backoff = 0.0
+
+    def on_success(self) -> None:
+        """Called on successful request to reset backoff"""
+        if self._consecutive_429s > 0:
+            logger.info("Request successful, resetting backoff")
+        self.reset_backoff()
 
 
 class APICallWrapper:
@@ -191,7 +200,10 @@ class APICallWrapper:
                     logger.error("Network error after %d attempts, giving up", self.MAX_RETRIES)
                     raise classified
 
-                # Non-transient errors (DataError, ConfigurationError): fail immediately
+                # Non-transient errors (DataError, ConfigurationError): fail immediately.
+                # Reset backoff since this is not a rate-limit issue — keeping
+                # stale backoff would penalise subsequent unrelated API calls.
+                self.rate_limiter.reset_backoff()
                 raise classified
 
         raise last_exception  # pragma: no cover
