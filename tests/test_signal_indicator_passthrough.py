@@ -49,6 +49,7 @@ class TestRSISignalPassthrough:
         strategy.market_data = MagicMock()
         strategy.order_manager = MagicMock()
         strategy.config = {}
+        strategy._last_rsi = {}
         return strategy
 
     def _make_oversold_candles(self):

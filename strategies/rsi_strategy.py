@@ -65,8 +65,6 @@ class RSIStrategy(BaseStrategy):
                 )
                 return None
 
-            if not hasattr(self, '_last_rsi'):
-                self._last_rsi = {}
             self._last_rsi[coin] = current_rsi
 
             logger.debug(

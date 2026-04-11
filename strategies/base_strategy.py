@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 import logging
 import math
+import time
 import pandas as pd
 from market_data import MarketDataManager, MarketData
 from order_manager import OrderManager, OrderSide, round_price
@@ -23,6 +24,11 @@ class BaseStrategy(ABC):
         self.order_manager = order_manager
         self.config = config
         self.positions: Dict[str, Dict] = {}
+
+        # Heartbeat logging for observability (retained for backward compat)
+        self._heartbeat_interval: float = config.get('heartbeat_interval', 300)
+        self._last_heartbeat: float = 0.0
+        self._max_coin_status_display: int = 10
 
     @abstractmethod
     def generate_signals(self, coin: str) -> Optional[Dict]:
@@ -243,11 +249,35 @@ class BaseStrategy(ABC):
                 else:
                     coin_statuses.append(f"{coin}:{self._coin_status(coin)}")
 
-        status_str = " | ".join(coin_statuses)
         pos_count = len(self.positions)
+
+        # Per-cycle log with coin-level status (truncated for large lists)
+        if len(coin_statuses) <= self._max_coin_status_display:
+            status_str = " | ".join(coin_statuses)
+        else:
+            shown = coin_statuses[:self._max_coin_status_display]
+            status_str = " | ".join(shown) + f" ... +{len(coin_statuses) - self._max_coin_status_display} more"
         logger.info(
             f"[cycle] {len(coins)} coins, {signals_generated} signals, "
             f"{pos_count} pos | {status_str}"
+        )
+
+        # Periodic heartbeat (retained for backward compatibility with
+        # monitoring tools that grep for "[heartbeat]")
+        self._log_heartbeat(len(coins), signals_generated, signals_attempted)
+
+    def _log_heartbeat(self, coins_checked: int, signals_generated: int,
+                       signals_attempted: int) -> None:
+        """Emit a periodic ``[heartbeat]`` log line for monitoring tools."""
+        now = time.monotonic()
+        if now - self._last_heartbeat < self._heartbeat_interval:
+            return
+        self._last_heartbeat = now
+        pos_count = len(self.positions)
+        logger.info(
+            f"[heartbeat] {coins_checked} coins checked, "
+            f"{signals_generated} signals, {signals_attempted} attempted, "
+            f"{pos_count} positions"
         )
 
     def _coin_status(self, coin: str) -> str:
