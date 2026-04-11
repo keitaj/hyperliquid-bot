@@ -88,6 +88,7 @@ class MultiDexMarketData(MarketDataManager):
             return result
         except API_ERRORS as e:
             logger.error(f"Error fetching user state (dex={dex}): {e}")
+            self._user_state_cache.pop(cache_key, None)
             return {}
 
     def get_open_orders_dex(self, address: str, dex: Optional[str] = None) -> List[Dict]:

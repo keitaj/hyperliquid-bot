@@ -48,6 +48,8 @@ class PositionCloser:
 
         # coin -> (entry_time, close_oid or None, close_tier)
         self._open_positions: Dict[str, Tuple[float, Optional[int], int]] = {}
+        # coin -> consecutive cycles where manage() failed to place a close order
+        self._consecutive_close_failures: Dict[str, int] = {}
 
     @property
     def tracked_coins(self) -> set:
@@ -69,10 +71,12 @@ class PositionCloser:
             except API_ERRORS as e:
                 logger.debug(f"[mm] Could not cancel leftover close order for {coin}: {e}")
         self._open_positions.pop(coin, None)
+        self._consecutive_close_failures.pop(coin, None)
 
     def on_position_closed(self, coin: str) -> None:
         """Remove tracking after an immediate close."""
         self._open_positions.pop(coin, None)
+        self._consecutive_close_failures.pop(coin, None)
 
     def manage(self, coin: str, position: Dict, close_position_fn) -> None:
         """Manage take-profit close for an open position.
@@ -132,6 +136,23 @@ class PositionCloser:
 
         # Place take-profit close order with price based on position age
         self._place_take_profit(coin, size, entry_price, entry_time, desired_tier)
+
+        # Auto-clear stale tracking after repeated failures to place a close order.
+        # This handles ghost positions where the exchange has closed the position
+        # but stale cached data causes the bot to keep trying to close it.
+        entry = self._open_positions.get(coin)
+        if entry and entry[1] is None:
+            count = self._consecutive_close_failures.get(coin, 0) + 1
+            self._consecutive_close_failures[coin] = count
+            if count >= 5:
+                logger.warning(
+                    f"[mm] {coin}: {count} consecutive close failures "
+                    "— clearing stale position tracking (ghost position)"
+                )
+                self._open_positions.pop(coin, None)
+                self._consecutive_close_failures.pop(coin, None)
+        else:
+            self._consecutive_close_failures.pop(coin, None)
 
     def _handle_force_close(
         self, coin: str, size: float, age: float,
