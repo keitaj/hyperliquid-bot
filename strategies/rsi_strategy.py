@@ -33,7 +33,7 @@ class RSIStrategy(BaseStrategy):
 
     def _coin_status(self, coin: str) -> str:
         """RSI-specific status: current RSI value."""
-        rsi = getattr(self, '_last_rsi', {}).get(coin)
+        rsi = self._last_rsi.get(coin)
         if rsi is None:
             return "no_data"
         return f"rsi:{rsi:.0f}"

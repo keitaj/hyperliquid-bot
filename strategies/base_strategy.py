@@ -28,7 +28,7 @@ class BaseStrategy(ABC):
         # Heartbeat logging for observability (retained for backward compat)
         self._heartbeat_interval: float = config.get('heartbeat_interval', 300)
         self._last_heartbeat: float = 0.0
-        self._max_coin_status_display: int = 10
+        self._max_coin_status_display: int = config.get('max_coin_status_display', 10)
 
     @abstractmethod
     def generate_signals(self, coin: str) -> Optional[Dict]:
