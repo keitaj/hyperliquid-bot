@@ -153,6 +153,9 @@ python3 bot.py --strategy breakout --lookback-period 30 --volume-multiplier 2.0 
 
 # Market Making Strategy
 python3 bot.py --strategy market_making --spread-bps 10 --order-size-usd 100 --maker-only --taker-fallback-age 60
+
+# Market Making with BBO mode (place orders at best bid/ask)
+python3 bot.py --strategy market_making --bbo-mode --bbo-offset-bps 0.5
 ```
 
 **Risk Guardrail Parameters**
@@ -293,6 +296,8 @@ The bot handles this automatically at startup:
 | 7 | `market_making` | Symmetric buy/sell limits around mid price for spread capture |
 
 The `market_making` strategy uses **progressive close pricing**: as a position ages, the take-profit price is tightened from full spread → breakeven (at 50% of max age) → small loss (at 75%), reducing costly taker force-closes. The loss tolerance is configurable via `--aggressive-loss-bps` (default: 1 bps).
+
+**BBO mode** (`--bbo-mode`): Places orders at the best bid/ask instead of `mid ± spread_bps`. On Hyperliquid, market spreads are typically 0.1–2 bps, so even `SPREAD_BPS=5` places orders 4–5 bps away from BBO, resulting in low fill rates. BBO mode improves fill rates by tracking the current best prices. Use `--bbo-offset-bps N` to place orders N bps behind BBO (default: 0 = at BBO). Falls back to `mid ± spread_bps` when BBO is unavailable.
 
 All parameters are configurable via CLI flags with sensible defaults.
 Run `python3 bot.py --help` for the full list, or see [Parameter Reference](#parameter-reference-for-ai-agents) below.
@@ -511,6 +516,8 @@ strategies:
     maker_only: false                  # --maker-only
     taker_fallback_age_seconds: null   # --taker-fallback-age  (seconds after max-position-age to fall back to taker; null = never)
     aggressive_loss_bps: 1.0           # --aggressive-loss-bps (max loss in bps accepted to avoid taker close; 0 = breakeven only)
+    bbo_mode: false                    # --bbo-mode  (place orders at best bid/ask instead of mid ± spread)
+    bbo_offset_bps: 0                  # --bbo-offset-bps  (bps behind BBO; 0 = at BBO)
     account_cap_pct: 0.05              # --account-cap-pct
     max_positions: 3
     take_profit_percent: 1
