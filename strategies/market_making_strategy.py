@@ -39,7 +39,14 @@ class MarketMakingStrategy(BaseStrategy):
         self.maker_only: bool = config.get('maker_only', False)
         self.account_cap_pct: float = config.get('account_cap_pct', 0.05)
         self.bbo_mode: bool = config.get('bbo_mode', False)
-        self.bbo_offset_bps: float = config.get('bbo_offset_bps', 0)
+        raw_offset = config.get('bbo_offset_bps', None)
+        if raw_offset is not None:
+            self.bbo_offset_bps = max(0.0, float(raw_offset))
+        elif self.bbo_mode and self.maker_only:
+            # Default to small offset to reduce Alo rejection risk in fast markets
+            self.bbo_offset_bps = 0.1
+        else:
+            self.bbo_offset_bps = 0.0
 
         # ---- Fill rate tracking ---- #
         self._orders_placed: int = 0
@@ -168,10 +175,11 @@ class MarketMakingStrategy(BaseStrategy):
     # ------------------------------------------------------------------ #
 
     def _place_orders(self, coin: str) -> None:
-        """Place a buy and a sell limit order symmetrically around mid price.
+        """Place a buy and a sell limit order.
 
-        Uses ``bulk_place_orders`` so that both orders are sent in a
-        single API call (1 weight instead of 2).
+        In BBO mode, orders are placed at or near the best bid/ask.
+        Otherwise, orders are placed symmetrically around mid price at
+        ``spread_bps``.  Uses ``bulk_place_orders`` for a single API call.
         """
         from order_manager import Order
 
@@ -193,6 +201,9 @@ class MarketMakingStrategy(BaseStrategy):
             buy_price = round_price(market_data.bid * (1 - offset))
             sell_price = round_price(market_data.ask * (1 + offset))
         else:
+            # Fallback: mid ± spread. Also used when BBO is unavailable
+            # (bid/ask=0) even in bbo_mode. Maker-only clamping below
+            # ensures Alo orders don't cross the spread.
             buy_price, sell_price = self._get_spread_prices(mid_price)
             # Clamp prices to stay outside BBO for maker-only (Alo) orders
             if self.maker_only and market_data.bid > 0 and market_data.ask > 0:
