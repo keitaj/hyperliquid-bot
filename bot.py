@@ -793,6 +793,12 @@ if __name__ == "__main__":
     parser.add_argument('--aggressive-loss-bps', type=float,
                         help='Max loss in bps accepted to avoid taker close (default: 1.0). '
                              '0 = breakeven only, no loss-accepting tier. (market_making)')
+    parser.add_argument('--bbo-mode', action='store_true',
+                        help='Place orders at BBO instead of mid±spread (market_making)')
+    parser.add_argument('--bbo-offset-bps', type=float,
+                        help='Offset from BBO in bps (0=at BBO, 1=1bp behind). '
+                             'Defaults to 0.1 when --maker-only to reduce Alo rejection risk. '
+                             'Negative values are clamped to 0. (market_making)')
 
     # Risk guardrail parameters
     parser.add_argument('--max-position-pct', type=float,
@@ -863,6 +869,8 @@ if __name__ == "__main__":
             ('max_position_age', 'max_position_age_seconds'),
             ('taker_fallback_age', 'taker_fallback_age_seconds'),
             'aggressive_loss_bps',
+            'bbo_mode',
+            'bbo_offset_bps',
         ],
     }
 
