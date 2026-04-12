@@ -140,6 +140,8 @@ class TestPlaceOrdersBBOClamping:
         s.max_positions = 10
         s.maker_only = maker_only
         s.account_cap_pct = 0.25
+        s.bbo_mode = False
+        s.bbo_offset_bps = 0
         s.positions = {}
         s._orders_placed = 0
         s._orders_placed_per_coin = defaultdict(int)

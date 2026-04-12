@@ -38,6 +38,8 @@ class MarketMakingStrategy(BaseStrategy):
         self.max_positions: int = config.get('max_positions', 3)
         self.maker_only: bool = config.get('maker_only', False)
         self.account_cap_pct: float = config.get('account_cap_pct', 0.05)
+        self.bbo_mode: bool = config.get('bbo_mode', False)
+        self.bbo_offset_bps: float = config.get('bbo_offset_bps', 0)
 
         # ---- Fill rate tracking ---- #
         self._orders_placed: int = 0
@@ -185,14 +187,19 @@ class MarketMakingStrategy(BaseStrategy):
         if mid_price <= 0:
             return
 
-        buy_price, sell_price = self._get_spread_prices(mid_price)
-
-        # Clamp prices to stay outside BBO for maker-only (Alo) orders
-        if self.maker_only and market_data.bid > 0 and market_data.ask > 0:
-            if buy_price >= market_data.bid:
-                buy_price = round_price(market_data.bid * (1 - BBO_OFFSET))
-            if sell_price <= market_data.ask:
-                sell_price = round_price(market_data.ask * (1 + BBO_OFFSET))
+        if self.bbo_mode and market_data.bid > 0 and market_data.ask > 0:
+            # BBO-following mode: place at/near best bid and ask
+            offset = self.bbo_offset_bps / 10_000
+            buy_price = round_price(market_data.bid * (1 - offset))
+            sell_price = round_price(market_data.ask * (1 + offset))
+        else:
+            buy_price, sell_price = self._get_spread_prices(mid_price)
+            # Clamp prices to stay outside BBO for maker-only (Alo) orders
+            if self.maker_only and market_data.bid > 0 and market_data.ask > 0:
+                if buy_price >= market_data.bid:
+                    buy_price = round_price(market_data.bid * (1 - BBO_OFFSET))
+                if sell_price <= market_data.ask:
+                    sell_price = round_price(market_data.ask * (1 + BBO_OFFSET))
 
         size = self.calculate_position_size(coin, {})
         if size <= 0:
