@@ -518,6 +518,7 @@ strategies:
     aggressive_loss_bps: 1.0           # --aggressive-loss-bps (max loss in bps accepted to avoid taker close; 0 = breakeven only)
     bbo_mode: false                    # --bbo-mode  (place orders at best bid/ask instead of mid ± spread)
     bbo_offset_bps: 0                  # --bbo-offset-bps  (bps behind BBO; 0 = at BBO)
+    inventory_skew_bps: 0              # --inventory-skew-bps (skew per unit of inventory; 0 = disabled)
     account_cap_pct: 0.05              # --account-cap-pct
     max_positions: 3
     take_profit_percent: 1

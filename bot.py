@@ -799,6 +799,9 @@ if __name__ == "__main__":
                         help='Offset from BBO in bps (0=at BBO, 1=1bp behind). '
                              'Defaults to 0.1 when --maker-only to reduce Alo rejection risk. '
                              'Negative values are clamped to 0. (market_making)')
+    parser.add_argument('--inventory-skew-bps', type=float,
+                        help='Skew prices per unit of inventory to encourage position reduction. '
+                             '0=disabled, 2=shift 2bps per order-size of inventory. (market_making)')
 
     # Risk guardrail parameters
     parser.add_argument('--max-position-pct', type=float,
@@ -871,6 +874,7 @@ if __name__ == "__main__":
             'aggressive_loss_bps',
             'bbo_mode',
             'bbo_offset_bps',
+            'inventory_skew_bps',
         ],
     }
 

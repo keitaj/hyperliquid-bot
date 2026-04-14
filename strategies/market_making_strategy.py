@@ -47,6 +47,8 @@ class MarketMakingStrategy(BaseStrategy):
             self.bbo_offset_bps = 0.1
         else:
             self.bbo_offset_bps = 0.0
+        self.inventory_skew_bps: float = config.get('inventory_skew_bps', 0)
+        self.inventory_skew_cap: float = config.get('inventory_skew_cap', 3.0)
 
         # ---- Fill rate tracking ---- #
         self._orders_placed: int = 0
@@ -212,6 +214,17 @@ class MarketMakingStrategy(BaseStrategy):
                 if sell_price <= market_data.ask:
                     sell_price = round_price(market_data.ask * (1 + BBO_OFFSET))
 
+        # Inventory skew: shift both prices to encourage position reduction.
+        # Applied after BBO/spread pricing intentionally — skew may push
+        # prices beyond BBO bounds (e.g. sell below ask) which is desired
+        # to accelerate inventory reduction via more aggressive fills.
+        skew = self._calculate_inventory_skew(coin, mid_price)
+        if skew != 0.0:
+            skew_mult = skew / 10_000
+            buy_price = round_price(buy_price * (1 - skew_mult))
+            sell_price = round_price(sell_price * (1 - skew_mult))
+            logger.debug(f"[mm] Inventory skew {coin}: {skew:.1f}bps")
+
         size = self.calculate_position_size(coin, {})
         if size <= 0:
             logger.debug(f"[mm] Position size is 0 for {coin}, skipping")
@@ -261,6 +274,32 @@ class MarketMakingStrategy(BaseStrategy):
         buy_price = round_price(mid_price - offset)
         sell_price = round_price(mid_price + offset)
         return buy_price, sell_price
+
+    def _calculate_inventory_skew(self, coin: str, mid_price: float) -> float:
+        """Calculate price skew in bps based on current inventory.
+
+        Positive skew shifts both prices down (encourages selling when long).
+        Negative skew shifts both prices up (encourages buying when short).
+        """
+        if not self.inventory_skew_bps:
+            return 0.0
+
+        position = self.positions.get(coin)
+        if not position or position['size'] == 0:
+            return 0.0
+
+        size = position['size']
+        if mid_price <= 0:
+            return 0.0
+
+        # Normalize position value relative to order_size_usd
+        position_value = abs(size) * mid_price
+        normalized = position_value / self.order_size_usd
+        normalized = min(normalized, self.inventory_skew_cap)
+
+        # Long = positive skew (shift down), Short = negative skew (shift up)
+        direction = 1.0 if size > 0 else -1.0
+        return direction * normalized * self.inventory_skew_bps
 
     # ------------------------------------------------------------------ #
     #  Fill rate observability
