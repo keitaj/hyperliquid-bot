@@ -148,6 +148,31 @@ class MarketMakingStrategy(BaseStrategy):
             except API_ERRORS as e:
                 logger.error(f"[mm] Error processing {coin}: {e}")
 
+        # Per-cycle log with inventory skew info
+        coin_statuses = []
+        for coin in coins:
+            pos = self.positions.get(coin)
+            if pos and pos['size'] != 0:
+                skew = self._calculate_inventory_skew(
+                    coin, self.market_data.get_market_data(coin).mid_price
+                    if self.market_data.get_market_data(coin) else 0
+                )
+                if abs(skew) > 0:
+                    coin_statuses.append(f"{coin}:skew{skew:+.1f}bp")
+                else:
+                    coin_statuses.append(f"{coin}:pos")
+            else:
+                coin_statuses.append(f"{coin}:idle")
+
+        if len(coin_statuses) <= 10:
+            status_str = " | ".join(coin_statuses)
+        else:
+            shown = coin_statuses[:10]
+            status_str = " | ".join(shown) + f" ... +{len(coin_statuses) - 10} more"
+        logger.info(
+            f"[cycle] {len(coins)} coins, {len(self.positions)} pos | {status_str}"
+        )
+
     # ------------------------------------------------------------------ #
     #  Stub implementations for abstract methods (not used in run())
     # ------------------------------------------------------------------ #
