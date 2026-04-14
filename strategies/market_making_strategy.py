@@ -148,15 +148,18 @@ class MarketMakingStrategy(BaseStrategy):
             except API_ERRORS as e:
                 logger.error(f"[mm] Error processing {coin}: {e}")
 
-        # Per-cycle log with inventory skew info
+        # Per-cycle log with inventory skew info.
+        # Format differs from base strategy's [cycle] (no signals_generated)
+        # because MM uses a position-based flow, not signal-based.
         coin_statuses = []
+        active_positions = 0
         for coin in coins:
             pos = self.positions.get(coin)
             if pos and pos['size'] != 0:
-                skew = self._calculate_inventory_skew(
-                    coin, self.market_data.get_market_data(coin).mid_price
-                    if self.market_data.get_market_data(coin) else 0
-                )
+                active_positions += 1
+                md = self.market_data.get_market_data(coin)
+                mid = md.mid_price if md else 0
+                skew = self._calculate_inventory_skew(coin, mid)
                 if abs(skew) > 0:
                     coin_statuses.append(f"{coin}:skew{skew:+.1f}bp")
                 else:
@@ -164,13 +167,14 @@ class MarketMakingStrategy(BaseStrategy):
             else:
                 coin_statuses.append(f"{coin}:idle")
 
-        if len(coin_statuses) <= 10:
+        max_display = getattr(self, '_max_coin_status_display', 10)
+        if len(coin_statuses) <= max_display:
             status_str = " | ".join(coin_statuses)
         else:
-            shown = coin_statuses[:10]
-            status_str = " | ".join(shown) + f" ... +{len(coin_statuses) - 10} more"
+            shown = coin_statuses[:max_display]
+            status_str = " | ".join(shown) + f" ... +{len(coin_statuses) - max_display} more"
         logger.info(
-            f"[cycle] {len(coins)} coins, {len(self.positions)} pos | {status_str}"
+            f"[cycle] {len(coins)} coins, {active_positions} pos | {status_str}"
         )
 
     # ------------------------------------------------------------------ #
