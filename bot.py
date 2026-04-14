@@ -802,6 +802,12 @@ if __name__ == "__main__":
     parser.add_argument('--inventory-skew-bps', type=float,
                         help='Skew prices per unit of inventory to encourage position reduction. '
                              '0=disabled, 2=shift 2bps per order-size of inventory. (market_making)')
+    parser.add_argument('--vol-adjust', action='store_true', default=False,
+                        help='Enable volatility-adjusted BBO offset (market_making)')
+    parser.add_argument('--vol-adjust-multiplier', type=float,
+                        help='Volatility multiplier for offset adjustment (default: 2.0, market_making)')
+    parser.add_argument('--vol-lookback', type=int,
+                        help='Number of recent mid prices for volatility calc (default: 30, market_making)')
 
     # Risk guardrail parameters
     parser.add_argument('--max-position-pct', type=float,
@@ -875,6 +881,9 @@ if __name__ == "__main__":
             'bbo_mode',
             'bbo_offset_bps',
             'inventory_skew_bps',
+            ('vol_adjust', 'vol_adjust_enabled'),
+            'vol_adjust_multiplier',
+            'vol_lookback',
         ],
     }
 

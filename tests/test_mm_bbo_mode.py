@@ -19,6 +19,10 @@ def _make_strategy(bbo_mode=False, bbo_offset_bps=0, spread_bps=10, maker_only=T
     s.bbo_mode = bbo_mode
     s.bbo_offset_bps = bbo_offset_bps
     s.inventory_skew_bps = 0
+    s.vol_adjust_enabled = False
+    s.vol_adjust_multiplier = 2.0
+    s.vol_lookback = 30
+    s._recent_mids = {}
     s.positions = {}
     s._orders_placed = 0
     s._orders_placed_per_coin = defaultdict(int)
