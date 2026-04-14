@@ -88,3 +88,27 @@ class OrderTracker:
                 )
 
         self._tracked_orders[coin] = still_active
+
+    def cancel_all_orders_for_coin(self, coin: str) -> None:
+        """Cancel all tracked orders for a coin.
+
+        Called when one side fills to prevent the opposite side from also
+        filling (which would double adverse selection cost).
+        """
+        tracked = self._tracked_orders.get(coin, [])
+        if not tracked:
+            return
+
+        cancel_requests = [{"coin": coin, "oid": oid} for oid, _side, _t in tracked]
+        try:
+            cancelled = self.order_manager.bulk_cancel_orders(cancel_requests)
+            for oid, side, _ in tracked:
+                logger.info(f"[mm] Cancelled {side} order {oid} for {coin} (post-fill cleanup)")
+            if cancelled < len(cancel_requests):
+                logger.warning(
+                    f"[mm] Post-fill cancel: {cancelled}/{len(cancel_requests)} succeeded for {coin}"
+                )
+        except Exception as e:
+            logger.error(f"[mm] Error cancelling orders for {coin} after fill: {e}")
+
+        self._tracked_orders[coin] = []
