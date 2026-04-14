@@ -18,6 +18,7 @@ def _make_strategy(inventory_skew_bps=2, bbo_mode=False, order_size_usd=100):
     s.bbo_mode = bbo_mode
     s.bbo_offset_bps = 1.0
     s.inventory_skew_bps = inventory_skew_bps
+    s.inventory_skew_cap = 3.0
     s.positions = {}
     s._orders_placed = 0
     s._orders_placed_per_coin = defaultdict(int)

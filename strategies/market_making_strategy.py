@@ -48,6 +48,7 @@ class MarketMakingStrategy(BaseStrategy):
         else:
             self.bbo_offset_bps = 0.0
         self.inventory_skew_bps: float = config.get('inventory_skew_bps', 0)
+        self.inventory_skew_cap: float = config.get('inventory_skew_cap', 3.0)
 
         # ---- Fill rate tracking ---- #
         self._orders_placed: int = 0
@@ -213,9 +214,12 @@ class MarketMakingStrategy(BaseStrategy):
                 if sell_price <= market_data.ask:
                     sell_price = round_price(market_data.ask * (1 + BBO_OFFSET))
 
-        # Inventory skew: shift both prices to encourage position reduction
+        # Inventory skew: shift both prices to encourage position reduction.
+        # Applied after BBO/spread pricing intentionally — skew may push
+        # prices beyond BBO bounds (e.g. sell below ask) which is desired
+        # to accelerate inventory reduction via more aggressive fills.
         skew = self._calculate_inventory_skew(coin, mid_price)
-        if abs(skew) > 0.001:
+        if skew != 0.0:
             skew_mult = skew / 10_000
             buy_price = round_price(buy_price * (1 - skew_mult))
             sell_price = round_price(sell_price * (1 - skew_mult))
@@ -291,7 +295,7 @@ class MarketMakingStrategy(BaseStrategy):
         # Normalize position value relative to order_size_usd
         position_value = abs(size) * mid_price
         normalized = position_value / self.order_size_usd
-        normalized = min(normalized, 3.0)  # Cap to prevent extreme skew
+        normalized = min(normalized, self.inventory_skew_cap)
 
         # Long = positive skew (shift down), Short = negative skew (shift up)
         direction = 1.0 if size > 0 else -1.0
