@@ -11,7 +11,7 @@ Order tracking and position close management are delegated to
 import logging
 import os
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from typing import Dict, List, Optional
 
 from strategies.base_strategy import BaseStrategy
@@ -54,7 +54,8 @@ class MarketMakingStrategy(BaseStrategy):
         self.vol_adjust_enabled: bool = config.get('vol_adjust_enabled', False)
         self.vol_adjust_multiplier: float = config.get('vol_adjust_multiplier', 2.0)
         self.vol_lookback: int = config.get('vol_lookback', 30)
-        self._recent_mids: Dict[str, list] = {}  # coin -> list of recent mid prices
+        self.vol_adjust_max_offset: float = config.get('vol_adjust_max_offset', 50.0)
+        self._recent_mids: Dict[str, deque] = {}  # coin -> deque of recent mid prices
 
         # ---- Fill rate tracking ---- #
         self._orders_placed: int = 0
@@ -171,14 +172,12 @@ class MarketMakingStrategy(BaseStrategy):
                 else:
                     coin_statuses.append(f"{coin}:pos")
             else:
-                # Show vol-adjusted offset when it differs from base
+                # Show vol-adjusted offset when it differs from base (read-only)
                 if self.vol_adjust_enabled and self.bbo_mode:
-                    md = self.market_data.get_market_data(coin)
-                    if md and md.mid_price > 0:
-                        adj = self._get_volatility_adjusted_offset(coin, md.mid_price)
-                        if abs(adj - self.bbo_offset_bps) > 0.01:
-                            coin_statuses.append(f"{coin}:idle(off={adj:.1f}bp)")
-                            continue
+                    adj = self._get_volatility_adjusted_offset(coin)
+                    if abs(adj - self.bbo_offset_bps) > 0.01:
+                        coin_statuses.append(f"{coin}:idle(off={adj:.1f}bp)")
+                        continue
                 coin_statuses.append(f"{coin}:idle")
 
         max_display = getattr(self, '_max_coin_status_display', 10)
@@ -219,27 +218,25 @@ class MarketMakingStrategy(BaseStrategy):
     #  Order placement
     # ------------------------------------------------------------------ #
 
-    def _get_volatility_adjusted_offset(self, coin: str, mid_price: float) -> float:
-        """Calculate BBO offset adjusted for recent volatility.
+    def _record_mid_price(self, coin: str, mid_price: float) -> None:
+        """Record a mid price for volatility tracking. Call once per cycle."""
+        if not self.vol_adjust_enabled:
+            return
+        if coin not in self._recent_mids:
+            self._recent_mids[coin] = deque(maxlen=self.vol_lookback)
+        self._recent_mids[coin].append(mid_price)
 
-        Tracks recent mid prices and computes realized volatility.
-        High vol -> wider offset (defensive), low vol -> base offset.
+    def _get_volatility_adjusted_offset(self, coin: str) -> float:
+        """Return BBO offset adjusted for recent volatility.
+
+        Read-only — does not mutate state. Call _record_mid_price()
+        separately to update the price history.
         """
         if not self.vol_adjust_enabled or not self.bbo_mode:
             return self.bbo_offset_bps
 
-        # Track mid prices
-        if coin not in self._recent_mids:
-            self._recent_mids[coin] = []
-        mids = self._recent_mids[coin]
-        mids.append(mid_price)
-
-        # Keep only lookback window
-        if len(mids) > self.vol_lookback:
-            mids.pop(0)
-
-        # Need at least 5 data points
-        if len(mids) < 5:
+        mids = self._recent_mids.get(coin)
+        if not mids or len(mids) < 5:
             return self.bbo_offset_bps
 
         # Calculate realized volatility (average absolute return in bps)
@@ -250,10 +247,9 @@ class MarketMakingStrategy(BaseStrategy):
 
         avg_move_bps = sum(returns_bps) / len(returns_bps)
 
-        # Scale offset: base + vol_multiplier * avg_move
+        # Scale offset with cap to prevent extreme values during flash crashes
         adjusted = self.bbo_offset_bps + self.vol_adjust_multiplier * avg_move_bps
-
-        return adjusted
+        return min(adjusted, self.vol_adjust_max_offset)
 
     def _place_orders(self, coin: str) -> None:
         """Place a buy and a sell limit order.
@@ -278,7 +274,8 @@ class MarketMakingStrategy(BaseStrategy):
 
         if self.bbo_mode and market_data.bid > 0 and market_data.ask > 0:
             # BBO-following mode: place at/near best bid and ask
-            effective_offset_bps = self._get_volatility_adjusted_offset(coin, mid_price)
+            self._record_mid_price(coin, mid_price)
+            effective_offset_bps = self._get_volatility_adjusted_offset(coin)
             offset = effective_offset_bps / 10_000
             buy_price = round_price(market_data.bid * (1 - offset))
             sell_price = round_price(market_data.ask * (1 + offset))
