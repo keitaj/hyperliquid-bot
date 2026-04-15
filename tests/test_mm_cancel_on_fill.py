@@ -119,20 +119,16 @@ class TestCancelOnFillInRun:
         """When a new position is detected, cancel_all_orders_for_coin is called."""
         strategy = _make_strategy()
         strategy._prev_position_coins = set()
-        strategy.positions = {'BTC': {'size': 0.5}}
+        # Mock update_positions to set positions as if a fill occurred
+        strategy.update_positions = MagicMock(
+            side_effect=lambda: setattr(strategy, 'positions',
+                                        {'BTC': {'size': 0.5, 'entry_price': 100,
+                                                 'unrealized_pnl': 0, 'margin_used': 10}})
+        )
+        strategy.market_data.get_market_data.return_value = MagicMock(
+            mid_price=100.0, bid=0, ask=0)
 
-        # Run the fill detection logic (extracted from run())
-        coins = ['BTC']
-        current_position_coins = set()
-        for coin in coins:
-            if coin in strategy.positions and abs(strategy.positions[coin].get('size', 0)) > 0:
-                current_position_coins.add(coin)
-
-        new_fills = current_position_coins - strategy._prev_position_coins
-        for coin in new_fills:
-            strategy._fills_detected += 1
-            strategy._fills_per_coin[coin] += 1
-            strategy._tracker.cancel_all_orders_for_coin(coin)
+        strategy.run(['BTC'])
 
         strategy._tracker.cancel_all_orders_for_coin.assert_called_once_with('BTC')
 
@@ -140,17 +136,15 @@ class TestCancelOnFillInRun:
         """When a position already existed, no cancel is triggered."""
         strategy = _make_strategy()
         strategy._prev_position_coins = {'BTC'}
-        strategy.positions = {'BTC': {'size': 0.5}}
+        strategy.update_positions = MagicMock(
+            side_effect=lambda: setattr(strategy, 'positions',
+                                        {'BTC': {'size': 0.5, 'entry_price': 100,
+                                                 'unrealized_pnl': 0, 'margin_used': 10}})
+        )
+        strategy.market_data.get_market_data.return_value = MagicMock(
+            mid_price=100.0, bid=0, ask=0)
 
-        coins = ['BTC']
-        current_position_coins = set()
-        for coin in coins:
-            if coin in strategy.positions and abs(strategy.positions[coin].get('size', 0)) > 0:
-                current_position_coins.add(coin)
-
-        new_fills = current_position_coins - strategy._prev_position_coins
-        for coin in new_fills:
-            strategy._tracker.cancel_all_orders_for_coin(coin)
+        strategy.run(['BTC'])
 
         strategy._tracker.cancel_all_orders_for_coin.assert_not_called()
 
@@ -158,22 +152,18 @@ class TestCancelOnFillInRun:
         """Multiple new fills each trigger their own cancel."""
         strategy = _make_strategy()
         strategy._prev_position_coins = set()
-        strategy.positions = {
-            'BTC': {'size': 0.5},
-            'ETH': {'size': 1.0},
-        }
+        strategy.update_positions = MagicMock(
+            side_effect=lambda: setattr(strategy, 'positions', {
+                'BTC': {'size': 0.5, 'entry_price': 100,
+                        'unrealized_pnl': 0, 'margin_used': 10},
+                'ETH': {'size': 1.0, 'entry_price': 3000,
+                        'unrealized_pnl': 0, 'margin_used': 30},
+            })
+        )
+        strategy.market_data.get_market_data.return_value = MagicMock(
+            mid_price=100.0, bid=0, ask=0)
 
-        coins = ['BTC', 'ETH']
-        current_position_coins = set()
-        for coin in coins:
-            if coin in strategy.positions and abs(strategy.positions[coin].get('size', 0)) > 0:
-                current_position_coins.add(coin)
-
-        new_fills = current_position_coins - strategy._prev_position_coins
-        for coin in new_fills:
-            strategy._fills_detected += 1
-            strategy._fills_per_coin[coin] += 1
-            strategy._tracker.cancel_all_orders_for_coin(coin)
+        strategy.run(['BTC', 'ETH'])
 
         assert strategy._tracker.cancel_all_orders_for_coin.call_count == 2
         called_coins = {c[0][0] for c in strategy._tracker.cancel_all_orders_for_coin.call_args_list}
