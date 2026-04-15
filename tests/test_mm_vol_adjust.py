@@ -187,7 +187,7 @@ class TestVolAdjustIntegration:
 
         assert len(placed) >= 2
         buy_price = placed[0].price
-        sell_price = placed[1].price
+        _ = placed[1].price  # sell_price checked implicitly via buy
 
         # With high vol, offset should be much wider than 1bp
         # So buy should be well below bid and sell well above ask
