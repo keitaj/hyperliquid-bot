@@ -51,10 +51,12 @@ class HyperliquidBot:
 
         # Risk check throttling: avoid calling check_risk_limits every cycle
         # when main_loop_interval is short (e.g. 3s). Risk checks cost 4 weight
-        # and don't need sub-minute frequency.
-        self._risk_check_interval: float = float(os.getenv("RISK_CHECK_INTERVAL", "30"))
+        # and don't need sub-10s frequency.
+        self._risk_check_interval: float = Config.RISK_CHECK_INTERVAL
+        # epoch 0 ensures the first cycle always triggers a risk check
         self._last_risk_check: float = 0.0
-        self._last_risk_result: dict = {'all_checks_passed': True, 'action': 'none'}
+        # Fail-safe: default to blocking until first real check completes
+        self._last_risk_result: dict = {'all_checks_passed': False, 'action': 'none'}
 
         # ------------------------------------------------------------------ #
         # HIP-3 Multi-DEX setup

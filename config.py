@@ -104,6 +104,13 @@ class Config:
     # Timeout (seconds) for Hyperliquid API calls.
     API_TIMEOUT: float = float(os.getenv("API_TIMEOUT", "10"))
 
+    # How often (seconds) to run risk checks in the trading loop.
+    # With fast MAIN_LOOP_INTERVAL (e.g. 3s), risk checks don't need to
+    # run every cycle. Default 10s matches the previous 10s loop interval.
+    RISK_CHECK_INTERVAL: float = max(
+        float(os.getenv("RISK_CHECK_INTERVAL", "10")), 1.0
+    )
+
     # ------------------------------------------------------------------ #
     # Margin validation constants
     # ------------------------------------------------------------------ #
