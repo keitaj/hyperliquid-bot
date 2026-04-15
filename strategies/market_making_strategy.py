@@ -104,6 +104,12 @@ class MarketMakingStrategy(BaseStrategy):
         for coin in new_fills:
             self._fills_detected += 1
             self._fills_per_coin[coin] += 1
+            # Cancel opposite-side orders for newly filled coins to prevent
+            # double-filling which doubles adverse selection cost.
+            # NOTE: Does not fire when close_immediately=True because
+            # positions are closed before the next detection pass.
+            self._tracker.cancel_all_orders_for_coin(coin)
+            logger.info(f"[mm] Cancelled orders for {coin} after fill (prevent double-fill)")
         self._prev_position_coins = current_position_coins
 
         self._log_fill_rate()
