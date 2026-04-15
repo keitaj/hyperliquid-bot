@@ -11,7 +11,7 @@ Order tracking and position close management are delegated to
 import logging
 import os
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from typing import Dict, List, Optional
 
 from strategies.base_strategy import BaseStrategy
@@ -49,6 +49,13 @@ class MarketMakingStrategy(BaseStrategy):
             self.bbo_offset_bps = 0.0
         self.inventory_skew_bps: float = config.get('inventory_skew_bps', 0)
         self.inventory_skew_cap: float = config.get('inventory_skew_cap', 3.0)
+
+        # ---- Volatility-adjusted BBO offset ---- #
+        self.vol_adjust_enabled: bool = config.get('vol_adjust_enabled', False)
+        self.vol_adjust_multiplier: float = config.get('vol_adjust_multiplier', 2.0)
+        self.vol_lookback: int = config.get('vol_lookback', 30)
+        self.vol_adjust_max_offset: float = config.get('vol_adjust_max_offset', 50.0)
+        self._recent_mids: Dict[str, deque] = {}  # coin -> deque of recent mid prices
 
         # ---- Fill rate tracking ---- #
         self._orders_placed: int = 0
@@ -171,6 +178,12 @@ class MarketMakingStrategy(BaseStrategy):
                 else:
                     coin_statuses.append(f"{coin}:pos")
             else:
+                # Show vol-adjusted offset when it differs from base (read-only)
+                if self.vol_adjust_enabled and self.bbo_mode:
+                    adj = self._get_volatility_adjusted_offset(coin)
+                    if abs(adj - self.bbo_offset_bps) > 0.01:
+                        coin_statuses.append(f"{coin}:idle(off={adj:.1f}bp)")
+                        continue
                 coin_statuses.append(f"{coin}:idle")
 
         max_display = getattr(self, '_max_coin_status_display', 10)
@@ -211,6 +224,39 @@ class MarketMakingStrategy(BaseStrategy):
     #  Order placement
     # ------------------------------------------------------------------ #
 
+    def _record_mid_price(self, coin: str, mid_price: float) -> None:
+        """Record a mid price for volatility tracking. Call once per cycle."""
+        if not self.vol_adjust_enabled:
+            return
+        if coin not in self._recent_mids:
+            self._recent_mids[coin] = deque(maxlen=self.vol_lookback)
+        self._recent_mids[coin].append(mid_price)
+
+    def _get_volatility_adjusted_offset(self, coin: str) -> float:
+        """Return BBO offset adjusted for recent volatility.
+
+        Read-only — does not mutate state. Call _record_mid_price()
+        separately to update the price history.
+        """
+        if not self.vol_adjust_enabled or not self.bbo_mode:
+            return self.bbo_offset_bps
+
+        mids = self._recent_mids.get(coin)
+        if not mids or len(mids) < 5:
+            return self.bbo_offset_bps
+
+        # Calculate realized volatility (average absolute return in bps)
+        returns_bps = []
+        for i in range(1, len(mids)):
+            ret = abs(mids[i] - mids[i - 1]) / mids[i - 1] * 10_000
+            returns_bps.append(ret)
+
+        avg_move_bps = sum(returns_bps) / len(returns_bps)
+
+        # Scale offset with cap to prevent extreme values during flash crashes
+        adjusted = self.bbo_offset_bps + self.vol_adjust_multiplier * avg_move_bps
+        return min(adjusted, self.vol_adjust_max_offset)
+
     def _place_orders(self, coin: str) -> None:
         """Place a buy and a sell limit order.
 
@@ -234,7 +280,9 @@ class MarketMakingStrategy(BaseStrategy):
 
         if self.bbo_mode and market_data.bid > 0 and market_data.ask > 0:
             # BBO-following mode: place at/near best bid and ask
-            offset = self.bbo_offset_bps / 10_000
+            self._record_mid_price(coin, mid_price)
+            effective_offset_bps = self._get_volatility_adjusted_offset(coin)
+            offset = effective_offset_bps / 10_000
             buy_price = round_price(market_data.bid * (1 - offset))
             sell_price = round_price(market_data.ask * (1 + offset))
         else:
