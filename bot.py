@@ -49,6 +49,13 @@ class HyperliquidBot:
         self.api_timeout = Config.API_TIMEOUT
         self.circuit_breaker = CircuitBreaker(threshold=5, recovery_seconds=60.0)
 
+        # Risk check throttling: avoid calling check_risk_limits every cycle
+        # when main_loop_interval is short (e.g. 3s). Risk checks cost 4 weight
+        # and don't need sub-minute frequency.
+        self._risk_check_interval: float = float(os.getenv("RISK_CHECK_INTERVAL", "30"))
+        self._last_risk_check: float = 0.0
+        self._last_risk_result: dict = {'all_checks_passed': True, 'action': 'none'}
+
         # ------------------------------------------------------------------ #
         # HIP-3 Multi-DEX setup
         # ------------------------------------------------------------------ #
@@ -376,7 +383,13 @@ class HyperliquidBot:
                 time.sleep(10)
 
     def _trading_loop(self) -> None:
-        risk_checks = self.risk_manager.check_risk_limits()
+        # Throttle risk checks to avoid burning API weight every cycle.
+        # With MAIN_LOOP_INTERVAL=3s, checking every 30s saves ~36 weight/min.
+        now = time.time()
+        if now - self._last_risk_check >= self._risk_check_interval:
+            self._last_risk_result = self.risk_manager.check_risk_limits()
+            self._last_risk_check = now
+        risk_checks = self._last_risk_result
         action = risk_checks.get('action', 'none')
 
         metrics_unavailable = (
