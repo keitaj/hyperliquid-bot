@@ -519,6 +519,9 @@ strategies:
     bbo_mode: false                    # --bbo-mode  (place orders at best bid/ask instead of mid ± spread)
     bbo_offset_bps: 0                  # --bbo-offset-bps  (bps behind BBO; 0 = at BBO)
     inventory_skew_bps: 0              # --inventory-skew-bps (skew per unit of inventory; 0 = disabled)
+    vol_adjust_enabled: false          # --vol-adjust  (enable volatility-adjusted BBO offset)
+    vol_adjust_multiplier: 2.0         # --vol-adjust-multiplier  (offset += multiplier × avg_move_bps)
+    vol_adjust_max_offset: 50          # --vol-adjust-max-offset  (max offset bps after vol adjustment)
     account_cap_pct: 0.05              # --account-cap-pct
     max_positions: 3
     take_profit_percent: 1

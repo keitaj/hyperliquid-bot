@@ -808,6 +808,8 @@ if __name__ == "__main__":
                         help='Volatility multiplier for offset adjustment (default: 2.0, market_making)')
     parser.add_argument('--vol-lookback', type=int,
                         help='Number of recent mid prices for volatility calc (default: 30, market_making)')
+    parser.add_argument('--vol-adjust-max-offset', type=float,
+                        help='Max BBO offset in bps after vol adjustment (default: 50, market_making)')
 
     # Risk guardrail parameters
     parser.add_argument('--max-position-pct', type=float,
@@ -884,6 +886,7 @@ if __name__ == "__main__":
             ('vol_adjust', 'vol_adjust_enabled'),
             'vol_adjust_multiplier',
             'vol_lookback',
+            'vol_adjust_max_offset',
         ],
     }
 
