@@ -73,6 +73,18 @@ class OrderManager:
         self._user_state_cache_time: float = 0.0
         self._user_state_cache_ttl = user_state_cache_ttl
 
+        # Per-cycle open orders cache. Multiple callers (update_order_status,
+        # cancel_stale_orders, _is_order_alive) share a single API call.
+        # Invalidated after any write operation (place, cancel).
+        # Not thread-safe; bot runs single-threaded.
+        self._open_orders_cache: Optional[List[Dict]] = None
+        self._open_orders_cache_time: float = 0.0
+        self._open_orders_cache_ttl: float = user_state_cache_ttl
+
+    def _invalidate_open_orders_cache(self) -> None:
+        """Clear cached open orders after a write operation (place/cancel)."""
+        self._open_orders_cache = None
+
     def create_limit_order(
         self,
         coin: str,
@@ -180,6 +192,7 @@ class OrderManager:
                         if oid is not None:
                             order.id = oid
                             self.active_orders[order.id] = order
+                            self._invalidate_open_orders_cache()
                             logger.info(
                                 "Order placed successfully: %d", order.id
                             )
@@ -280,6 +293,7 @@ class OrderManager:
             for o in orders:
                 o.status = OrderStatus.REJECTED
 
+        self._invalidate_open_orders_cache()
         return results
 
     def _get_cached_mids(self, dex: str = '') -> Dict[str, str]:
@@ -332,6 +346,7 @@ class OrderManager:
                     self.active_orders[order_id].status = OrderStatus.CANCELLED
                     del self.active_orders[order_id]
                 logger.info(f"Order {order_id} cancelled successfully")
+                self._invalidate_open_orders_cache()
                 return True
 
             logger.error(f"Failed to cancel order {order_id}: {result}")
@@ -380,6 +395,7 @@ class OrderManager:
             else:
                 logger.error(f"Bulk cancel failed: {result}")
 
+            self._invalidate_open_orders_cache()
             return cancelled
 
         except API_ERRORS as e:
@@ -408,16 +424,29 @@ class OrderManager:
             return 0
 
     def get_open_orders(self, coin: Optional[str] = None) -> List[Dict]:
-        try:
-            open_orders = api_wrapper.call(self.info.open_orders, self.account_address)
+        """Return open orders, using a short-lived cache to avoid redundant API calls.
 
-            if coin:
-                return [o for o in open_orders if o['coin'] == coin]
-            return open_orders
+        Multiple callers per cycle (update_order_status, cancel_stale_orders,
+        _is_order_alive) all need open orders. Without caching, each call
+        costs 20 API weight. With cache, only the first call per TTL window
+        hits the API.
+        """
+        now = time.monotonic()
+        if (self._open_orders_cache is not None
+                and (now - self._open_orders_cache_time) < self._open_orders_cache_ttl):
+            open_orders = self._open_orders_cache
+        else:
+            try:
+                open_orders = api_wrapper.call(self.info.open_orders, self.account_address)
+                self._open_orders_cache = open_orders
+                self._open_orders_cache_time = now
+            except API_ERRORS as e:
+                logger.error(f"Error fetching open orders: {e}")
+                return []
 
-        except API_ERRORS as e:
-            logger.error(f"Error fetching open orders: {e}")
-            return []
+        if coin:
+            return [o for o in open_orders if o['coin'] == coin]
+        return open_orders
 
     def update_order_status(self) -> None:
         try:

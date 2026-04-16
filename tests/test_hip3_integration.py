@@ -315,6 +315,7 @@ class TestMultiDexMarketData:
         mdm._meta_cache_ttl = 3600
         mdm._user_state_cache = {}
         mdm._user_state_cache_ttl = 2.0
+        mdm._open_orders_cache = {}
         return mdm
 
     def test_get_sz_decimals_hip3_coin_via_sdk(self):
