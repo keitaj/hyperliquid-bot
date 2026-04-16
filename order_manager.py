@@ -1,5 +1,4 @@
 import logging
-import os
 import time
 from typing import Dict, List, Optional
 from dataclasses import dataclass
@@ -74,14 +73,17 @@ class OrderManager:
         self._user_state_cache_time: float = 0.0
         self._user_state_cache_ttl = user_state_cache_ttl
 
-        # Per-cycle open orders cache. Call refresh_open_orders_cache() at
-        # the start of each trading cycle to fetch once (weight 20), then
-        # all get_open_orders() calls within the cycle use the cache (weight 0).
+        # Per-cycle open orders cache. Multiple callers (update_order_status,
+        # cancel_stale_orders, _is_order_alive) share a single API call.
+        # Invalidated after any write operation (place, cancel).
+        # Not thread-safe; bot runs single-threaded.
         self._open_orders_cache: Optional[List[Dict]] = None
         self._open_orders_cache_time: float = 0.0
-        self._open_orders_cache_ttl: float = float(
-            os.getenv("OPEN_ORDERS_CACHE_TTL", "5")
-        )
+        self._open_orders_cache_ttl: float = user_state_cache_ttl
+
+    def _invalidate_open_orders_cache(self) -> None:
+        """Clear cached open orders after a write operation (place/cancel)."""
+        self._open_orders_cache = None
 
     def create_limit_order(
         self,
@@ -190,6 +192,7 @@ class OrderManager:
                         if oid is not None:
                             order.id = oid
                             self.active_orders[order.id] = order
+                            self._invalidate_open_orders_cache()
                             logger.info(
                                 "Order placed successfully: %d", order.id
                             )
@@ -290,6 +293,7 @@ class OrderManager:
             for o in orders:
                 o.status = OrderStatus.REJECTED
 
+        self._invalidate_open_orders_cache()
         return results
 
     def _get_cached_mids(self, dex: str = '') -> Dict[str, str]:
@@ -342,6 +346,7 @@ class OrderManager:
                     self.active_orders[order_id].status = OrderStatus.CANCELLED
                     del self.active_orders[order_id]
                 logger.info(f"Order {order_id} cancelled successfully")
+                self._invalidate_open_orders_cache()
                 return True
 
             logger.error(f"Failed to cancel order {order_id}: {result}")
@@ -390,6 +395,7 @@ class OrderManager:
             else:
                 logger.error(f"Bulk cancel failed: {result}")
 
+            self._invalidate_open_orders_cache()
             return cancelled
 
         except API_ERRORS as e:
