@@ -41,6 +41,8 @@ class MultiDexMarketData(MarketDataManager):
         # Per-DEX user_state cache: {(address, dex): (timestamp, data)}
         self._user_state_cache: Dict[Tuple[str, str], Tuple[float, Dict]] = {}
         self._user_state_cache_ttl = user_state_cache_ttl
+        # Per-DEX open orders cache (same TTL as user_state)
+        self._open_orders_cache: Dict[Tuple[str, str], Tuple[float, List]] = {}
 
     # ------------------------------------------------------------------ #
     # Overrides leveraging 0.22.0 SDK native HIP-3 support
@@ -92,9 +94,20 @@ class MultiDexMarketData(MarketDataManager):
             return {}
 
     def get_open_orders_dex(self, address: str, dex: Optional[str] = None) -> List[Dict]:
-        """Open orders for an account, optionally scoped to a HIP-3 DEX."""
+        """Open orders for an account, optionally scoped to a HIP-3 DEX.
+
+        Uses a short-lived cache (same TTL as user_state) so that multiple
+        callers in the same cycle share a single API call (weight 20 each).
+        """
+        cache_key = (address, dex or "")
+        now = time.monotonic()
+        cached = self._open_orders_cache.get(cache_key)
+        if cached and (now - cached[0]) < self._user_state_cache_ttl:
+            return cached[1]
         try:
-            return self.info.open_orders(address, dex=dex or "")
+            result = self.info.open_orders(address, dex=dex or "")
+            self._open_orders_cache[cache_key] = (now, result)
+            return result
         except API_ERRORS as e:
             logger.error(f"Error fetching open orders (dex={dex}): {e}")
             return []

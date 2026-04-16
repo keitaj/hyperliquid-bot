@@ -1,4 +1,5 @@
 import logging
+import os
 import time
 from typing import Dict, List, Optional
 from dataclasses import dataclass
@@ -72,6 +73,15 @@ class OrderManager:
         self._user_state_cache: Optional[Dict] = None
         self._user_state_cache_time: float = 0.0
         self._user_state_cache_ttl = user_state_cache_ttl
+
+        # Per-cycle open orders cache. Call refresh_open_orders_cache() at
+        # the start of each trading cycle to fetch once (weight 20), then
+        # all get_open_orders() calls within the cycle use the cache (weight 0).
+        self._open_orders_cache: Optional[List[Dict]] = None
+        self._open_orders_cache_time: float = 0.0
+        self._open_orders_cache_ttl: float = float(
+            os.getenv("OPEN_ORDERS_CACHE_TTL", "5")
+        )
 
     def create_limit_order(
         self,
@@ -408,16 +418,29 @@ class OrderManager:
             return 0
 
     def get_open_orders(self, coin: Optional[str] = None) -> List[Dict]:
-        try:
-            open_orders = api_wrapper.call(self.info.open_orders, self.account_address)
+        """Return open orders, using a short-lived cache to avoid redundant API calls.
 
-            if coin:
-                return [o for o in open_orders if o['coin'] == coin]
-            return open_orders
+        Multiple callers per cycle (update_order_status, cancel_stale_orders,
+        _is_order_alive) all need open orders. Without caching, each call
+        costs 20 API weight. With cache, only the first call per TTL window
+        hits the API.
+        """
+        now = time.monotonic()
+        if (self._open_orders_cache is not None
+                and (now - self._open_orders_cache_time) < self._open_orders_cache_ttl):
+            open_orders = self._open_orders_cache
+        else:
+            try:
+                open_orders = api_wrapper.call(self.info.open_orders, self.account_address)
+                self._open_orders_cache = open_orders
+                self._open_orders_cache_time = now
+            except API_ERRORS as e:
+                logger.error(f"Error fetching open orders: {e}")
+                return []
 
-        except API_ERRORS as e:
-            logger.error(f"Error fetching open orders: {e}")
-            return []
+        if coin:
+            return [o for o in open_orders if o['coin'] == coin]
+        return open_orders
 
     def update_order_status(self) -> None:
         try:

@@ -22,6 +22,9 @@ def _make_order_manager(active_orders=None):
     om.account_address = "0xtest"
     om.default_slippage = 0.01
     om.active_orders = dict(active_orders) if active_orders else {}
+    om._open_orders_cache = None
+    om._open_orders_cache_time = 0.0
+    om._open_orders_cache_ttl = 5.0
     return om
 
 
