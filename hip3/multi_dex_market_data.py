@@ -11,7 +11,6 @@ As of hyperliquid-python-sdk 0.22.0, the SDK natively supports HIP-3:
 This class adds only the thin wrappers that are not on the base MarketDataManager.
 """
 import logging
-import time
 import requests
 from typing import Dict, List, Optional, Tuple
 
@@ -21,6 +20,7 @@ from coin_utils import is_hip3, parse_coin
 from hip3.dex_registry import DEXRegistry
 from market_data import MarketDataManager
 from rate_limiter import api_wrapper
+from ttl_cache import TTLCacheMap
 
 logger = logging.getLogger(__name__)
 
@@ -38,11 +38,11 @@ class MultiDexMarketData(MarketDataManager):
         super().__init__(info, meta_cache_ttl=meta_cache_ttl)
         self.registry = registry
         self.api_url = api_url.rstrip("/")
-        # Per-DEX user_state cache: {(address, dex): (timestamp, data)}
-        self._user_state_cache: Dict[Tuple[str, str], Tuple[float, Dict]] = {}
+        # Per-DEX user_state cache keyed by (address, dex)
+        self._dex_user_state_cache: TTLCacheMap[Tuple[str, str], Dict] = TTLCacheMap(user_state_cache_ttl)
         self._user_state_cache_ttl = user_state_cache_ttl
         # Per-DEX open orders cache (same TTL as user_state)
-        self._open_orders_cache: Dict[Tuple[str, str], Tuple[float, List]] = {}
+        self._dex_open_orders_cache: TTLCacheMap[Tuple[str, str], List] = TTLCacheMap(user_state_cache_ttl)
 
     # ------------------------------------------------------------------ #
     # Overrides leveraging 0.22.0 SDK native HIP-3 support
@@ -80,17 +80,16 @@ class MultiDexMarketData(MarketDataManager):
         same bot cycle share a single API call.
         """
         cache_key = (address, dex or "")
-        now = time.monotonic()
-        cached = self._user_state_cache.get(cache_key)
-        if cached and (now - cached[0]) < self._user_state_cache_ttl:
-            return cached[1]
+        cached = self._dex_user_state_cache.get(cache_key)
+        if cached is not None:
+            return cached
         try:
             result = self.info.user_state(address, dex=dex or "")
-            self._user_state_cache[cache_key] = (now, result)
+            self._dex_user_state_cache.set(cache_key, result)
             return result
         except API_ERRORS as e:
             logger.error(f"Error fetching user state (dex={dex}): {e}")
-            self._user_state_cache.pop(cache_key, None)
+            self._dex_user_state_cache.invalidate(cache_key)
             return {}
 
     def get_open_orders_dex(self, address: str, dex: Optional[str] = None) -> List[Dict]:
@@ -100,13 +99,12 @@ class MultiDexMarketData(MarketDataManager):
         callers in the same cycle share a single API call (weight 20 each).
         """
         cache_key = (address, dex or "")
-        now = time.monotonic()
-        cached = self._open_orders_cache.get(cache_key)
-        if cached and (now - cached[0]) < self._user_state_cache_ttl:
-            return cached[1]
+        cached = self._dex_open_orders_cache.get(cache_key)
+        if cached is not None:
+            return cached
         try:
             result = self.info.open_orders(address, dex=dex or "")
-            self._open_orders_cache[cache_key] = (now, result)
+            self._dex_open_orders_cache.set(cache_key, result)
             return result
         except API_ERRORS as e:
             logger.error(f"Error fetching open orders (dex={dex}): {e}")

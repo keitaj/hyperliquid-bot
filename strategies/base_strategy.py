@@ -34,9 +34,45 @@ class BaseStrategy(ABC):
     def generate_signals(self, coin: str) -> Optional[Dict]:
         pass
 
-    @abstractmethod
     def calculate_position_size(self, coin: str, signal: Dict) -> float:
-        pass
+        """Calculate position size with common boilerplate.
+
+        Subclasses override ``_adjust_size_usd()`` to apply strategy-specific
+        dynamic sizing (e.g. RSI multiplier, ATR scaling).  The default
+        implementation can still be fully overridden for strategies that need
+        fundamentally different sizing logic (e.g. grid, market-making).
+        """
+        try:
+            if self._check_max_positions(coin):
+                return 0
+
+            market_data = self.market_data.get_market_data(coin)
+            if not market_data:
+                return 0
+
+            confidence = signal.get('confidence', 0.5)
+            base_size_usd = getattr(self, 'position_size_usd', 0) * confidence
+
+            base_size_usd = self._adjust_size_usd(base_size_usd, signal, market_data)
+
+            position_size = self._apply_account_cap(base_size_usd, market_data.mid_price)
+
+            log_detail = self._size_log_detail(signal)
+            logger.info(f"Calculated position size for {coin}: {position_size}{log_detail}")
+            return position_size
+
+        except API_ERRORS as e:
+            logger.error(f"Error calculating position size for {coin}: {e}")
+            return 0
+
+    def _adjust_size_usd(self, base_size_usd: float, signal: Dict,
+                         market_data: 'MarketData') -> float:
+        """Apply strategy-specific dynamic sizing. Override in subclasses."""
+        return base_size_usd
+
+    def _size_log_detail(self, signal: Dict) -> str:
+        """Return extra info to append to the position-size log line. Override in subclasses."""
+        return ""
 
     # ------------------------------------------------------------------ #
     # Signal validation
