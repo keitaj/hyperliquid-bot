@@ -3,9 +3,10 @@ from ws.fill_feed import FillFeed
 from ws.bbo_guard import BboGuard
 from ws.imbalance_guard import ImbalanceGuard
 from ws.close_refresh_guard import CloseRefreshGuard
+from ws.adverse_selection_tracker import AdverseSelectionTracker
 from ws.ws_reconnector import WsReconnector
 
 __all__ = [
     "MarketDataFeed", "FillFeed", "BboGuard", "ImbalanceGuard",
-    "CloseRefreshGuard", "WsReconnector",
+    "CloseRefreshGuard", "AdverseSelectionTracker", "WsReconnector",
 ]

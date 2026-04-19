@@ -20,7 +20,10 @@ from position_closer import close_position_market  # noqa: E402
 from rate_limiter import API_ERRORS  # noqa: E402
 from exceptions import TransientError, DataError, ConfigurationError  # noqa: E402
 from circuit_breaker import CircuitBreaker  # noqa: E402
-from ws import MarketDataFeed, FillFeed, BboGuard, ImbalanceGuard, CloseRefreshGuard, WsReconnector  # noqa: E402
+from ws import (  # noqa: E402
+    MarketDataFeed, FillFeed, BboGuard, ImbalanceGuard,
+    CloseRefreshGuard, AdverseSelectionTracker, WsReconnector,
+)
 from strategies import (  # noqa: E402
     SimpleMAStrategy,
     RSIStrategy,
@@ -65,6 +68,7 @@ class HyperliquidBot:
         self.bbo_guard: Optional[BboGuard] = None
         self.imbalance_guard: Optional[ImbalanceGuard] = None
         self.close_refresh_guard: Optional[CloseRefreshGuard] = None
+        self.adverse_tracker: Optional[AdverseSelectionTracker] = None
         self._ws_reconnector: Optional[WsReconnector] = None
 
         # ------------------------------------------------------------------ #
@@ -411,6 +415,15 @@ class HyperliquidBot:
                         close_refresh_threshold,
                     )
 
+                # Phase 6: Adverse selection measurement (observation only)
+                if self.strategy_config.get('enable_adverse_selection_log', False):
+                    self.adverse_tracker = AdverseSelectionTracker(
+                        market_data=self.market_data,
+                        log_interval=self.strategy_config.get('adverse_selection_log_interval', 300.0),
+                    )
+                    self.fill_feed.set_adverse_selection_tracker(self.adverse_tracker)
+                    logger.info("[ws] AdverseSelectionTracker enabled")
+
         if self._enable_ws and self.ws_feed is not None:
             self._ws_reconnector = WsReconnector(stale_threshold=60.0)
 
@@ -537,6 +550,8 @@ class HyperliquidBot:
             try:
                 self.strategy.run(self.coins)
                 self.circuit_breaker.record_success("strategy")
+                if self.adverse_tracker:
+                    self.adverse_tracker.maybe_log_summary()
             except TransientError as e:
                 logger.warning(f"Strategy execution hit transient error: {e}")
                 self.circuit_breaker.record_failure("strategy")
@@ -598,6 +613,9 @@ class HyperliquidBot:
         if self.imbalance_guard:
             self.imbalance_guard.stop()
             self.imbalance_guard = None
+        if self.adverse_tracker:
+            self.adverse_tracker.stop()
+            self.adverse_tracker = None
         if self.close_refresh_guard:
             self.close_refresh_guard.stop()
             self.close_refresh_guard = None
@@ -930,6 +948,10 @@ if __name__ == "__main__":
                         help='Cancel one side when L2 imbalance exceeds this (0-1); 0 to disable (default: 0)')
     parser.add_argument('--imbalance-guard-depth', type=int,
                         help='Number of L2 book levels for imbalance guard calculation (default: 5)')
+    parser.add_argument('--enable-adverse-selection-log', action='store_true', default=False,
+                        help='Enable post-fill adverse selection measurement logging')
+    parser.add_argument('--adverse-selection-log-interval', type=float,
+                        help='Adverse selection summary log interval in seconds (default: 300)')
     parser.add_argument('--coin-offset-overrides', type=str, default='',
                         help='Per-coin BBO offset overrides in bps (e.g. "SP500:0.5,MSFT:3")')
     parser.add_argument('--coin-spread-overrides', type=str, default='',
@@ -1031,6 +1053,7 @@ if __name__ == "__main__":
             'vol_adjust_multiplier',
             'vol_lookback',
             'vol_adjust_max_offset',
+            'adverse_selection_log_interval',
             'coin_offset_overrides',
             'coin_spread_overrides',
             'close_refresh_threshold_bps',
@@ -1060,6 +1083,8 @@ if __name__ == "__main__":
             strategy_config['close_immediately'] = False
         if getattr(args, 'maker_only', False):
             strategy_config['maker_only'] = True
+        if getattr(args, 'enable_adverse_selection_log', False):
+            strategy_config['enable_adverse_selection_log'] = True
 
     # Apply CLI overrides for DEX settings
     if args.dex is not None:
