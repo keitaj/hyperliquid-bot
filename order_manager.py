@@ -416,7 +416,7 @@ class OrderManager:
                                 del self.active_orders[oid]
 
                 if cancelled < len(cancel_requests):
-                    logger.warning(
+                    logger.debug(
                         "Bulk cancel: %d/%d succeeded", cancelled, len(cancel_requests)
                     )
             else:

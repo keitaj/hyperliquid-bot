@@ -89,7 +89,7 @@ class OrderTracker:
             for oid, side in to_cancel:
                 logger.info(f"[mm] Cancelled stale {side} order {oid} for {coin}")
             if cancelled < len(to_cancel):
-                logger.warning(
+                logger.debug(
                     f"[mm] Bulk cancel: {cancelled}/{len(to_cancel)} succeeded for {coin}"
                 )
 
@@ -114,15 +114,10 @@ class OrderTracker:
         oid_list = [oid for oid, _, _ in tracked]
         try:
             cancelled = self.order_manager.bulk_cancel_orders(cancel_requests)
-            if cancelled >= len(cancel_requests):
-                logger.info(
-                    f"[mm] Cancelled {cancelled} orders for {coin} (post-fill cleanup): {oid_list}"
-                )
-            else:
-                logger.warning(
-                    f"[mm] Post-fill cancel: {cancelled}/{len(cancel_requests)} "
-                    f"succeeded for {coin}, attempted: {oid_list}"
-                )
+            logger.info(
+                f"[mm] Cancelled {cancelled}/{len(cancel_requests)} orders for {coin} "
+                f"(post-fill cleanup): {oid_list}"
+            )
         except Exception as e:
             logger.error(
                 f"[mm] Error cancelling orders for {coin} after fill: {e}, oids: {oid_list}"
