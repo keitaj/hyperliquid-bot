@@ -1,6 +1,7 @@
 """Order tracking and stale order management for market-making strategy."""
 
 import logging
+import threading
 import time
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -20,16 +21,19 @@ class OrderTracker:
         # coin -> list of (oid, side, place_time)
         self._tracked_orders: Dict[str, List[Tuple[int, str, float]]] = {}
         self._last_order_time: Dict[str, float] = {}
+        self._lock = threading.Lock()
 
     def get_order_count(self, coin: str) -> int:
-        return len(self._tracked_orders.get(coin, []))
+        with self._lock:
+            return len(self._tracked_orders.get(coin, []))
 
     def record_order(self, coin: str, oid: int, side: str) -> None:
         now = time.monotonic()
-        if coin not in self._tracked_orders:
-            self._tracked_orders[coin] = []
-        self._tracked_orders[coin].append((oid, side, now))
-        self._last_order_time[coin] = now
+        with self._lock:
+            if coin not in self._tracked_orders:
+                self._tracked_orders[coin] = []
+            self._tracked_orders[coin].append((oid, side, now))
+            self._last_order_time[coin] = now
 
     def active_coins(self, positions: Dict, open_positions_keys: Set[str]) -> int:
         """Count coins with positions, pending close orders, or tracked orders."""
@@ -38,14 +42,16 @@ class OrderTracker:
             if abs(pos.get('size', 0)) > 0:
                 active.add(coin)
         active.update(open_positions_keys)
-        for coin, orders in self._tracked_orders.items():
-            if orders:
-                active.add(coin)
+        with self._lock:
+            for coin, orders in self._tracked_orders.items():
+                if orders:
+                    active.add(coin)
         return len(active)
 
     def cancel_stale_orders(self, coin: str, close_oid: Optional[int] = None) -> None:
         """Cancel orders older than refresh_interval and remove filled/cancelled from tracking."""
-        tracked = self._tracked_orders.get(coin, [])
+        with self._lock:
+            tracked = list(self._tracked_orders.get(coin, []))
         if not tracked:
             return
 
@@ -87,15 +93,20 @@ class OrderTracker:
                     f"[mm] Bulk cancel: {cancelled}/{len(to_cancel)} succeeded for {coin}"
                 )
 
-        self._tracked_orders[coin] = still_active
+        with self._lock:
+            self._tracked_orders[coin] = still_active
 
     def cancel_all_orders_for_coin(self, coin: str) -> None:
         """Cancel all tracked orders for a coin.
 
         Called when one side fills to prevent the opposite side from also
         filling (which would double adverse selection cost).
+
+        Thread-safe: may be called from the WS fill feed thread.
         """
-        tracked = self._tracked_orders.get(coin, [])
+        with self._lock:
+            tracked = list(self._tracked_orders.get(coin, []))
+            self._tracked_orders[coin] = []
         if not tracked:
             return
 
@@ -116,7 +127,3 @@ class OrderTracker:
             logger.error(
                 f"[mm] Error cancelling orders for {coin} after fill: {e}, oids: {oid_list}"
             )
-
-        # Clear tracking unconditionally — failed cancels will be rejected
-        # by the exchange on next attempt anyway (already filled/expired).
-        self._tracked_orders[coin] = []

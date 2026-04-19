@@ -20,7 +20,7 @@ from position_closer import close_position_market  # noqa: E402
 from rate_limiter import API_ERRORS  # noqa: E402
 from exceptions import TransientError, DataError, ConfigurationError  # noqa: E402
 from circuit_breaker import CircuitBreaker  # noqa: E402
-from ws import MarketDataFeed  # noqa: E402
+from ws import MarketDataFeed, FillFeed  # noqa: E402
 from strategies import (  # noqa: E402
     SimpleMAStrategy,
     RSIStrategy,
@@ -61,6 +61,7 @@ class HyperliquidBot:
         self._last_risk_result: dict = {'all_checks_passed': False, 'action': 'none'}
         self._enable_ws = enable_ws
         self.ws_feed: Optional[MarketDataFeed] = None
+        self.fill_feed: Optional[FillFeed] = None
 
         # ------------------------------------------------------------------ #
         # HIP-3 Multi-DEX setup
@@ -361,6 +362,12 @@ class HyperliquidBot:
             self.ws_feed = MarketDataFeed(ws_info, self.market_data, self.coins)
             self.ws_feed.start()
 
+            # Phase 2: instant fill detection → opposite-side cancel
+            tracker = getattr(self.strategy, 'order_tracker', None)
+            if tracker is not None:
+                self.fill_feed = FillFeed(ws_info, tracker, self.account_address)
+                self.fill_feed.start()
+
         consecutive_errors = 0
 
         while self.running:
@@ -538,6 +545,9 @@ class HyperliquidBot:
         logger.info("Received shutdown signal")
         self.running = False
 
+        if self.fill_feed:
+            self.fill_feed.stop()
+            self.fill_feed = None
         if self.ws_feed:
             self.ws_feed.stop()
             self.ws_feed = None
