@@ -44,6 +44,7 @@ def _make_strategy(bbo_mode=False, bbo_offset_bps=1.0, vol_adjust_enabled=False,
 
     om = MagicMock()
     md = MagicMock()
+    md.get_sz_decimals.return_value = 0
     s.order_manager = om
     s.market_data = md
 

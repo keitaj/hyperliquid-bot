@@ -17,13 +17,24 @@ logger = logging.getLogger(__name__)
 BBO_OFFSET = 1 / 10_000  # 1 basis point
 
 
-def round_price(px: float) -> float:
-    """Round price to 5 significant figures and 6 decimal places.
+def round_price(px: float, sz_decimals: int = 0, is_perp: bool = True) -> float:
+    """Format price matching the official Hyperliquid SDK rounding logic.
 
-    This is the standard rounding format for Hyperliquid perpetual prices.
-    All price values sent to the API should pass through this function.
+    Uses 5 significant figures with ``max_decimals - sz_decimals`` decimal
+    places.  Integer prices above 100,000 are always valid.
+
+    Args:
+        px: Raw price value.
+        sz_decimals: Size decimals for the asset (from exchange metadata).
+        is_perp: True for perpetuals (max 6 decimals), False for spot
+            (max 8 decimals).
     """
-    return round(float(f"{px:.5g}"), 6)
+    max_decimals = 6 if is_perp else 8
+
+    if px > 100_000:
+        return round(px)
+
+    return round(float(f"{px:.5g}"), max_decimals - sz_decimals)
 
 
 class OrderSide(Enum):
@@ -85,6 +96,17 @@ class OrderManager:
         """Clear cached open orders after a write operation (place/cancel)."""
         self._open_orders_cache = None
 
+    def _get_sz_decimals(self, coin: str) -> int:
+        """Return sz_decimals for *coin* from exchange metadata."""
+        try:
+            meta = api_wrapper.call(self.info.meta)
+            for asset in meta.get('universe', []):
+                if asset['name'] == coin:
+                    return asset['szDecimals']
+        except API_ERRORS:
+            pass
+        return 0
+
     def create_limit_order(
         self,
         coin: str,
@@ -136,7 +158,8 @@ class OrderManager:
             else:
                 limit_price = mid_price * (1 - slippage)
 
-            limit_price = round_price(limit_price)
+            sz_dec = self._get_sz_decimals(coin)
+            limit_price = round_price(limit_price, sz_dec, not is_hip3(coin))
         except API_ERRORS as e:
             logger.error(f"Error calculating market price for {coin} ({side.value}, slippage={slippage}): {e}")
             return None

@@ -14,6 +14,7 @@ import time
 from typing import Dict, Optional, Tuple
 
 from order_manager import BBO_OFFSET, OrderSide, round_price
+from coin_utils import is_hip3
 from rate_limiter import API_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -188,12 +189,14 @@ class PositionCloser:
         # Maker-only close: try limit at mid price (post_only)
         market_data = self.market_data.get_market_data(coin)
         if market_data and market_data.mid_price > 0:
+            sz_dec = self.market_data.get_sz_decimals(coin)
+            perp = not is_hip3(coin)
             close_side = OrderSide.SELL if size > 0 else OrderSide.BUY
             if market_data.bid > 0 and market_data.ask > 0:
                 if close_side == OrderSide.SELL:
-                    close_price = round_price(market_data.ask * (1 + BBO_OFFSET))
+                    close_price = round_price(market_data.ask * (1 + BBO_OFFSET), sz_dec, perp)
                 else:
-                    close_price = round_price(market_data.bid * (1 - BBO_OFFSET))
+                    close_price = round_price(market_data.bid * (1 - BBO_OFFSET), sz_dec, perp)
             else:
                 # No BBO available — skip to avoid rejection at mid_price
                 logger.info(f"[mm] Position {coin} held {age:.0f}s — no BBO, skipping maker close")
@@ -246,24 +249,27 @@ class PositionCloser:
         effective_spread = self._tier_spread_bps(tier)
         age = time.monotonic() - entry_time
 
+        sz_dec = self.market_data.get_sz_decimals(coin)
+        perp = not is_hip3(coin)
+
         close_side = OrderSide.SELL if size > 0 else OrderSide.BUY
         if size > 0:
-            close_price = round_price(entry_price * (1 + effective_spread / 10_000))
+            close_price = round_price(entry_price * (1 + effective_spread / 10_000), sz_dec, perp)
         else:
-            close_price = round_price(entry_price * (1 - effective_spread / 10_000))
+            close_price = round_price(entry_price * (1 - effective_spread / 10_000), sz_dec, perp)
 
         # Clamp take-profit price outside BBO to avoid post-only rejections
         if self.maker_only:
             md = self.market_data.get_market_data(coin)
             if md and md.bid > 0 and md.ask > 0:
                 if close_side == OrderSide.SELL and close_price <= md.ask:
-                    close_price = round_price(md.ask * (1 + BBO_OFFSET))
+                    close_price = round_price(md.ask * (1 + BBO_OFFSET), sz_dec, perp)
                     logger.debug(
                         f"[mm] Clamped take-profit sell for {coin} to {close_price:.6f} "
                         f"(ask={md.ask:.6f})"
                     )
                 if close_side == OrderSide.BUY and close_price >= md.bid:
-                    close_price = round_price(md.bid * (1 - BBO_OFFSET))
+                    close_price = round_price(md.bid * (1 - BBO_OFFSET), sz_dec, perp)
                     logger.debug(
                         f"[mm] Clamped take-profit buy for {coin} to {close_price:.6f} "
                         f"(bid={md.bid:.6f})"

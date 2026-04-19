@@ -18,6 +18,7 @@ from strategies.base_strategy import BaseStrategy
 from strategies.mm_order_tracker import OrderTracker
 from strategies.mm_position_closer import PositionCloser
 from order_manager import BBO_OFFSET, OrderSide, round_price
+from coin_utils import is_hip3
 from rate_limiter import API_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -340,24 +341,27 @@ class MarketMakingStrategy(BaseStrategy):
         if mid_price <= 0:
             return
 
+        sz_dec = self.market_data.get_sz_decimals(coin)
+        perp = not is_hip3(coin)
+
         if self.bbo_mode and market_data.bid > 0 and market_data.ask > 0:
             # BBO-following mode: place at/near best bid and ask
             self._record_mid_price(coin, mid_price)
             effective_offset_bps = self._get_volatility_adjusted_offset(coin)
             offset = effective_offset_bps / 10_000
-            buy_price = round_price(market_data.bid * (1 - offset))
-            sell_price = round_price(market_data.ask * (1 + offset))
+            buy_price = round_price(market_data.bid * (1 - offset), sz_dec, perp)
+            sell_price = round_price(market_data.ask * (1 + offset), sz_dec, perp)
         else:
             # Fallback: mid ± spread. Also used when BBO is unavailable
             # (bid/ask=0) even in bbo_mode. Maker-only clamping below
             # ensures Alo orders don't cross the spread.
-            buy_price, sell_price = self._get_spread_prices(mid_price)
+            buy_price, sell_price = self._get_spread_prices(mid_price, sz_dec, perp)
             # Clamp prices to stay outside BBO for maker-only (Alo) orders
             if self.maker_only and market_data.bid > 0 and market_data.ask > 0:
                 if buy_price >= market_data.bid:
-                    buy_price = round_price(market_data.bid * (1 - BBO_OFFSET))
+                    buy_price = round_price(market_data.bid * (1 - BBO_OFFSET), sz_dec, perp)
                 if sell_price <= market_data.ask:
-                    sell_price = round_price(market_data.ask * (1 + BBO_OFFSET))
+                    sell_price = round_price(market_data.ask * (1 + BBO_OFFSET), sz_dec, perp)
 
         # Inventory skew: shift both prices to encourage position reduction.
         # Applied after BBO/spread pricing intentionally — skew may push
@@ -366,8 +370,8 @@ class MarketMakingStrategy(BaseStrategy):
         skew = self._calculate_inventory_skew(coin, mid_price)
         if skew != 0.0:
             skew_mult = skew / 10_000
-            buy_price = round_price(buy_price * (1 - skew_mult))
-            sell_price = round_price(sell_price * (1 - skew_mult))
+            buy_price = round_price(buy_price * (1 - skew_mult), sz_dec, perp)
+            sell_price = round_price(sell_price * (1 - skew_mult), sz_dec, perp)
             logger.debug(f"[mm] Inventory skew {coin}: {skew:.1f}bps")
 
         size = self.calculate_position_size(coin, {})
@@ -427,11 +431,12 @@ class MarketMakingStrategy(BaseStrategy):
                     f"size={size} price={price:.6f} (oid={order.id})"
                 )
 
-    def _get_spread_prices(self, mid_price: float) -> tuple:
+    def _get_spread_prices(self, mid_price: float, sz_decimals: int = 0,
+                           is_perp: bool = True) -> tuple:
         """Return ``(buy_price, sell_price)`` based on ``spread_bps``."""
         offset = mid_price * (self.spread_bps / 10_000)
-        buy_price = round_price(mid_price - offset)
-        sell_price = round_price(mid_price + offset)
+        buy_price = round_price(mid_price - offset, sz_decimals, is_perp)
+        sell_price = round_price(mid_price + offset, sz_decimals, is_perp)
         return buy_price, sell_price
 
     def _calculate_inventory_skew(self, coin: str, mid_price: float) -> float:

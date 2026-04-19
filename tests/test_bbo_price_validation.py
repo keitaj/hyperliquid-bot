@@ -13,6 +13,7 @@ def _make_closer(maker_only=True, spread_bps=10, max_age=120):
     om = MagicMock()
     md = MagicMock()
     md.round_size.return_value = 0.5
+    md.get_sz_decimals.return_value = 0
     closer = PositionCloser(
         order_manager=om,
         market_data=md,
@@ -160,6 +161,7 @@ class TestPlaceOrdersBBOClamping:
 
         om = MagicMock()
         md = MagicMock()
+        md.get_sz_decimals.return_value = 0
         s.order_manager = om
         s.market_data = md
 

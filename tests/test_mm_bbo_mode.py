@@ -40,6 +40,7 @@ def _make_strategy(bbo_mode=False, bbo_offset_bps=0, spread_bps=10, maker_only=T
 
     om = MagicMock()
     md = MagicMock()
+    md.get_sz_decimals.return_value = 0
     s.order_manager = om
     s.market_data = md
 

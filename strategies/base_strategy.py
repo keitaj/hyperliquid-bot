@@ -6,6 +6,7 @@ import time
 import pandas as pd
 from market_data import MarketDataManager, MarketData
 from order_manager import OrderManager, OrderSide, round_price
+from coin_utils import is_hip3
 from position_closer import close_position_market
 from account_utils import get_account_snapshot
 from rate_limiter import API_ERRORS
@@ -161,7 +162,7 @@ class BaseStrategy(ABC):
                     reduce_only=signal.get('reduce_only', False)
                 )
             else:
-                price = self._calculate_limit_price(market_data, side)
+                price = self._calculate_limit_price(market_data, side, coin)
                 order = self.order_manager.create_limit_order(
                     coin=coin,
                     side=OrderSide.BUY if side == 'buy' else OrderSide.SELL,
@@ -177,11 +178,13 @@ class BaseStrategy(ABC):
         except API_ERRORS as e:
             logger.error(f"Error executing signal for {coin}: {e}")
 
-    def _calculate_limit_price(self, market_data: MarketData, side: str) -> float:
+    def _calculate_limit_price(self, market_data: MarketData, side: str, coin: str = "") -> float:
+        sz_dec = self.market_data.get_sz_decimals(coin) if coin else 0
+        perp = not is_hip3(coin) if coin else True
         if side == 'buy':
-            return round_price(market_data.bid)
+            return round_price(market_data.bid, sz_dec, perp)
         else:
-            return round_price(market_data.ask)
+            return round_price(market_data.ask, sz_dec, perp)
 
     def update_positions(self) -> None:
         self.positions = {}
