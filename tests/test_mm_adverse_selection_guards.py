@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from strategies.market_making_strategy import MarketMakingStrategy
-from market_data import MarketData
 
 
 def _make_strategy(imbalance_threshold=0.0, loss_streak_limit=0, loss_streak_cooldown=300):

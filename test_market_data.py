@@ -4,7 +4,6 @@ Test script to verify Hyperliquid API connection and fetch market data
 No authentication required for public endpoints
 """
 
-import json
 from hyperliquid.info import Info
 from hyperliquid.utils import constants
 
