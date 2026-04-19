@@ -20,7 +20,7 @@ from position_closer import close_position_market  # noqa: E402
 from rate_limiter import API_ERRORS  # noqa: E402
 from exceptions import TransientError, DataError, ConfigurationError  # noqa: E402
 from circuit_breaker import CircuitBreaker  # noqa: E402
-from ws import MarketDataFeed, FillFeed  # noqa: E402
+from ws import MarketDataFeed, FillFeed, BboGuard  # noqa: E402
 from strategies import (  # noqa: E402
     SimpleMAStrategy,
     RSIStrategy,
@@ -62,6 +62,7 @@ class HyperliquidBot:
         self._enable_ws = enable_ws
         self.ws_feed: Optional[MarketDataFeed] = None
         self.fill_feed: Optional[FillFeed] = None
+        self.bbo_guard: Optional[BboGuard] = None
 
         # ------------------------------------------------------------------ #
         # HIP-3 Multi-DEX setup
@@ -368,6 +369,16 @@ class HyperliquidBot:
                 self.fill_feed = FillFeed(ws_info, tracker, self.account_address)
                 self.fill_feed.start()
 
+                # Phase 3: BBO change detection → stale quote cancel
+                threshold = self.strategy_config.get('bbo_guard_threshold_bps', 2.0)
+                if threshold > 0:
+                    self.bbo_guard = BboGuard(
+                        tracker,
+                        threshold_bps=threshold,
+                    )
+                    self.ws_feed.add_listener(self.bbo_guard.on_l2_update)
+                    logger.info("[ws] BboGuard enabled (threshold=%.1f bps)", threshold)
+
         consecutive_errors = 0
 
         while self.running:
@@ -545,6 +556,9 @@ class HyperliquidBot:
         logger.info("Received shutdown signal")
         self.running = False
 
+        if self.bbo_guard:
+            self.bbo_guard.stop()
+            self.bbo_guard = None
         if self.fill_feed:
             self.fill_feed.stop()
             self.fill_feed = None
@@ -865,6 +879,8 @@ if __name__ == "__main__":
                              '0=disabled, 2=cooldown after 2 losses. (market_making)')
     parser.add_argument('--loss-streak-cooldown', type=float,
                         help='Seconds to pause a coin after hitting loss streak limit (default: 300, market_making)')
+    parser.add_argument('--bbo-guard-threshold-bps', type=float,
+                        help='Cancel orders when BBO changes by this many bps; 0 to disable (default: 2.0)')
     parser.add_argument('--vol-adjust', action='store_true', default=False,
                         help='Enable volatility-adjusted BBO offset (market_making)')
     parser.add_argument('--vol-adjust-multiplier', type=float,
@@ -949,6 +965,7 @@ if __name__ == "__main__":
             'imbalance_threshold',
             'loss_streak_limit',
             'loss_streak_cooldown',
+            'bbo_guard_threshold_bps',
             ('vol_adjust', 'vol_adjust_enabled'),
             'vol_adjust_multiplier',
             'vol_lookback',

@@ -16,7 +16,7 @@ Usage::
 import logging
 import threading
 import time
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,11 @@ class MarketDataFeed:
         self._update_count = 0
         self._error_count = 0
         self._last_update: Dict[str, float] = {}
+        self._listeners: List[Callable[[str, Any], None]] = []
+
+    def add_listener(self, callback: Callable[[str, Any], None]) -> None:
+        """Register a callback that receives ``(coin, levels)`` on each l2Book update."""
+        self._listeners.append(callback)
 
     # ------------------------------------------------------------------ #
     #  Lifecycle
@@ -113,6 +118,12 @@ class MarketDataFeed:
 
             self._update_count += 1
             self._last_update[coin] = time.monotonic()
+
+            for listener in self._listeners:
+                try:
+                    listener(coin, levels)
+                except Exception as exc:
+                    logger.error("[ws] Listener error: %s", exc)
 
         except Exception as e:
             self._error_count += 1
