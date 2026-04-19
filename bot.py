@@ -363,10 +363,9 @@ class HyperliquidBot:
             self.ws_feed.start()
 
             # Phase 2: instant fill detection → opposite-side cancel
-            if hasattr(self.strategy, '_tracker'):
-                self.fill_feed = FillFeed(
-                    ws_info, self.strategy._tracker, self.account_address,
-                )
+            tracker = getattr(self.strategy, 'order_tracker', None)
+            if tracker is not None:
+                self.fill_feed = FillFeed(ws_info, tracker, self.account_address)
                 self.fill_feed.start()
 
         consecutive_errors = 0

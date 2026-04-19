@@ -16,7 +16,6 @@ Usage::
 """
 
 import logging
-import threading
 from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
@@ -40,7 +39,6 @@ class FillFeed:
         self._fill_count = 0
         self._cancel_count = 0
         self._error_count = 0
-        self._lock = threading.Lock()
 
     # ------------------------------------------------------------------ #
     #  Lifecycle
@@ -129,11 +127,11 @@ class FillFeed:
                     filled_coins.add(coin)
                     self._fill_count += 1
 
-            # Cancel opposite-side orders for each filled coin
+            # Cancel opposite-side orders for each filled coin.
+            # OrderTracker.cancel_all_orders_for_coin is thread-safe (has its own lock).
             for coin in filled_coins:
-                with self._lock:
-                    self.order_tracker.cancel_all_orders_for_coin(coin)
-                    self._cancel_count += 1
+                self.order_tracker.cancel_all_orders_for_coin(coin)
+                self._cancel_count += 1
                 logger.info(
                     "[ws-fill] Instant cancel for %s (fill detected via WS)", coin
                 )

@@ -98,6 +98,11 @@ class MarketMakingStrategy(BaseStrategy):
             aggressive_loss_bps=config.get('aggressive_loss_bps', 1.0),
         )
 
+    @property
+    def order_tracker(self) -> OrderTracker:
+        """Public accessor for the order tracker (used by WS FillFeed)."""
+        return self._tracker
+
     # ------------------------------------------------------------------ #
     #  Main loop override
     # ------------------------------------------------------------------ #
