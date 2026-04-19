@@ -179,10 +179,11 @@ class GridTradingStrategy(BaseStrategy):
         total = len(grid['levels'])
         return f"grid:{filled}/{total}"
 
-    def _calculate_limit_price(self, market_data, side: str) -> float:
+    def _calculate_limit_price(self, market_data, side: str, coin=None) -> float:
         if hasattr(self, '_current_signal') and 'grid_price' in self._current_signal:
-            return round_price(self._current_signal['grid_price'])
-        return super()._calculate_limit_price(market_data, side)
+            sz_dec, perp = self.market_data.price_rounding_params(coin) if coin is not None else (0, True)
+            return round_price(self._current_signal['grid_price'], sz_dec, perp)
+        return super()._calculate_limit_price(market_data, side, coin)
 
     def execute_signal(self, coin: str, signal: Dict):
         self._current_signal = signal

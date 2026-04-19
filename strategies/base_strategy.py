@@ -161,7 +161,7 @@ class BaseStrategy(ABC):
                     reduce_only=signal.get('reduce_only', False)
                 )
             else:
-                price = self._calculate_limit_price(market_data, side)
+                price = self._calculate_limit_price(market_data, side, coin)
                 order = self.order_manager.create_limit_order(
                     coin=coin,
                     side=OrderSide.BUY if side == 'buy' else OrderSide.SELL,
@@ -177,11 +177,13 @@ class BaseStrategy(ABC):
         except API_ERRORS as e:
             logger.error(f"Error executing signal for {coin}: {e}")
 
-    def _calculate_limit_price(self, market_data: MarketData, side: str) -> float:
+    def _calculate_limit_price(self, market_data: MarketData, side: str,
+                               coin: Optional[str] = None) -> float:
+        sz_dec, perp = self.market_data.price_rounding_params(coin) if coin is not None else (0, True)
         if side == 'buy':
-            return round_price(market_data.bid)
+            return round_price(market_data.bid, sz_dec, perp)
         else:
-            return round_price(market_data.ask)
+            return round_price(market_data.ask, sz_dec, perp)
 
     def update_positions(self) -> None:
         self.positions = {}
