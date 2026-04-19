@@ -40,6 +40,7 @@ class PositionCloser:
         maker_only: bool,
         taker_fallback_age_seconds: Optional[float],
         aggressive_loss_bps: float = 1.0,
+        force_close_max_loss_bps: float = 0.0,
         coin_spread_overrides: Optional[Dict[str, float]] = None,
     ) -> None:
         self.order_manager = order_manager
@@ -50,6 +51,9 @@ class PositionCloser:
         self.maker_only = maker_only
         self.taker_fallback_age_seconds = taker_fallback_age_seconds
         self.aggressive_loss_bps = aggressive_loss_bps
+        # 0 = disabled (use BBO-only pricing in force close phase)
+        self.force_close_max_loss_bps = max(force_close_max_loss_bps, aggressive_loss_bps) \
+            if force_close_max_loss_bps > 0 else 0.0
 
         # coin -> (entry_time, close_oid or None, close_tier)
         self._open_positions: Dict[str, Tuple[float, Optional[int], int]] = {}
@@ -138,7 +142,8 @@ class PositionCloser:
 
         # Check if max age exceeded -- force close
         if age >= self.max_position_age_seconds:
-            self._handle_force_close(coin, size, age, entry_time, close_oid, close_position_fn)
+            self._handle_force_close(coin, size, age, entry_time, close_oid, close_position_fn,
+                                     entry_price=entry_price)
             return
 
         # Determine desired tier for this age
@@ -198,7 +203,7 @@ class PositionCloser:
     def _handle_force_close(
         self, coin: str, size: float, age: float,
         entry_time: float, close_oid: Optional[int],
-        close_position_fn,
+        close_position_fn, entry_price: float = 0.0,
     ) -> None:
         # Cancel existing close order if any
         if close_oid is not None:
@@ -222,36 +227,71 @@ class PositionCloser:
             self._open_positions.pop(coin, None)
             return
 
-        # Maker-only close: try limit at mid price (post_only)
+        # Maker-only close with progressive loss acceptance
         market_data = self.market_data.get_market_data(coin)
-        if market_data and market_data.mid_price > 0:
-            rp = self.market_data.price_rounding_params(coin)
-            close_side = OrderSide.SELL if size > 0 else OrderSide.BUY
-            if market_data.bid > 0 and market_data.ask > 0:
-                if close_side == OrderSide.SELL:
-                    close_price = round_price(market_data.ask * (1 + BBO_OFFSET), *rp)
-                else:
-                    close_price = round_price(market_data.bid * (1 - BBO_OFFSET), *rp)
+        if not market_data or market_data.mid_price <= 0:
+            logger.info(f"[mm] Position {coin} held {age:.0f}s — no market data, skipping maker close")
+            return
+
+        rp = self.market_data.price_rounding_params(coin)
+        close_side = OrderSide.SELL if size > 0 else OrderSide.BUY
+
+        if not (market_data.bid > 0 and market_data.ask > 0):
+            logger.info(f"[mm] Position {coin} held {age:.0f}s — no BBO, skipping maker close")
+            return
+
+        # BBO-based price (always available)
+        if close_side == OrderSide.SELL:
+            bbo_price = round_price(market_data.ask * (1 + BBO_OFFSET), *rp)
+        else:
+            bbo_price = round_price(market_data.bid * (1 - BBO_OFFSET), *rp)
+
+        close_price = bbo_price
+        loss_bps = self.aggressive_loss_bps
+
+        # Dynamic loss acceptance: scale from aggressive_loss_bps to
+        # force_close_max_loss_bps as position approaches taker deadline.
+        if self.force_close_max_loss_bps > 0 and entry_price > 0 and self.taker_fallback_age_seconds:
+            progress = (age - self.max_position_age_seconds) / self.taker_fallback_age_seconds
+            progress = min(max(progress, 0.0), 1.0)
+            loss_bps = (self.aggressive_loss_bps
+                        + progress * (self.force_close_max_loss_bps - self.aggressive_loss_bps))
+
+            if close_side == OrderSide.SELL:
+                entry_price_adjusted = round_price(entry_price * (1 - loss_bps / 10_000), *rp)
+                # Use the more aggressive of entry-based and BBO-based
+                close_price = min(entry_price_adjusted, bbo_price)
+                # Clamp to stay outside BBO for maker-only
+                if close_price <= market_data.ask:
+                    close_price = bbo_price
             else:
-                # No BBO available — skip to avoid rejection at mid_price
-                logger.info(f"[mm] Position {coin} held {age:.0f}s — no BBO, skipping maker close")
-                return
-            abs_size = self.market_data.round_size(coin, abs(size))
-            if abs_size > 0:
-                try:
-                    order = self.order_manager.create_limit_order(
-                        coin=coin, side=close_side, size=abs_size,
-                        price=close_price, reduce_only=True, post_only=True,
-                    )
-                    if order and order.id is not None:
-                        self._open_positions[coin] = (entry_time, order.id, _TIER_AGGRESSIVE)
+                entry_price_adjusted = round_price(entry_price * (1 + loss_bps / 10_000), *rp)
+                close_price = max(entry_price_adjusted, bbo_price)
+                if close_price >= market_data.bid:
+                    close_price = bbo_price
+
+        abs_size = self.market_data.round_size(coin, abs(size))
+        if abs_size > 0:
+            try:
+                order = self.order_manager.create_limit_order(
+                    coin=coin, side=close_side, size=abs_size,
+                    price=close_price, reduce_only=True, post_only=True,
+                )
+                if order and order.id is not None:
+                    self._open_positions[coin] = (entry_time, order.id, _TIER_AGGRESSIVE)
+                    if self.force_close_max_loss_bps > 0 and entry_price > 0:
+                        logger.info(
+                            f"[mm] Position {coin} held {age:.0f}s -- "
+                            f"maker close at {close_price:.6f} loss={loss_bps:.1f}bps (oid={order.id})"
+                        )
+                    else:
                         logger.info(
                             f"[mm] Position {coin} held {age:.0f}s -- "
                             f"maker close at {close_price:.6f} (oid={order.id})"
                         )
-                        return
-                except API_ERRORS as e:
-                    logger.debug(f"[mm] Maker close failed for {coin}: {e}")
+                    return
+            except API_ERRORS as e:
+                logger.debug(f"[mm] Maker close failed for {coin}: {e}")
 
         logger.info(f"[mm] Position {coin} held {age:.0f}s -- maker close pending, will retry next cycle")
 
