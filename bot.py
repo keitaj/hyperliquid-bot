@@ -20,7 +20,7 @@ from position_closer import close_position_market  # noqa: E402
 from rate_limiter import API_ERRORS  # noqa: E402
 from exceptions import TransientError, DataError, ConfigurationError  # noqa: E402
 from circuit_breaker import CircuitBreaker  # noqa: E402
-from ws import MarketDataFeed, FillFeed, BboGuard  # noqa: E402
+from ws import MarketDataFeed, FillFeed, BboGuard, ImbalanceGuard  # noqa: E402
 from strategies import (  # noqa: E402
     SimpleMAStrategy,
     RSIStrategy,
@@ -63,6 +63,7 @@ class HyperliquidBot:
         self.ws_feed: Optional[MarketDataFeed] = None
         self.fill_feed: Optional[FillFeed] = None
         self.bbo_guard: Optional[BboGuard] = None
+        self.imbalance_guard: Optional[ImbalanceGuard] = None
 
         # ------------------------------------------------------------------ #
         # HIP-3 Multi-DEX setup
@@ -379,6 +380,20 @@ class HyperliquidBot:
                     self.ws_feed.add_listener(self.bbo_guard.on_l2_update)
                     logger.info("[ws] BboGuard enabled (threshold=%.1f bps)", threshold)
 
+                # Phase 4: L2 imbalance detection → one-sided cancel
+                imb_threshold = self.strategy_config.get('imbalance_guard_threshold', 0)
+                if imb_threshold > 0:
+                    self.imbalance_guard = ImbalanceGuard(
+                        tracker,
+                        threshold=imb_threshold,
+                        depth=int(self.strategy_config.get('imbalance_guard_depth', 5)),
+                    )
+                    self.ws_feed.add_listener(self.imbalance_guard.on_l2_update)
+                    logger.info(
+                        "[ws] ImbalanceGuard enabled (threshold=%.2f, depth=%d)",
+                        imb_threshold, self.imbalance_guard.depth,
+                    )
+
         consecutive_errors = 0
 
         while self.running:
@@ -556,6 +571,9 @@ class HyperliquidBot:
         logger.info("Received shutdown signal")
         self.running = False
 
+        if self.imbalance_guard:
+            self.imbalance_guard.stop()
+            self.imbalance_guard = None
         if self.bbo_guard:
             self.bbo_guard.stop()
             self.bbo_guard = None
@@ -881,6 +899,10 @@ if __name__ == "__main__":
                         help='Seconds to pause a coin after hitting loss streak limit (default: 300, market_making)')
     parser.add_argument('--bbo-guard-threshold-bps', type=float,
                         help='Cancel orders when BBO changes by this many bps; 0 to disable (default: 2.0)')
+    parser.add_argument('--imbalance-guard-threshold', type=float,
+                        help='Cancel one side when L2 imbalance exceeds this (0-1); 0 to disable (default: 0)')
+    parser.add_argument('--imbalance-guard-depth', type=int,
+                        help='Number of L2 book levels for imbalance guard calculation (default: 5)')
     parser.add_argument('--vol-adjust', action='store_true', default=False,
                         help='Enable volatility-adjusted BBO offset (market_making)')
     parser.add_argument('--vol-adjust-multiplier', type=float,
@@ -966,6 +988,8 @@ if __name__ == "__main__":
             'loss_streak_limit',
             'loss_streak_cooldown',
             'bbo_guard_threshold_bps',
+            'imbalance_guard_threshold',
+            'imbalance_guard_depth',
             ('vol_adjust', 'vol_adjust_enabled'),
             'vol_adjust_multiplier',
             'vol_lookback',

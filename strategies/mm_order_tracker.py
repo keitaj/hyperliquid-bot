@@ -127,3 +127,33 @@ class OrderTracker:
             logger.error(
                 f"[mm] Error cancelling orders for {coin} after fill: {e}, oids: {oid_list}"
             )
+
+    def cancel_orders_by_side(self, coin: str, side: str) -> None:
+        """Cancel tracked orders for a specific side of a coin.
+
+        Only cancels orders matching *side* (``"B"`` for buy, ``"A"`` for sell),
+        leaving the opposite side intact.
+
+        Thread-safe: may be called from the WS imbalance guard thread.
+        """
+        with self._lock:
+            tracked = self._tracked_orders.get(coin, [])
+            to_cancel = [(oid, s, t) for oid, s, t in tracked if s == side]
+            remaining = [(oid, s, t) for oid, s, t in tracked if s != side]
+            self._tracked_orders[coin] = remaining
+
+        if not to_cancel:
+            return
+
+        cancel_requests = [{"coin": coin, "oid": oid} for oid, _, _ in to_cancel]
+        oid_list = [oid for oid, _, _ in to_cancel]
+        try:
+            cancelled = self.order_manager.bulk_cancel_orders(cancel_requests)
+            logger.info(
+                f"[mm] Cancelled {cancelled} {side} order(s) for {coin} "
+                f"(imbalance guard): {oid_list}"
+            )
+        except Exception as e:
+            logger.error(
+                f"[mm] Error cancelling {side} orders for {coin}: {e}, oids: {oid_list}"
+            )
