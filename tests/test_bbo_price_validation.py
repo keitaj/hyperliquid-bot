@@ -150,6 +150,9 @@ class TestPlaceOrdersBBOClamping:
         s.loss_streak_cooldown = 300
         s._loss_streaks = defaultdict(int)
         s._coin_cooldown_until = {}
+        s._quiet_hours = set()
+        s._quiet_spread_multiplier = 0.0
+        s._was_quiet = False
         s.positions = {}
         s._orders_placed = 0
         s._orders_placed_per_coin = defaultdict(int)
