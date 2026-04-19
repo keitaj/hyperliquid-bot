@@ -374,6 +374,10 @@ class HyperliquidBot:
             tracker = getattr(self.strategy, 'order_tracker', None)
             if tracker is not None:
                 self.fill_feed = FillFeed(ws_info, tracker, self.account_address)
+                # Connect PositionCloser for close-fill cleanup (prevents reduce-only rejections)
+                closer = getattr(self.strategy, '_closer', None)
+                if closer is not None:
+                    self.fill_feed.set_position_closer(closer)
                 self.fill_feed.start()
 
                 # Phase 3: BBO change detection → stale quote cancel

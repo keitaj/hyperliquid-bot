@@ -17,6 +17,7 @@ def _make_closer():
         maker_only=True,
         taker_fallback_age_seconds=None,
     )
+    om.get_all_positions.return_value = [{'coin': 'BTC', 'szi': '1.0'}]
     return closer, om, md
 
 

@@ -40,10 +40,20 @@ class FillFeed:
         self._cancel_count = 0
         self._error_count = 0
         self._adverse_tracker: Any = None
+        self._position_closer: Any = None
 
     def set_adverse_selection_tracker(self, tracker: Any) -> None:
         """Register an adverse selection tracker to receive fill notifications."""
         self._adverse_tracker = tracker
+
+    def set_position_closer(self, closer: Any) -> None:
+        """Register PositionCloser for close-fill cleanup.
+
+        When a fill is detected, ``on_position_closed(coin)`` is called
+        to clear stale tracking state — preventing reduce-only rejections
+        from race conditions between the WS thread and main loop.
+        """
+        self._position_closer = closer
 
     # ------------------------------------------------------------------ #
     #  Lifecycle
@@ -153,6 +163,13 @@ class FillFeed:
                 logger.info(
                     "[ws-fill] Instant cancel for %s (fill detected via WS)", coin
                 )
+
+            # Notify PositionCloser that positions may have closed.
+            # This clears stale tracking state to prevent reduce-only
+            # rejections when the close order itself was the fill.
+            if self._position_closer is not None:
+                for coin in filled_coins:
+                    self._position_closer.on_position_closed(coin)
 
         except Exception as e:
             self._error_count += 1
