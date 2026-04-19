@@ -3,7 +3,7 @@
 import time
 from unittest.mock import MagicMock, patch
 
-from market_data import MarketDataManager, MarketData
+from market_data import MarketDataManager
 from ttl_cache import TTLCacheMap
 from ws.market_data_feed import MarketDataFeed
 
