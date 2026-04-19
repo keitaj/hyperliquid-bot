@@ -41,9 +41,6 @@ class WsReconnector:
 
     def maybe_reconnect(self, bot: "HyperliquidBot") -> None:  # noqa: F821
         """Check WS health and reconnect if needed.  Safe to call every cycle."""
-        if bot.ws_feed is None:
-            return
-
         now = time.monotonic()
         if now - self._last_check < self._check_interval:
             return
@@ -75,17 +72,15 @@ class WsReconnector:
 
     def _is_healthy(self, bot: "HyperliquidBot") -> bool:  # noqa: F821
         """Return True if at least one coin received a WS update recently."""
+        if bot.ws_feed is None:
+            return False
+
         stale = bot.ws_feed.stale_coins(max_age=self.stale_threshold)
         total = len(bot.ws_feed.coins)
         if len(stale) < total:
             return True
 
-        # All coins stale — also check if the SDK ws thread is alive
-        ws_mgr = getattr(bot.ws_feed.info, 'ws_manager', None)
-        if ws_mgr is not None and ws_mgr.is_alive():
-            # Thread alive but no data — might be transient
-            return False
-        # Thread dead — definitely needs reconnect
+        # All coins stale
         return False
 
     def _do_reconnect(self, bot: "HyperliquidBot") -> None:  # noqa: F821

@@ -1,10 +1,7 @@
 """Tests for WsReconnector — WebSocket auto-reconnect monitor."""
 
 import time
-import threading
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from ws.ws_reconnector import WsReconnector
 
@@ -71,13 +68,22 @@ class TestWsReconnectorHealthy:
         bot.ws_feed.stop.assert_not_called()
         assert reconnector._consecutive_failures == 0
 
-    def test_no_reconnect_when_no_ws_feed(self):
+    @patch("ws.ws_reconnector.WsReconnector._rebuild")
+    def test_reconnect_when_ws_feed_is_none(self, mock_rebuild):
+        """After a failed rebuild, ws_feed is None but reconnector should still retry."""
         bot = _make_bot()
         bot.ws_feed = None
+        bot.fill_feed = None
+        bot.bbo_guard = None
+        bot.imbalance_guard = None
         reconnector = WsReconnector()
+        reconnector._check_interval = 0
+        reconnector._last_check = 0
 
         reconnector.maybe_reconnect(bot)
-        assert reconnector._reconnect_count == 0
+        # Should detect as unhealthy and attempt rebuild
+        mock_rebuild.assert_called_once_with(bot)
+        assert reconnector._reconnect_count == 1
 
     def test_skip_check_within_interval(self):
         bot = _make_bot(all_stale=True)
@@ -256,4 +262,27 @@ class TestWsReconnectorRecovery:
         reconnector._consecutive_failures = 3  # simulate previous failures
 
         reconnector.maybe_reconnect(bot)
+        assert reconnector._consecutive_failures == 0
+
+    @patch("ws.ws_reconnector.WsReconnector._rebuild")
+    def test_retry_after_rebuild_failure(self, mock_rebuild):
+        """After rebuild fails (ws_feed=None), reconnector should still retry."""
+        # First call: rebuild fails, leaving ws_feed=None
+        mock_rebuild.side_effect = Exception("connection refused")
+        bot = _make_bot(all_stale=True, ws_thread_alive=False)
+        reconnector = WsReconnector(stale_threshold=60.0)
+        reconnector._check_interval = 0
+        reconnector._last_check = 0
+
+        reconnector.maybe_reconnect(bot)
+        assert reconnector._consecutive_failures == 1
+        # Teardown set ws_feed to None
+        assert bot.ws_feed is None
+
+        # Second call: should still attempt reconnect (ws_feed=None is unhealthy)
+        mock_rebuild.side_effect = None  # succeed this time
+        reconnector._next_retry_at = 0
+        reconnector._last_check = 0
+        reconnector.maybe_reconnect(bot)
+        assert reconnector._reconnect_count == 1
         assert reconnector._consecutive_failures == 0
