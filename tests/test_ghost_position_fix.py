@@ -37,20 +37,16 @@ class TestUserStateCacheInvalidation:
         should be removed so subsequent calls do not return old data."""
         md, info = self._make_multi_dex_md(cache_ttl=0.0)  # TTL=0 so every call hits API
 
-        # First call succeeds and caches
+        # First call succeeds
         good_state = {"assetPositions": [{"position": {"coin": "BTC", "szi": "0.1"}}]}
         info.user_state.return_value = good_state
         result1 = md.get_user_state("0xabc", dex="xyz")
         assert result1 == good_state
-        # Verify cache entry exists
-        assert ("0xabc", "xyz") in md._user_state_cache
 
-        # Second call raises API error -- cache entry should be removed
+        # Second call raises API error -- should not return stale data
         info.user_state.side_effect = ConnectionError("timeout")
         result2 = md.get_user_state("0xabc", dex="xyz")
         assert result2 == {}
-        # Cache entry should be gone
-        assert ("0xabc", "xyz") not in md._user_state_cache
 
         # Third call succeeds with new data
         info.user_state.side_effect = None
@@ -86,17 +82,16 @@ class TestUserStateCacheInvalidation:
 
         # Manually expire xyz cache to force API call
         cache_key_xyz = ("0xabc", "xyz")
-        old_entry = md._user_state_cache[cache_key_xyz]
-        md._user_state_cache[cache_key_xyz] = (old_entry[0] - 120, old_entry[1])
+        md._dex_user_state_cache.invalidate(cache_key_xyz)
 
         # Error on xyz (now cache-expired, so it hits API)
         info.user_state.side_effect = ConnectionError("timeout")
         md.get_user_state("0xabc", dex="xyz")
 
         # xyz cache should be gone
-        assert cache_key_xyz not in md._user_state_cache
+        assert md._dex_user_state_cache.get(cache_key_xyz) is None
         # km cache should still be valid
-        assert ("0xabc", "km") in md._user_state_cache
+        assert md._dex_user_state_cache.get(("0xabc", "km")) is not None
 
         info.user_state.side_effect = None
         info.user_state.return_value = state_km

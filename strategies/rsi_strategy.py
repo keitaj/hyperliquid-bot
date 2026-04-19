@@ -114,33 +114,20 @@ class RSIStrategy(BaseStrategy):
             logger.error(f"Error generating RSI signals for {coin}: {e}")
             return None
 
-    def calculate_position_size(self, coin: str, signal: Dict) -> float:
-        try:
-            if self._check_max_positions(coin):
-                return 0
+    def _adjust_size_usd(self, base_size_usd: float, signal: Dict,
+                         market_data) -> float:
+        current_rsi = signal.get('rsi')
+        if current_rsi is None:
+            logger.warning("Signal missing 'rsi', skipping dynamic sizing")
+            return base_size_usd
 
-            market_data = self.market_data.get_market_data(coin)
-            if not market_data:
-                return 0
+        if signal['side'] == 'buy' and current_rsi < self.rsi_extreme_low:
+            base_size_usd *= self.size_multiplier_extreme
+        elif signal['side'] == 'buy' and current_rsi < self.rsi_moderate_low:
+            base_size_usd *= self.size_multiplier_moderate
 
-            confidence = signal.get('confidence', 0.5)
-            base_size_usd = self.position_size_usd * confidence
+        return base_size_usd
 
-            current_rsi = signal.get('rsi')
-            if current_rsi is None:
-                logger.warning("Signal missing 'rsi', skipping dynamic sizing")
-                current_rsi = (self.rsi_extreme_low + self.overbought_threshold) / 2
-
-            if signal['side'] == 'buy' and current_rsi < self.rsi_extreme_low:
-                base_size_usd *= self.size_multiplier_extreme
-            elif signal['side'] == 'buy' and current_rsi < self.rsi_moderate_low:
-                base_size_usd *= self.size_multiplier_moderate
-
-            position_size = self._apply_account_cap(base_size_usd, market_data.mid_price)
-
-            logger.info(f"Calculated position size for {coin}: {position_size} (RSI: {current_rsi:.2f})")
-            return position_size
-
-        except API_ERRORS as e:
-            logger.error(f"Error calculating position size for {coin}: {e}")
-            return 0
+    def _size_log_detail(self, signal: Dict) -> str:
+        rsi = signal.get('rsi')
+        return f" (RSI: {rsi:.2f})" if rsi is not None else ""

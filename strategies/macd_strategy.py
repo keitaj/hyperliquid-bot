@@ -150,33 +150,20 @@ class MACDStrategy(BaseStrategy):
             logger.error(f"Error generating MACD signals for {coin}: {e}")
             return None
 
-    def calculate_position_size(self, coin: str, signal: Dict) -> float:
-        try:
-            if self._check_max_positions(coin):
-                return 0
+    def _adjust_size_usd(self, base_size_usd: float, signal: Dict,
+                         market_data) -> float:
+        histogram_strength = signal.get('histogram_strength')
+        if histogram_strength is None:
+            logger.warning("Signal missing 'histogram_strength', skipping dynamic sizing")
+            return base_size_usd
 
-            market_data = self.market_data.get_market_data(coin)
-            if not market_data:
-                return 0
+        if histogram_strength > self.histogram_strength_high:
+            base_size_usd *= self.histogram_multiplier_high
+        elif histogram_strength < self.histogram_strength_low:
+            base_size_usd *= self.histogram_multiplier_low
 
-            confidence = signal.get('confidence', 0.5)
-            base_size_usd = self.position_size_usd * confidence
+        return base_size_usd
 
-            histogram_strength = signal.get('histogram_strength')
-            if histogram_strength is None:
-                logger.warning("Signal missing 'histogram_strength', skipping dynamic sizing")
-                histogram_strength = (self.histogram_strength_high + self.histogram_strength_low) / 2
-
-            if histogram_strength > self.histogram_strength_high:
-                base_size_usd *= self.histogram_multiplier_high
-            elif histogram_strength < self.histogram_strength_low:
-                base_size_usd *= self.histogram_multiplier_low
-
-            position_size = self._apply_account_cap(base_size_usd, market_data.mid_price)
-
-            logger.info(f"Calculated position size for {coin}: {position_size} (Histogram: {histogram_strength:.4f}%)")
-            return position_size
-
-        except API_ERRORS as e:
-            logger.error(f"Error calculating position size for {coin}: {e}")
-            return 0
+    def _size_log_detail(self, signal: Dict) -> str:
+        hs = signal.get('histogram_strength')
+        return f" (Histogram: {hs:.4f}%)" if hs is not None else ""

@@ -7,6 +7,7 @@ import pandas as pd
 from hyperliquid.info import Info
 from coin_utils import is_hip3
 from rate_limiter import api_wrapper, API_ERRORS
+from ttl_cache import TTLCacheEntry, TTLCacheMap
 
 logger = logging.getLogger(__name__)
 
@@ -27,12 +28,10 @@ class MarketDataManager:
                  market_data_cache_ttl: float = 2.0,
                  imbalance_depth: int = 5):
         self.info = info
-        self._cache: Dict[str, MarketData] = {}
-        self._cache_time: Dict[str, float] = {}
+        self._cache: TTLCacheMap[str, MarketData] = TTLCacheMap(market_data_cache_ttl)
         self._cache_ttl = market_data_cache_ttl
         self._imbalance_depth = imbalance_depth
-        self._meta_cache = None
-        self._meta_cache_time: float = 0.0
+        self._meta_cache: TTLCacheEntry[Dict] = TTLCacheEntry(meta_cache_ttl)
         self._meta_cache_ttl = meta_cache_ttl
 
     def get_all_mids(self) -> Dict[str, float]:
@@ -45,13 +44,12 @@ class MarketDataManager:
     def get_meta(self) -> Dict:
         """Get meta information including sz_decimals for all assets"""
         try:
-            now = time.monotonic()
-            if self._meta_cache and (now - self._meta_cache_time) < self._meta_cache_ttl:
-                return self._meta_cache
+            cached = self._meta_cache.get()
+            if cached is not None:
+                return cached
 
             meta = api_wrapper.call(self.info.meta)
-            self._meta_cache = meta
-            self._meta_cache_time = now
+            self._meta_cache.set(meta)
             return meta
         except API_ERRORS as e:
             logger.error(f"Error fetching meta data: {e}")
@@ -88,11 +86,9 @@ class MarketDataManager:
 
     def get_market_data(self, coin: str) -> Optional[MarketData]:
         try:
-            # Return cached data if still fresh
-            now = time.monotonic()
-            cached_time = self._cache_time.get(coin, 0.0)
-            if now - cached_time < self._cache_ttl and coin in self._cache:
-                return self._cache[coin]
+            cached = self._cache.get(coin)
+            if cached is not None:
+                return cached
 
             l2_data = self.get_l2_snapshot(coin)
             if not l2_data or 'levels' not in l2_data:
@@ -131,8 +127,7 @@ class MarketDataManager:
                 book_imbalance=book_imbalance,
             )
 
-            self._cache[coin] = market_data
-            self._cache_time[coin] = now
+            self._cache.set(coin, market_data)
             return market_data
 
         except API_ERRORS as e:

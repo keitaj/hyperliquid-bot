@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from strategies.market_making_strategy import MarketMakingStrategy
+from ttl_cache import TTLCacheMap
 
 
 def _make_strategy(imbalance_threshold=0.0, loss_streak_limit=0, loss_streak_cooldown=300):
@@ -263,8 +264,7 @@ class TestBookImbalanceInMarketData:
 
         # Call the real method
         real_mdm = MarketDataManager.__new__(MarketDataManager)
-        real_mdm._cache = {}
-        real_mdm._cache_time = {}
+        real_mdm._cache = TTLCacheMap(ttl=2.0)
         real_mdm._cache_ttl = 2.0
         real_mdm._imbalance_depth = 5
 
@@ -277,8 +277,7 @@ class TestBookImbalanceInMarketData:
     def test_bid_heavy_book(self):
         from market_data import MarketDataManager
         real_mdm = MarketDataManager.__new__(MarketDataManager)
-        real_mdm._cache = {}
-        real_mdm._cache_time = {}
+        real_mdm._cache = TTLCacheMap(ttl=2.0)
         real_mdm._cache_ttl = 2.0
         real_mdm._imbalance_depth = 5
 
@@ -295,8 +294,7 @@ class TestBookImbalanceInMarketData:
     def test_ask_heavy_book(self):
         from market_data import MarketDataManager
         real_mdm = MarketDataManager.__new__(MarketDataManager)
-        real_mdm._cache = {}
-        real_mdm._cache_time = {}
+        real_mdm._cache = TTLCacheMap(ttl=2.0)
         real_mdm._cache_ttl = 2.0
         real_mdm._imbalance_depth = 5
 

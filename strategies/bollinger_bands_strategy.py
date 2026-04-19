@@ -129,33 +129,20 @@ class BollingerBandsStrategy(BaseStrategy):
                 }
         return None
 
-    def calculate_position_size(self, coin: str, signal: Dict) -> float:
-        try:
-            if self._check_max_positions(coin):
-                return 0
+    def _adjust_size_usd(self, base_size_usd: float, signal: Dict,
+                         market_data) -> float:
+        band_width = signal.get('band_width')
+        if band_width is None:
+            logger.warning("Signal missing 'band_width', skipping dynamic sizing")
+            return base_size_usd
 
-            market_data = self.market_data.get_market_data(coin)
-            if not market_data:
-                return 0
+        if band_width > self.high_band_width_threshold:
+            base_size_usd *= self.high_band_width_multiplier
+        elif band_width < self.low_band_width_threshold:
+            base_size_usd *= self.low_band_width_multiplier
 
-            confidence = signal.get('confidence', 0.5)
-            base_size_usd = self.position_size_usd * confidence
+        return base_size_usd
 
-            band_width = signal.get('band_width')
-            if band_width is None:
-                logger.warning("Signal missing 'band_width', skipping dynamic sizing")
-                band_width = (self.high_band_width_threshold + self.low_band_width_threshold) / 2
-
-            if band_width > self.high_band_width_threshold:
-                base_size_usd *= self.high_band_width_multiplier
-            elif band_width < self.low_band_width_threshold:
-                base_size_usd *= self.low_band_width_multiplier
-
-            position_size = self._apply_account_cap(base_size_usd, market_data.mid_price)
-
-            logger.info(f"Calculated position size for {coin}: {position_size} (Band Width: {band_width:.4f})")
-            return position_size
-
-        except API_ERRORS as e:
-            logger.error(f"Error calculating position size for {coin}: {e}")
-            return 0
+    def _size_log_detail(self, signal: Dict) -> str:
+        bw = signal.get('band_width')
+        return f" (Band Width: {bw:.4f})" if bw is not None else ""

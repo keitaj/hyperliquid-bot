@@ -1,5 +1,4 @@
 import logging
-import time
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from datetime import datetime
@@ -9,6 +8,7 @@ from hyperliquid.info import Info
 from rate_limiter import api_wrapper, API_ERRORS
 from exceptions import ConfigurationError
 from coin_utils import is_hip3, parse_coin
+from ttl_cache import TTLCacheEntry, TTLCacheMap
 
 logger = logging.getLogger(__name__)
 
@@ -78,23 +78,19 @@ class OrderManager:
         self.account_address = account_address
         self.default_slippage = default_slippage
         self.active_orders: Dict[int, Order] = {}
-        self._mids_cache: Dict[str, tuple] = {}
-        self._mids_cache_ttl = mids_cache_ttl
-        self._user_state_cache: Optional[Dict] = None
-        self._user_state_cache_time: float = 0.0
+        self._mids_cache: TTLCacheMap[str, Dict[str, str]] = TTLCacheMap(mids_cache_ttl)
+        self._user_state_cache: TTLCacheEntry[Dict] = TTLCacheEntry(user_state_cache_ttl)
         self._user_state_cache_ttl = user_state_cache_ttl
 
         # Per-cycle open orders cache. Multiple callers (update_order_status,
         # cancel_stale_orders, _is_order_alive) share a single API call.
         # Invalidated after any write operation (place, cancel).
         # Not thread-safe; bot runs single-threaded.
-        self._open_orders_cache: Optional[List[Dict]] = None
-        self._open_orders_cache_time: float = 0.0
-        self._open_orders_cache_ttl: float = user_state_cache_ttl
+        self._open_orders_cache: TTLCacheEntry[List[Dict]] = TTLCacheEntry(user_state_cache_ttl)
 
     def _invalidate_open_orders_cache(self) -> None:
         """Clear cached open orders after a write operation (place/cancel)."""
-        self._open_orders_cache = None
+        self._open_orders_cache.invalidate()
 
     def _get_sz_decimals(self, coin: str) -> int:
         """Return sz_decimals for *coin* from exchange metadata.
@@ -330,13 +326,12 @@ class OrderManager:
 
     def _get_cached_mids(self, dex: str = '') -> Dict[str, str]:
         """Return all_mids for a DEX, using a short-lived cache."""
-        now = time.monotonic()
         cached = self._mids_cache.get(dex)
-        if cached and (now - cached[0]) < self._mids_cache_ttl:
-            return cached[1]
+        if cached is not None:
+            return cached
 
         mids = api_wrapper.call(self.info.all_mids, dex=dex) if dex else api_wrapper.call(self.info.all_mids)
-        self._mids_cache[dex] = (now, mids)
+        self._mids_cache.set(dex, mids)
         return mids
 
     def _get_mid_price(self, coin: str) -> float:
@@ -463,15 +458,11 @@ class OrderManager:
         costs 20 API weight. With cache, only the first call per TTL window
         hits the API.
         """
-        now = time.monotonic()
-        if (self._open_orders_cache is not None
-                and (now - self._open_orders_cache_time) < self._open_orders_cache_ttl):
-            open_orders = self._open_orders_cache
-        else:
+        open_orders = self._open_orders_cache.get()
+        if open_orders is None:
             try:
                 open_orders = api_wrapper.call(self.info.open_orders, self.account_address)
-                self._open_orders_cache = open_orders
-                self._open_orders_cache_time = now
+                self._open_orders_cache.set(open_orders)
             except API_ERRORS as e:
                 logger.error(f"Error fetching open orders: {e}")
                 return []
@@ -516,13 +507,12 @@ class OrderManager:
 
     def _get_cached_user_state(self) -> Dict:
         """Return user_state, using a short-lived cache to avoid redundant API calls."""
-        now = time.monotonic()
-        if self._user_state_cache and (now - self._user_state_cache_time) < self._user_state_cache_ttl:
-            return self._user_state_cache
+        cached = self._user_state_cache.get()
+        if cached is not None:
+            return cached
 
         user_state = api_wrapper.call(self.info.user_state, self.account_address)
-        self._user_state_cache = user_state
-        self._user_state_cache_time = now
+        self._user_state_cache.set(user_state)
         return user_state
 
     def get_position(self, coin: str) -> Optional[Dict]:

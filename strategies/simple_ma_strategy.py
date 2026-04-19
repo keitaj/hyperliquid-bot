@@ -69,22 +69,4 @@ class SimpleMAStrategy(BaseStrategy):
             logger.error(f"Error generating signals for {coin}: {e}")
             return None
 
-    def calculate_position_size(self, coin: str, signal: Dict) -> float:
-        try:
-            if self._check_max_positions(coin):
-                return 0
-
-            market_data = self.market_data.get_market_data(coin)
-            if not market_data:
-                return 0
-
-            confidence = signal.get('confidence', 0.5)
-            base_size_usd = self.position_size_usd * confidence
-            position_size = self._apply_account_cap(base_size_usd, market_data.mid_price)
-
-            logger.info(f"Calculated position size for {coin}: {position_size}")
-            return position_size
-
-        except API_ERRORS as e:
-            logger.error(f"Error calculating position size for {coin}: {e}")
-            return 0
+    # Uses default calculate_position_size from BaseStrategy (no dynamic sizing adjustments).

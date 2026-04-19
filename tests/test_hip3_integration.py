@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from order_manager import Order, OrderSide
+from ttl_cache import TTLCacheEntry, TTLCacheMap
 
 
 # ---------------------------------------------------------------------------
@@ -67,11 +68,10 @@ def _make_multi_dex_om(active_orders=None, hip3_dexes=None):
     om.hip3_dexes = hip3_dexes or ["xyz"]
     om.registry = MagicMock()
     om.market_data_ext = MagicMock()
-    om._mids_cache = {}
-    om._mids_cache_ttl = 5.0
-    om._user_state_cache = None
-    om._user_state_cache_time = 0.0
+    om._mids_cache = TTLCacheMap(ttl=5.0)
+    om._user_state_cache = TTLCacheEntry(ttl=2.0)
     om._user_state_cache_ttl = 2.0
+    om._open_orders_cache = TTLCacheEntry(ttl=2.0)
     return om
 
 
@@ -307,15 +307,13 @@ class TestMultiDexMarketData:
         mdm.info = MagicMock()
         mdm.registry = MagicMock()
         mdm.api_url = "https://api.example.com"
-        mdm._cache = {}
-        mdm._cache_time = {}
+        mdm._cache = TTLCacheMap(ttl=2.0)
         mdm._cache_ttl = 2.0
-        mdm._meta_cache = None
-        mdm._meta_cache_time = None
+        mdm._meta_cache = TTLCacheEntry(ttl=3600)
         mdm._meta_cache_ttl = 3600
-        mdm._user_state_cache = {}
+        mdm._dex_user_state_cache = TTLCacheMap(ttl=2.0)
         mdm._user_state_cache_ttl = 2.0
-        mdm._open_orders_cache = {}
+        mdm._dex_open_orders_cache = TTLCacheMap(ttl=2.0)
         return mdm
 
     def test_get_sz_decimals_hip3_coin_via_sdk(self):
@@ -443,7 +441,7 @@ class TestMultiDexMarketData:
     def test_get_user_state_cache_expires(self):
         """After TTL expires, the cache is refreshed."""
         mdm = self._make_mdm()
-        mdm._user_state_cache_ttl = 0.0  # Expire immediately
+        mdm._dex_user_state_cache = TTLCacheMap(ttl=0.0)  # Expire immediately
         mdm.info.user_state.return_value = {"assetPositions": []}
 
         mdm.get_user_state("0xabc", dex="xyz")
