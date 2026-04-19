@@ -39,6 +39,11 @@ class FillFeed:
         self._fill_count = 0
         self._cancel_count = 0
         self._error_count = 0
+        self._adverse_tracker: Any = None
+
+    def set_adverse_selection_tracker(self, tracker: Any) -> None:
+        """Register an adverse selection tracker to receive fill notifications."""
+        self._adverse_tracker = tracker
 
     # ------------------------------------------------------------------ #
     #  Lifecycle
@@ -126,6 +131,19 @@ class FillFeed:
                 if coin:
                     filled_coins.add(coin)
                     self._fill_count += 1
+
+            # Notify adverse selection tracker (observation only, no trading impact)
+            if self._adverse_tracker is not None:
+                for fill in fills:
+                    try:
+                        coin = fill.get("coin", "")
+                        px = float(fill.get("px", 0))
+                        side = fill.get("side", "")
+                        fill_time = fill.get("time")
+                        if coin and px > 0 and side:
+                            self._adverse_tracker.on_fill(coin, px, side, fill_time)
+                    except Exception as e:
+                        logger.debug("[ws-fill] Error notifying adverse tracker: %s", e)
 
             # Cancel opposite-side orders for each filled coin.
             # OrderTracker.cancel_all_orders_for_coin is thread-safe (has its own lock).
