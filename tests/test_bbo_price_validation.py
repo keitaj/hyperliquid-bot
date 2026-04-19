@@ -143,6 +143,11 @@ class TestPlaceOrdersBBOClamping:
         s.bbo_mode = False
         s.bbo_offset_bps = 0
         s.inventory_skew_bps = 0
+        s.imbalance_threshold = 0.0
+        s.loss_streak_limit = 0
+        s.loss_streak_cooldown = 300
+        s._loss_streaks = defaultdict(int)
+        s._coin_cooldown_until = {}
         s.positions = {}
         s._orders_placed = 0
         s._orders_placed_per_coin = defaultdict(int)
@@ -151,6 +156,7 @@ class TestPlaceOrdersBBOClamping:
         s._fill_rate_log_interval = 300
         s._last_fill_rate_log = 0.0
         s._prev_position_coins = set()
+        s._prev_positions = {}
 
         om = MagicMock()
         md = MagicMock()

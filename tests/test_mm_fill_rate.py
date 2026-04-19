@@ -21,6 +21,12 @@ def _make_strategy(fill_rate_log_interval=300):
     strategy._fill_rate_log_interval = fill_rate_log_interval
     strategy._last_fill_rate_log = 0.0
     strategy._prev_position_coins = set()
+    strategy._prev_positions = {}
+    strategy.imbalance_threshold = 0.0
+    strategy.loss_streak_limit = 0
+    strategy.loss_streak_cooldown = 300
+    strategy._loss_streaks = defaultdict(int)
+    strategy._coin_cooldown_until = {}
     return strategy
 
 
