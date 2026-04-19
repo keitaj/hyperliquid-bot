@@ -929,6 +929,9 @@ if __name__ == "__main__":
     parser.add_argument('--aggressive-loss-bps', type=float,
                         help='Max loss in bps accepted to avoid taker close (default: 1.0). '
                              '0 = breakeven only, no loss-accepting tier. (market_making)')
+    parser.add_argument('--force-close-max-loss-bps', type=float,
+                        help='Max loss bps during force-close phase, scaling from aggressive-loss-bps '
+                             '(default: 0 = disabled, use BBO-only pricing)')
     parser.add_argument('--bbo-mode', action='store_true',
                         help='Place orders at BBO instead of mid±spread (market_making)')
     parser.add_argument('--bbo-offset-bps', type=float,
@@ -1044,6 +1047,7 @@ if __name__ == "__main__":
             ('max_position_age', 'max_position_age_seconds'),
             ('taker_fallback_age', 'taker_fallback_age_seconds'),
             'aggressive_loss_bps',
+            'force_close_max_loss_bps',
             'bbo_mode',
             'bbo_offset_bps',
             'inventory_skew_bps',

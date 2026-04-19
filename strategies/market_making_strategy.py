@@ -126,6 +126,7 @@ class MarketMakingStrategy(BaseStrategy):
             maker_only=self.maker_only,
             taker_fallback_age_seconds=config.get('taker_fallback_age_seconds', None),
             aggressive_loss_bps=config.get('aggressive_loss_bps', 1.0),
+            force_close_max_loss_bps=config.get('force_close_max_loss_bps', 0.0),
             coin_spread_overrides=self._coin_spread_overrides,
         )
 
