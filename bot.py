@@ -20,6 +20,7 @@ from position_closer import close_position_market  # noqa: E402
 from rate_limiter import API_ERRORS  # noqa: E402
 from exceptions import TransientError, DataError, ConfigurationError  # noqa: E402
 from circuit_breaker import CircuitBreaker  # noqa: E402
+from ws import MarketDataFeed  # noqa: E402
 from strategies import (  # noqa: E402
     SimpleMAStrategy,
     RSIStrategy,
@@ -38,7 +39,8 @@ logger = logging.getLogger(__name__)
 class HyperliquidBot:
     def __init__(self, strategy_name: str = "simple_ma", coins: Optional[List[str]] = None,
                  strategy_config: Optional[Dict] = None,
-                 main_loop_interval: float = 10, market_order_slippage: float = 0.01) -> None:
+                 main_loop_interval: float = 10, market_order_slippage: float = 0.01,
+                 enable_ws: bool = False) -> None:
         Config.validate()
         self.account_address = Config.ACCOUNT_ADDRESS
         self.running = False
@@ -57,6 +59,8 @@ class HyperliquidBot:
         self._last_risk_check: float = 0.0
         # Fail-safe: default to blocking until first real check completes
         self._last_risk_result: dict = {'all_checks_passed': False, 'action': 'none'}
+        self._enable_ws = enable_ws
+        self.ws_feed: Optional[MarketDataFeed] = None
 
         # ------------------------------------------------------------------ #
         # HIP-3 Multi-DEX setup
@@ -342,6 +346,11 @@ class HyperliquidBot:
         from rate_limiter import api_wrapper
         api_wrapper.rate_limiter.reset_backoff()
 
+        # Start WebSocket market data feed (optional, non-blocking)
+        if self._enable_ws:
+            self.ws_feed = MarketDataFeed(self.info, self.market_data, self.coins)
+            self.ws_feed.start()
+
         consecutive_errors = 0
 
         while self.running:
@@ -518,6 +527,10 @@ class HyperliquidBot:
     def _signal_handler(self, signum: int, frame: Optional[types.FrameType]) -> None:
         logger.info("Received shutdown signal")
         self.running = False
+
+        if self.ws_feed:
+            self.ws_feed.stop()
+
         try:
             # Set a timeout for order cancellation to avoid hanging
             import threading
@@ -695,6 +708,12 @@ if __name__ == "__main__":
         action='store_true',
         default=False,
         help='Disable trading on standard Hyperliquid perps (trade only HIP-3 DEXes)'
+    )
+    parser.add_argument(
+        '--enable-ws',
+        action='store_true',
+        default=False,
+        help='Enable WebSocket feed for real-time L2 book updates (reduces REST API calls)'
     )
 
     # Common strategy parameters
@@ -972,5 +991,6 @@ if __name__ == "__main__":
         strategy_config=strategy_config if strategy_config else None,
         main_loop_interval=args.main_loop_interval if args.main_loop_interval is not None else 10,
         market_order_slippage=args.market_order_slippage if args.market_order_slippage is not None else 0.01,
+        enable_ws=getattr(args, 'enable_ws', False),
     )
     bot.run()

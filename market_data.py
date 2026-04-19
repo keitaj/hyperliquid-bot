@@ -94,38 +94,9 @@ class MarketDataManager:
             if not l2_data or 'levels' not in l2_data:
                 return None
 
-            levels = l2_data['levels']
-            if len(levels) < 2 or not levels[0] or not levels[1]:
+            market_data = self._parse_levels(coin, l2_data['levels'])
+            if market_data is None:
                 return None
-
-            bids = levels[0]
-            asks = levels[1]
-
-            if not bids or not asks:
-                return None
-
-            best_bid = float(bids[0]['px'])
-            best_ask = float(asks[0]['px'])
-            mid_price = (best_bid + best_ask) / 2
-            spread = best_ask - best_bid
-
-            # Book imbalance from top N levels: (bid_size - ask_size) / (bid_size + ask_size)
-            # Range [-1, +1]: >0 = bid-heavy (buy pressure), <0 = ask-heavy (sell pressure)
-            depth = min(self._imbalance_depth, len(bids), len(asks))
-            bid_size = sum(float(bids[i]['sz']) for i in range(depth))
-            ask_size = sum(float(asks[i]['sz']) for i in range(depth))
-            total_size = bid_size + ask_size
-            book_imbalance = (bid_size - ask_size) / total_size if total_size > 0 else 0.0
-
-            market_data = MarketData(
-                symbol=coin,
-                mid_price=mid_price,
-                bid=best_bid,
-                ask=best_ask,
-                spread=spread,
-                timestamp=datetime.now(),
-                book_imbalance=book_imbalance,
-            )
 
             self._cache.set(coin, market_data)
             return market_data
@@ -133,6 +104,47 @@ class MarketDataManager:
         except API_ERRORS as e:
             logger.error(f"Error getting market data for {coin}: {e}")
             return None
+
+    def _parse_levels(self, coin: str, levels) -> Optional[MarketData]:
+        """Build a :class:`MarketData` from raw L2 ``levels`` (list of bid/ask arrays)."""
+        if len(levels) < 2 or not levels[0] or not levels[1]:
+            return None
+
+        bids = levels[0]
+        asks = levels[1]
+        if not bids or not asks:
+            return None
+
+        best_bid = float(bids[0]['px'])
+        best_ask = float(asks[0]['px'])
+        mid_price = (best_bid + best_ask) / 2
+        spread = best_ask - best_bid
+
+        depth = min(self._imbalance_depth, len(bids), len(asks))
+        bid_size = sum(float(bids[i]['sz']) for i in range(depth))
+        ask_size = sum(float(asks[i]['sz']) for i in range(depth))
+        total_size = bid_size + ask_size
+        book_imbalance = (bid_size - ask_size) / total_size if total_size > 0 else 0.0
+
+        return MarketData(
+            symbol=coin,
+            mid_price=mid_price,
+            bid=best_bid,
+            ask=best_ask,
+            spread=spread,
+            timestamp=datetime.now(),
+            book_imbalance=book_imbalance,
+        )
+
+    def update_from_ws(self, coin: str, levels) -> None:
+        """Update the cache from a WebSocket l2Book message.
+
+        Called from :class:`ws.MarketDataFeed` on the SDK's WS thread.
+        Thread-safe: single ``TTLCacheMap.set()`` call (GIL-protected dict write).
+        """
+        md = self._parse_levels(coin, levels)
+        if md is not None:
+            self._cache.set(coin, md)
 
     def get_candles(self, coin: str, interval: str, lookback: int = 100) -> pd.DataFrame:
         try:
