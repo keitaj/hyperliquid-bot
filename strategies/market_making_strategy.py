@@ -50,6 +50,15 @@ class MarketMakingStrategy(BaseStrategy):
         self.inventory_skew_bps: float = config.get('inventory_skew_bps', 0)
         self.inventory_skew_cap: float = config.get('inventory_skew_cap', 3.0)
 
+        # ---- L2 book imbalance guard ---- #
+        self.imbalance_threshold: float = config.get('imbalance_threshold', 0.0)
+
+        # ---- Per-coin loss streak cooldown ---- #
+        self.loss_streak_limit: int = config.get('loss_streak_limit', 0)
+        self.loss_streak_cooldown: float = config.get('loss_streak_cooldown', 300)
+        self._loss_streaks: Dict[str, int] = defaultdict(int)  # coin -> consecutive losses
+        self._coin_cooldown_until: Dict[str, float] = {}  # coin -> monotonic deadline
+
         # ---- Volatility-adjusted BBO offset ---- #
         self.vol_adjust_enabled: bool = config.get('vol_adjust_enabled', False)
         self.vol_adjust_multiplier: float = config.get('vol_adjust_multiplier', 2.0)
@@ -65,6 +74,7 @@ class MarketMakingStrategy(BaseStrategy):
         self._fill_rate_log_interval: float = config.get('fill_rate_log_interval', 300)
         self._last_fill_rate_log: float = 0.0
         self._prev_position_coins: set = set()  # coins that had positions last cycle
+        self._prev_positions: Dict[str, Dict] = {}  # snapshot for loss streak detection
 
         # ---- Delegates ---- #
         self._tracker = OrderTracker(
@@ -117,6 +127,28 @@ class MarketMakingStrategy(BaseStrategy):
             # positions are closed before the next detection pass.
             self._tracker.cancel_all_orders_for_coin(coin)
             logger.info(f"[mm] Cancelled orders for {coin} after fill (prevent double-fill)")
+
+        # Track loss streaks: detect coins that just closed (had position last cycle, not now)
+        if self.loss_streak_limit > 0:
+            just_closed = self._prev_position_coins - current_position_coins
+            for coin in just_closed:
+                # Use unrealizedPnl snapshot from last cycle as proxy for close PnL
+                last_pos = self._prev_positions.get(coin, {})
+                upnl = last_pos.get('unrealizedPnl', 0)
+                if upnl < 0:
+                    self._loss_streaks[coin] += 1
+                    streak = self._loss_streaks[coin]
+                    if streak >= self.loss_streak_limit:
+                        deadline = time.monotonic() + self.loss_streak_cooldown
+                        self._coin_cooldown_until[coin] = deadline
+                        logger.info(
+                            f"[mm] {coin} hit {streak} consecutive losses, "
+                            f"cooldown {self.loss_streak_cooldown}s"
+                        )
+                else:
+                    self._loss_streaks[coin] = 0
+
+        self._prev_positions = {c: dict(self.positions[c]) for c in self.positions if self.positions.get(c)}
         self._prev_position_coins = current_position_coins
 
         self._log_fill_rate()
@@ -154,6 +186,19 @@ class MarketMakingStrategy(BaseStrategy):
                         f"[mm] Max active coins ({active_count}/{self.max_positions}), skipping {coin}"
                     )
                     continue
+
+                # Per-coin loss streak cooldown
+                if self.loss_streak_limit > 0:
+                    cooldown_deadline = self._coin_cooldown_until.get(coin)
+                    if cooldown_deadline and time.monotonic() < cooldown_deadline:
+                        remaining = cooldown_deadline - time.monotonic()
+                        logger.debug(f"[mm] {coin} in cooldown ({remaining:.0f}s left)")
+                        continue
+                    elif cooldown_deadline:
+                        # Cooldown expired — reset
+                        del self._coin_cooldown_until[coin]
+                        self._loss_streaks[coin] = 0
+                        logger.info(f"[mm] {coin} cooldown expired, resuming")
 
                 if self._tracker.get_order_count(coin) < self.max_open_orders:
                     self._place_orders(coin)
@@ -320,10 +365,24 @@ class MarketMakingStrategy(BaseStrategy):
         current_count = self._tracker.get_order_count(coin)
         sides_and_prices = []
 
-        if current_count < self.max_open_orders:
+        # L2 book imbalance guard: skip the side that is likely to get adversely selected.
+        # book_imbalance > 0 = bid-heavy (buy pressure) → selling is risky (price likely going up)
+        # book_imbalance < 0 = ask-heavy (sell pressure) → buying is risky (price likely going down)
+        skip_buy = False
+        skip_sell = False
+        if self.imbalance_threshold > 0:
+            imb = market_data.book_imbalance
+            if imb < -self.imbalance_threshold:
+                skip_buy = True
+                logger.debug(f"[mm] {coin} skipping BUY (book imbalance {imb:.2f})")
+            elif imb > self.imbalance_threshold:
+                skip_sell = True
+                logger.debug(f"[mm] {coin} skipping SELL (book imbalance {imb:.2f})")
+
+        if current_count < self.max_open_orders and not skip_buy:
             sides_and_prices.append((OrderSide.BUY, buy_price))
 
-        if current_count + len(sides_and_prices) < self.max_open_orders:
+        if current_count + len(sides_and_prices) < self.max_open_orders and not skip_sell:
             sides_and_prices.append((OrderSide.SELL, sell_price))
 
         if not sides_and_prices:

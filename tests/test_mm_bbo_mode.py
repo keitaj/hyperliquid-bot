@@ -19,6 +19,11 @@ def _make_strategy(bbo_mode=False, bbo_offset_bps=0, spread_bps=10, maker_only=T
     s.bbo_mode = bbo_mode
     s.bbo_offset_bps = bbo_offset_bps
     s.inventory_skew_bps = 0
+    s.imbalance_threshold = 0.0
+    s.loss_streak_limit = 0
+    s.loss_streak_cooldown = 300
+    s._loss_streaks = defaultdict(int)
+    s._coin_cooldown_until = {}
     s.vol_adjust_enabled = False
     s.vol_adjust_multiplier = 2.0
     s.vol_lookback = 30
@@ -31,6 +36,7 @@ def _make_strategy(bbo_mode=False, bbo_offset_bps=0, spread_bps=10, maker_only=T
     s._fill_rate_log_interval = 300
     s._last_fill_rate_log = 0.0
     s._prev_position_coins = set()
+    s._prev_positions = {}
 
     om = MagicMock()
     md = MagicMock()

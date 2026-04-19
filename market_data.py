@@ -18,6 +18,7 @@ class MarketData:
     ask: float
     spread: float
     timestamp: datetime
+    book_imbalance: float = 0.0  # >0 = bid-heavy (buy pressure), <0 = ask-heavy (sell pressure)
 
 
 class MarketDataManager:
@@ -105,13 +106,22 @@ class MarketDataManager:
             mid_price = (best_bid + best_ask) / 2
             spread = best_ask - best_bid
 
+            # Book imbalance from top 5 levels: (bid_size - ask_size) / (bid_size + ask_size)
+            # Range [-1, +1]: >0 = bid-heavy (buy pressure), <0 = ask-heavy (sell pressure)
+            depth = min(5, len(bids), len(asks))
+            bid_size = sum(float(bids[i]['sz']) for i in range(depth))
+            ask_size = sum(float(asks[i]['sz']) for i in range(depth))
+            total_size = bid_size + ask_size
+            book_imbalance = (bid_size - ask_size) / total_size if total_size > 0 else 0.0
+
             market_data = MarketData(
                 symbol=coin,
                 mid_price=mid_price,
                 bid=best_bid,
                 ask=best_ask,
                 spread=spread,
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
+                book_imbalance=book_imbalance,
             )
 
             self._cache[coin] = market_data

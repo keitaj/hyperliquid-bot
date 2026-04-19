@@ -817,6 +817,14 @@ if __name__ == "__main__":
     parser.add_argument('--inventory-skew-bps', type=float,
                         help='Skew prices per unit of inventory to encourage position reduction. '
                              '0=disabled, 2=shift 2bps per order-size of inventory. (market_making)')
+    parser.add_argument('--imbalance-threshold', type=float,
+                        help='Skip quoting one side when L2 book imbalance exceeds this (0-1). '
+                             '0=disabled, 0.4=skip when 70%%/30%% imbalance. (market_making)')
+    parser.add_argument('--loss-streak-limit', type=int,
+                        help='Cooldown a coin after this many consecutive losses. '
+                             '0=disabled, 2=cooldown after 2 losses. (market_making)')
+    parser.add_argument('--loss-streak-cooldown', type=float,
+                        help='Seconds to pause a coin after hitting loss streak limit (default: 300, market_making)')
     parser.add_argument('--vol-adjust', action='store_true', default=False,
                         help='Enable volatility-adjusted BBO offset (market_making)')
     parser.add_argument('--vol-adjust-multiplier', type=float,
@@ -898,6 +906,9 @@ if __name__ == "__main__":
             'bbo_mode',
             'bbo_offset_bps',
             'inventory_skew_bps',
+            'imbalance_threshold',
+            'loss_streak_limit',
+            'loss_streak_cooldown',
             ('vol_adjust', 'vol_adjust_enabled'),
             'vol_adjust_multiplier',
             'vol_lookback',
