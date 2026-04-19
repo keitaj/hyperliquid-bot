@@ -40,10 +40,12 @@ class PositionCloser:
         maker_only: bool,
         taker_fallback_age_seconds: Optional[float],
         aggressive_loss_bps: float = 1.0,
+        coin_spread_overrides: Optional[Dict[str, float]] = None,
     ) -> None:
         self.order_manager = order_manager
         self.market_data = market_data
         self.spread_bps = spread_bps
+        self._coin_spread_overrides: Dict[str, float] = coin_spread_overrides or {}
         self.max_position_age_seconds = max_position_age_seconds
         self.maker_only = maker_only
         self.taker_fallback_age_seconds = taker_fallback_age_seconds
@@ -246,6 +248,15 @@ class PositionCloser:
 
         logger.info(f"[mm] Position {coin} held {age:.0f}s -- maker close pending, will retry next cycle")
 
+    def _get_spread_for_coin(self, coin: str) -> float:
+        """Get spread_bps for a specific coin, checking overrides first."""
+        if coin in self._coin_spread_overrides:
+            return self._coin_spread_overrides[coin]
+        bare = coin.split(':', 1)[-1] if ':' in coin else coin
+        if bare in self._coin_spread_overrides:
+            return self._coin_spread_overrides[bare]
+        return self.spread_bps
+
     def _get_tier(self, age: float) -> int:
         """Return the close price tier for the given position age."""
         threshold_breakeven = self.max_position_age_seconds * 0.50
@@ -272,7 +283,10 @@ class PositionCloser:
         entry_time: float, tier: int,
     ) -> bool:
         """Place a take-profit close order. Returns True if placement was attempted."""
-        effective_spread = self._tier_spread_bps(tier)
+        coin_spread = self._get_spread_for_coin(coin)
+        effective_spread = self._tier_spread_bps(tier) if coin_spread == self.spread_bps else (
+            coin_spread if tier == _TIER_NORMAL else 0.0 if tier == _TIER_BREAKEVEN else -self.aggressive_loss_bps
+        )
         age = time.monotonic() - entry_time
 
         rp = self.market_data.price_rounding_params(coin)

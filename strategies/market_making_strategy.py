@@ -83,6 +83,18 @@ class MarketMakingStrategy(BaseStrategy):
             mode = "spread×%.1f" % self._quiet_spread_multiplier if self._quiet_spread_multiplier > 0 else "stop"
             logger.info(f"[mm] Quiet hours enabled: UTC {sorted(self._quiet_hours)} mode={mode}")
 
+        # ---- Per-coin offset/spread overrides ---- #
+        self._coin_offset_overrides: Dict[str, float] = self._parse_coin_overrides(
+            config.get('coin_offset_overrides', '')
+        )
+        self._coin_spread_overrides: Dict[str, float] = self._parse_coin_overrides(
+            config.get('coin_spread_overrides', '')
+        )
+        if self._coin_offset_overrides:
+            logger.info(f"[mm] Per-coin offset overrides: {self._coin_offset_overrides}")
+        if self._coin_spread_overrides:
+            logger.info(f"[mm] Per-coin spread overrides: {self._coin_spread_overrides}")
+
         # ---- Volatility-adjusted BBO offset ---- #
         self.vol_adjust_enabled: bool = config.get('vol_adjust_enabled', False)
         self.vol_adjust_multiplier: float = config.get('vol_adjust_multiplier', 2.0)
@@ -114,6 +126,7 @@ class MarketMakingStrategy(BaseStrategy):
             maker_only=self.maker_only,
             taker_fallback_age_seconds=config.get('taker_fallback_age_seconds', None),
             aggressive_loss_bps=config.get('aggressive_loss_bps', 1.0),
+            coin_spread_overrides=self._coin_spread_overrides,
         )
 
     @property
@@ -348,18 +361,26 @@ class MarketMakingStrategy(BaseStrategy):
             self._recent_mids[coin] = deque(maxlen=self.vol_lookback)
         self._recent_mids[coin].append(mid_price)
 
-    def _get_volatility_adjusted_offset(self, coin: str) -> float:
+    def _get_volatility_adjusted_offset(self, coin: str, base_offset: Optional[float] = None) -> float:
         """Return BBO offset adjusted for recent volatility.
 
         Read-only — does not mutate state. Call _record_mid_price()
         separately to update the price history.
+
+        Parameters
+        ----------
+        base_offset : float, optional
+            Base offset to adjust from. If None, uses the global bbo_offset_bps.
         """
+        if base_offset is None:
+            base_offset = self.bbo_offset_bps
+
         if not self.vol_adjust_enabled or not self.bbo_mode:
-            return self.bbo_offset_bps
+            return base_offset
 
         mids = self._recent_mids.get(coin)
         if not mids or len(mids) < 5:
-            return self.bbo_offset_bps
+            return base_offset
 
         # Calculate realized volatility (average absolute return in bps)
         returns_bps = []
@@ -370,7 +391,7 @@ class MarketMakingStrategy(BaseStrategy):
         avg_move_bps = sum(returns_bps) / len(returns_bps)
 
         # Scale offset with cap to prevent extreme values during flash crashes
-        adjusted = self.bbo_offset_bps + self.vol_adjust_multiplier * avg_move_bps
+        adjusted = base_offset + self.vol_adjust_multiplier * avg_move_bps
         return min(adjusted, self.vol_adjust_max_offset)
 
     def _place_orders(self, coin: str) -> None:
@@ -399,7 +420,11 @@ class MarketMakingStrategy(BaseStrategy):
         if self.bbo_mode and market_data.bid > 0 and market_data.ask > 0:
             # BBO-following mode: place at/near best bid and ask
             self._record_mid_price(coin, mid_price)
-            effective_offset_bps = self._get_volatility_adjusted_offset(coin)
+            base_offset = self._get_coin_offset(coin)
+            if self.vol_adjust_enabled:
+                effective_offset_bps = self._get_volatility_adjusted_offset(coin, base_offset)
+            else:
+                effective_offset_bps = base_offset
             # Widen spread during quiet hours (spread-multiplier mode)
             if self._quiet_spread_multiplier > 0 and self._is_quiet_hour():
                 effective_offset_bps *= self._quiet_spread_multiplier
@@ -410,10 +435,12 @@ class MarketMakingStrategy(BaseStrategy):
             # Fallback: mid ± spread. Also used when BBO is unavailable
             # (bid/ask=0) even in bbo_mode. Maker-only clamping below
             # ensures Alo orders don't cross the spread.
-            raw_buy, raw_sell = self._get_spread_prices(mid_price)
+            coin_spread = self._get_coin_spread(coin)
+            spread_offset = mid_price * (coin_spread / 10_000)
+            raw_buy = mid_price - spread_offset
+            raw_sell = mid_price + spread_offset
             # Widen spread during quiet hours (spread-multiplier mode)
             if self._quiet_spread_multiplier > 0 and self._is_quiet_hour():
-                spread_offset = mid_price * self.spread_bps / 10_000
                 extra = spread_offset * (self._quiet_spread_multiplier - 1)
                 raw_buy -= extra
                 raw_sell += extra
@@ -561,6 +588,53 @@ class MarketMakingStrategy(BaseStrategy):
     # ------------------------------------------------------------------ #
     #  Helpers
     # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _parse_coin_overrides(raw: str) -> Dict[str, float]:
+        """Parse ``'COIN:BPS,COIN:BPS,...'`` into ``{coin: bps}`` dict.
+
+        Supports both bare names (``'SP500:1.5'``) and DEX-prefixed names
+        (``'xyz:SP500:1.5'``).  Bare names match any DEX at lookup time.
+        """
+        result: Dict[str, float] = {}
+        if not raw or not str(raw).strip():
+            return result
+        for pair in str(raw).split(','):
+            pair = pair.strip()
+            if not pair:
+                continue
+            parts = pair.rsplit(':', 1)
+            if len(parts) != 2:
+                logger.warning(f"[mm] Invalid coin override format: '{pair}', expected 'COIN:BPS'")
+                continue
+            coin_key, bps_str = parts
+            try:
+                bps = float(bps_str)
+                result[coin_key] = bps
+            except ValueError:
+                logger.warning(f"[mm] Invalid BPS value in coin override: '{pair}'")
+        return result
+
+    def _get_coin_offset(self, coin: str) -> float:
+        """Get BBO offset for a specific coin, checking overrides first.
+
+        Lookup: full name → bare name → global default.
+        """
+        if coin in self._coin_offset_overrides:
+            return self._coin_offset_overrides[coin]
+        bare = coin.split(':', 1)[-1] if ':' in coin else coin
+        if bare in self._coin_offset_overrides:
+            return self._coin_offset_overrides[bare]
+        return self.bbo_offset_bps
+
+    def _get_coin_spread(self, coin: str) -> float:
+        """Get spread_bps for a specific coin, checking overrides first."""
+        if coin in self._coin_spread_overrides:
+            return self._coin_spread_overrides[coin]
+        bare = coin.split(':', 1)[-1] if ':' in coin else coin
+        if bare in self._coin_spread_overrides:
+            return self._coin_spread_overrides[bare]
+        return self.spread_bps
 
     def _is_quiet_hour(self) -> bool:
         """Check if the current UTC hour is in the quiet hours set."""

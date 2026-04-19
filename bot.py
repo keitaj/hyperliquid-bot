@@ -930,6 +930,10 @@ if __name__ == "__main__":
                         help='Cancel one side when L2 imbalance exceeds this (0-1); 0 to disable (default: 0)')
     parser.add_argument('--imbalance-guard-depth', type=int,
                         help='Number of L2 book levels for imbalance guard calculation (default: 5)')
+    parser.add_argument('--coin-offset-overrides', type=str, default='',
+                        help='Per-coin BBO offset overrides in bps (e.g. "SP500:0.5,MSFT:3")')
+    parser.add_argument('--coin-spread-overrides', type=str, default='',
+                        help='Per-coin spread overrides in bps (e.g. "SP500:8,XYZ100:15")')
     parser.add_argument('--close-refresh-threshold-bps', type=float,
                         help='Refresh close orders when BBO changes by this many bps; 0 to disable (default: 0)')
     parser.add_argument('--quiet-hours-utc', type=str, default='',
@@ -1027,6 +1031,8 @@ if __name__ == "__main__":
             'vol_adjust_multiplier',
             'vol_lookback',
             'vol_adjust_max_offset',
+            'coin_offset_overrides',
+            'coin_spread_overrides',
             'close_refresh_threshold_bps',
             'quiet_hours_utc',
             'quiet_hours_spread_multiplier',

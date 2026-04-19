@@ -35,6 +35,8 @@ def _make_strategy(inventory_skew_bps=2, bbo_mode=False, order_size_usd=100):
     s._loss_streaks = defaultdict(int)
     s._coin_cooldown_until = {}
     s._quiet_hours = set()
+    s._coin_offset_overrides = {}
+    s._coin_spread_overrides = {}
     s._quiet_spread_multiplier = 0.0
     s._was_quiet = False
 

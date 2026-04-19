@@ -28,6 +28,8 @@ def _make_strategy(fill_rate_log_interval=300):
     strategy._loss_streaks = defaultdict(int)
     strategy._coin_cooldown_until = {}
     strategy._quiet_hours = set()
+    strategy._coin_offset_overrides = {}
+    strategy._coin_spread_overrides = {}
     strategy._quiet_spread_multiplier = 0.0
     strategy._was_quiet = False
     return strategy
