@@ -23,11 +23,13 @@ class MarketData:
 
 class MarketDataManager:
     def __init__(self, info: Info, meta_cache_ttl: float = 3600,
-                 market_data_cache_ttl: float = 2.0):
+                 market_data_cache_ttl: float = 2.0,
+                 imbalance_depth: int = 5):
         self.info = info
         self._cache: Dict[str, MarketData] = {}
         self._cache_time: Dict[str, float] = {}
         self._cache_ttl = market_data_cache_ttl
+        self._imbalance_depth = imbalance_depth
         self._meta_cache = None
         self._meta_cache_time: float = 0.0
         self._meta_cache_ttl = meta_cache_ttl
@@ -106,9 +108,9 @@ class MarketDataManager:
             mid_price = (best_bid + best_ask) / 2
             spread = best_ask - best_bid
 
-            # Book imbalance from top 5 levels: (bid_size - ask_size) / (bid_size + ask_size)
+            # Book imbalance from top N levels: (bid_size - ask_size) / (bid_size + ask_size)
             # Range [-1, +1]: >0 = bid-heavy (buy pressure), <0 = ask-heavy (sell pressure)
-            depth = min(5, len(bids), len(asks))
+            depth = min(self._imbalance_depth, len(bids), len(asks))
             bid_size = sum(float(bids[i]['sz']) for i in range(depth))
             ask_size = sum(float(asks[i]['sz']) for i in range(depth))
             total_size = bid_size + ask_size

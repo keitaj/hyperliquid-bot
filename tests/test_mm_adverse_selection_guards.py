@@ -157,10 +157,13 @@ class TestLossStreakCooldown:
         om.bulk_place_orders.return_value = [MagicMock(id=1), MagicMock(id=2)]
 
         # Simulate 2 consecutive losing closes
-        # Cycle 1: BTC gets a position
-        s.positions = {'BTC': {'size': 1.0, 'unrealizedPnl': -0.5}}
+        # Cycle 1: BTC gets a position (bought at 100, now at 99.5 = loss)
+        s.positions = {'BTC': {'size': 1.0, 'entryPx': 100.0}}
         s._prev_position_coins = {'BTC'}
-        s._prev_positions = {'BTC': {'size': 1.0, 'unrealizedPnl': -0.5}}
+        s._prev_positions = {'BTC': {'size': 1.0, 'entryPx': 100.0}}
+
+        # Market data shows price below entry → loss
+        market_data.mid_price = 99.5
 
         # Cycle 2: BTC position closed (loss)
         s.positions = {}
@@ -170,7 +173,7 @@ class TestLossStreakCooldown:
 
         # Cycle 3: BTC gets another position
         s._prev_position_coins = {'BTC'}
-        s._prev_positions = {'BTC': {'size': 1.0, 'unrealizedPnl': -0.3}}
+        s._prev_positions = {'BTC': {'size': 1.0, 'entryPx': 100.0}}
         s.positions = {}
 
         # Cycle 4: closed again (loss) → triggers cooldown
@@ -185,7 +188,7 @@ class TestLossStreakCooldown:
         s._loss_streaks['BTC'] = 1
         s.positions = {}
         s._prev_position_coins = {'BTC'}
-        s._prev_positions = {'BTC': {'size': 1.0, 'unrealizedPnl': 0.1}}  # win
+        s._prev_positions = {'BTC': {'size': 1.0, 'entryPx': 99.0}}  # bought at 99
 
         s.update_positions = MagicMock()
         md.get_market_data.return_value = MagicMock(
@@ -262,6 +265,7 @@ class TestBookImbalanceInMarketData:
         real_mdm._cache = {}
         real_mdm._cache_time = {}
         real_mdm._cache_ttl = 2.0
+        real_mdm._imbalance_depth = 5
 
         with patch.object(type(real_mdm), 'get_l2_snapshot', return_value=l2):
             md = real_mdm.get_market_data('BTC')
@@ -275,6 +279,7 @@ class TestBookImbalanceInMarketData:
         real_mdm._cache = {}
         real_mdm._cache_time = {}
         real_mdm._cache_ttl = 2.0
+        real_mdm._imbalance_depth = 5
 
         l2 = {'levels': [
             [{'px': '99.99', 'sz': '100'}, {'px': '99.98', 'sz': '100'}],
@@ -292,6 +297,7 @@ class TestBookImbalanceInMarketData:
         real_mdm._cache = {}
         real_mdm._cache_time = {}
         real_mdm._cache_ttl = 2.0
+        real_mdm._imbalance_depth = 5
 
         l2 = {'levels': [
             [{'px': '99.99', 'sz': '10'}],
@@ -302,3 +308,30 @@ class TestBookImbalanceInMarketData:
             md = real_mdm.get_market_data('BTC')
 
         assert md.book_imbalance < -0.8  # ask-heavy
+
+
+class TestInputValidation:
+    """Config validation catches invalid parameters."""
+
+    def _init_strategy(self, **overrides):
+        config = {'spread_bps': 10, 'order_size_usd': 100}
+        config.update(overrides)
+        md = MagicMock()
+        om = MagicMock()
+        return MarketMakingStrategy(md, om, config)
+
+    def test_imbalance_threshold_negative(self):
+        with pytest.raises(ValueError, match="imbalance_threshold"):
+            self._init_strategy(imbalance_threshold=-0.1)
+
+    def test_imbalance_threshold_above_one(self):
+        with pytest.raises(ValueError, match="imbalance_threshold"):
+            self._init_strategy(imbalance_threshold=1.5)
+
+    def test_loss_streak_limit_negative(self):
+        with pytest.raises(ValueError, match="loss_streak_limit"):
+            self._init_strategy(loss_streak_limit=-1)
+
+    def test_loss_streak_cooldown_zero_with_limit(self):
+        with pytest.raises(ValueError, match="loss_streak_cooldown"):
+            self._init_strategy(loss_streak_limit=2, loss_streak_cooldown=0)

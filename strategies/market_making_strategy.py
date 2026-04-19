@@ -52,10 +52,16 @@ class MarketMakingStrategy(BaseStrategy):
 
         # ---- L2 book imbalance guard ---- #
         self.imbalance_threshold: float = config.get('imbalance_threshold', 0.0)
+        if not (0 <= self.imbalance_threshold <= 1):
+            raise ValueError(f"imbalance_threshold must be in [0, 1], got {self.imbalance_threshold}")
 
         # ---- Per-coin loss streak cooldown ---- #
         self.loss_streak_limit: int = config.get('loss_streak_limit', 0)
         self.loss_streak_cooldown: float = config.get('loss_streak_cooldown', 300)
+        if self.loss_streak_limit < 0:
+            raise ValueError(f"loss_streak_limit must be >= 0, got {self.loss_streak_limit}")
+        if self.loss_streak_limit > 0 and self.loss_streak_cooldown <= 0:
+            raise ValueError(f"loss_streak_cooldown must be > 0 when limit is set, got {self.loss_streak_cooldown}")
         self._loss_streaks: Dict[str, int] = defaultdict(int)  # coin -> consecutive losses
         self._coin_cooldown_until: Dict[str, float] = {}  # coin -> monotonic deadline
 
@@ -132,10 +138,20 @@ class MarketMakingStrategy(BaseStrategy):
         if self.loss_streak_limit > 0:
             just_closed = self._prev_position_coins - current_position_coins
             for coin in just_closed:
-                # Use unrealizedPnl snapshot from last cycle as proxy for close PnL
                 last_pos = self._prev_positions.get(coin, {})
-                upnl = last_pos.get('unrealizedPnl', 0)
-                if upnl < 0:
+                entry_px = float(last_pos.get('entryPx', 0))
+                size = float(last_pos.get('size', 0))
+                # Estimate close PnL from entry price and current mid price.
+                # This is an approximation — actual close price may differ
+                # slightly, but the sign (win/loss) is reliable enough for
+                # streak detection since closes happen near current price.
+                md = self.market_data.get_market_data(coin)
+                if md and entry_px > 0 and size != 0:
+                    estimated_pnl = (md.mid_price - entry_px) * size
+                else:
+                    estimated_pnl = float(last_pos.get('unrealizedPnl', 0))
+
+                if estimated_pnl < 0:
                     self._loss_streaks[coin] += 1
                     streak = self._loss_streaks[coin]
                     if streak >= self.loss_streak_limit:
@@ -190,8 +206,9 @@ class MarketMakingStrategy(BaseStrategy):
                 # Per-coin loss streak cooldown
                 if self.loss_streak_limit > 0:
                     cooldown_deadline = self._coin_cooldown_until.get(coin)
-                    if cooldown_deadline and time.monotonic() < cooldown_deadline:
-                        remaining = cooldown_deadline - time.monotonic()
+                    now = time.monotonic()
+                    if cooldown_deadline and now < cooldown_deadline:
+                        remaining = cooldown_deadline - now
                         logger.debug(f"[mm] {coin} in cooldown ({remaining:.0f}s left)")
                         continue
                     elif cooldown_deadline:
