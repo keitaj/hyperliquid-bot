@@ -22,6 +22,7 @@ def _make_closer(max_age=120, maker_only=True, taker_fallback=None,
     md = MagicMock()
     md.round_size.return_value = 0.5
     md.get_sz_decimals.return_value = 0
+    md.price_rounding_params.return_value = (0, True)
     closer = PositionCloser(
         order_manager=om,
         market_data=md,

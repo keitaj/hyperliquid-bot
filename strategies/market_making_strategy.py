@@ -18,7 +18,6 @@ from strategies.base_strategy import BaseStrategy
 from strategies.mm_order_tracker import OrderTracker
 from strategies.mm_position_closer import PositionCloser
 from order_manager import BBO_OFFSET, OrderSide, round_price
-from coin_utils import is_hip3
 from rate_limiter import API_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -341,27 +340,28 @@ class MarketMakingStrategy(BaseStrategy):
         if mid_price <= 0:
             return
 
-        sz_dec = self.market_data.get_sz_decimals(coin)
-        perp = not is_hip3(coin)
+        rp = self.market_data.price_rounding_params(coin)
 
         if self.bbo_mode and market_data.bid > 0 and market_data.ask > 0:
             # BBO-following mode: place at/near best bid and ask
             self._record_mid_price(coin, mid_price)
             effective_offset_bps = self._get_volatility_adjusted_offset(coin)
             offset = effective_offset_bps / 10_000
-            buy_price = round_price(market_data.bid * (1 - offset), sz_dec, perp)
-            sell_price = round_price(market_data.ask * (1 + offset), sz_dec, perp)
+            buy_price = round_price(market_data.bid * (1 - offset), *rp)
+            sell_price = round_price(market_data.ask * (1 + offset), *rp)
         else:
             # Fallback: mid ± spread. Also used when BBO is unavailable
             # (bid/ask=0) even in bbo_mode. Maker-only clamping below
             # ensures Alo orders don't cross the spread.
-            buy_price, sell_price = self._get_spread_prices(mid_price, sz_dec, perp)
+            raw_buy, raw_sell = self._get_spread_prices(mid_price)
+            buy_price = round_price(raw_buy, *rp)
+            sell_price = round_price(raw_sell, *rp)
             # Clamp prices to stay outside BBO for maker-only (Alo) orders
             if self.maker_only and market_data.bid > 0 and market_data.ask > 0:
                 if buy_price >= market_data.bid:
-                    buy_price = round_price(market_data.bid * (1 - BBO_OFFSET), sz_dec, perp)
+                    buy_price = round_price(market_data.bid * (1 - BBO_OFFSET), *rp)
                 if sell_price <= market_data.ask:
-                    sell_price = round_price(market_data.ask * (1 + BBO_OFFSET), sz_dec, perp)
+                    sell_price = round_price(market_data.ask * (1 + BBO_OFFSET), *rp)
 
         # Inventory skew: shift both prices to encourage position reduction.
         # Applied after BBO/spread pricing intentionally — skew may push
@@ -370,8 +370,8 @@ class MarketMakingStrategy(BaseStrategy):
         skew = self._calculate_inventory_skew(coin, mid_price)
         if skew != 0.0:
             skew_mult = skew / 10_000
-            buy_price = round_price(buy_price * (1 - skew_mult), sz_dec, perp)
-            sell_price = round_price(sell_price * (1 - skew_mult), sz_dec, perp)
+            buy_price = round_price(buy_price * (1 - skew_mult), *rp)
+            sell_price = round_price(sell_price * (1 - skew_mult), *rp)
             logger.debug(f"[mm] Inventory skew {coin}: {skew:.1f}bps")
 
         size = self.calculate_position_size(coin, {})
@@ -431,13 +431,14 @@ class MarketMakingStrategy(BaseStrategy):
                     f"size={size} price={price:.6f} (oid={order.id})"
                 )
 
-    def _get_spread_prices(self, mid_price: float, sz_decimals: int = 0,
-                           is_perp: bool = True) -> tuple:
-        """Return ``(buy_price, sell_price)`` based on ``spread_bps``."""
+    def _get_spread_prices(self, mid_price: float) -> tuple:
+        """Return raw ``(buy_price, sell_price)`` based on ``spread_bps``.
+
+        Prices are not rounded — callers apply :func:`round_price` with
+        the appropriate asset parameters.
+        """
         offset = mid_price * (self.spread_bps / 10_000)
-        buy_price = round_price(mid_price - offset, sz_decimals, is_perp)
-        sell_price = round_price(mid_price + offset, sz_decimals, is_perp)
-        return buy_price, sell_price
+        return mid_price - offset, mid_price + offset
 
     def _calculate_inventory_skew(self, coin: str, mid_price: float) -> float:
         """Calculate price skew in bps based on current inventory.

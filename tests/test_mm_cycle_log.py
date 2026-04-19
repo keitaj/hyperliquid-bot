@@ -44,6 +44,7 @@ def _make_strategy(inventory_skew_bps=2, order_size_usd=100):
     om = MagicMock()
     md = MagicMock()
     md.get_sz_decimals.return_value = 0
+    md.price_rounding_params.return_value = (0, True)
     s.order_manager = om
     s.market_data = md
 

@@ -5,7 +5,6 @@ import numpy as np
 from strategies.base_strategy import BaseStrategy
 from rate_limiter import API_ERRORS
 from order_manager import round_price
-from coin_utils import is_hip3
 
 logger = logging.getLogger(__name__)
 
@@ -180,10 +179,9 @@ class GridTradingStrategy(BaseStrategy):
         total = len(grid['levels'])
         return f"grid:{filled}/{total}"
 
-    def _calculate_limit_price(self, market_data, side: str, coin: str = "") -> float:
+    def _calculate_limit_price(self, market_data, side: str, coin=None) -> float:
         if hasattr(self, '_current_signal') and 'grid_price' in self._current_signal:
-            sz_dec = self.market_data.get_sz_decimals(coin) if coin else 0
-            perp = not is_hip3(coin) if coin else True
+            sz_dec, perp = self.market_data.price_rounding_params(coin) if coin is not None else (0, True)
             return round_price(self._current_signal['grid_price'], sz_dec, perp)
         return super()._calculate_limit_price(market_data, side, coin)
 

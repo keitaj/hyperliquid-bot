@@ -43,6 +43,7 @@ def _make_strategy(imbalance_threshold=0.0, loss_streak_limit=0, loss_streak_coo
     om = MagicMock()
     md = MagicMock()
     md.get_sz_decimals.return_value = 0
+    md.price_rounding_params.return_value = (0, True)
     s.order_manager = om
     s.market_data = md
 

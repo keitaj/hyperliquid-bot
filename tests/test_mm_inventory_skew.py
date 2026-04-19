@@ -4,6 +4,7 @@ from collections import defaultdict
 from unittest.mock import MagicMock, patch
 
 from strategies.market_making_strategy import MarketMakingStrategy
+from order_manager import round_price
 
 
 def _make_strategy(inventory_skew_bps=2, bbo_mode=False, order_size_usd=100):
@@ -37,6 +38,7 @@ def _make_strategy(inventory_skew_bps=2, bbo_mode=False, order_size_usd=100):
     om = MagicMock()
     md = MagicMock()
     md.get_sz_decimals.return_value = 0
+    md.price_rounding_params.return_value = (0, True)
     s.order_manager = om
     s.market_data = md
 
@@ -108,7 +110,8 @@ class TestInventorySkewOrderPlacement:
         om.bulk_place_orders.side_effect = capture
 
         # Get prices without skew for comparison
-        no_skew_buy, no_skew_sell = s._get_spread_prices(100.0)
+        raw_buy, raw_sell = s._get_spread_prices(100.0)
+        no_skew_buy, no_skew_sell = round_price(raw_buy), round_price(raw_sell)
 
         s._place_orders('BTC')
 
@@ -136,7 +139,8 @@ class TestInventorySkewOrderPlacement:
             return [MagicMock(id=i) for i in range(len(orders))]
         om.bulk_place_orders.side_effect = capture
 
-        no_skew_buy, no_skew_sell = s._get_spread_prices(100.0)
+        raw_buy, raw_sell = s._get_spread_prices(100.0)
+        no_skew_buy, no_skew_sell = round_price(raw_buy), round_price(raw_sell)
 
         s._place_orders('BTC')
 
@@ -163,7 +167,8 @@ class TestInventorySkewOrderPlacement:
             return [MagicMock(id=i) for i in range(len(orders))]
         om.bulk_place_orders.side_effect = capture
 
-        no_skew_buy, no_skew_sell = s._get_spread_prices(100.0)
+        raw_buy, raw_sell = s._get_spread_prices(100.0)
+        no_skew_buy, no_skew_sell = round_price(raw_buy), round_price(raw_sell)
 
         s._place_orders('BTC')
 

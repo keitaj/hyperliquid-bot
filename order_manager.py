@@ -32,7 +32,7 @@ def round_price(px: float, sz_decimals: int = 0, is_perp: bool = True) -> float:
     max_decimals = 6 if is_perp else 8
 
     if px > 100_000:
-        return round(px)
+        return float(round(px))
 
     return round(float(f"{px:.5g}"), max_decimals - sz_decimals)
 
@@ -97,15 +97,24 @@ class OrderManager:
         self._open_orders_cache = None
 
     def _get_sz_decimals(self, coin: str) -> int:
-        """Return sz_decimals for *coin* from exchange metadata."""
+        """Return sz_decimals for *coin* from exchange metadata.
+
+        Results are cached per coin to avoid redundant API calls.
+        Default is 3 (aligned with MarketDataManager.get_sz_decimals).
+        """
+        if not hasattr(self, '_sz_decimals_cache'):
+            self._sz_decimals_cache: Dict[str, int] = {}
+        if coin in self._sz_decimals_cache:
+            return self._sz_decimals_cache[coin]
         try:
             meta = api_wrapper.call(self.info.meta)
             for asset in meta.get('universe', []):
                 if asset['name'] == coin:
+                    self._sz_decimals_cache[coin] = asset['szDecimals']
                     return asset['szDecimals']
         except API_ERRORS:
             pass
-        return 0
+        return 3
 
     def create_limit_order(
         self,

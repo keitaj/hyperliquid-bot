@@ -6,7 +6,6 @@ import time
 import pandas as pd
 from market_data import MarketDataManager, MarketData
 from order_manager import OrderManager, OrderSide, round_price
-from coin_utils import is_hip3
 from position_closer import close_position_market
 from account_utils import get_account_snapshot
 from rate_limiter import API_ERRORS
@@ -178,9 +177,9 @@ class BaseStrategy(ABC):
         except API_ERRORS as e:
             logger.error(f"Error executing signal for {coin}: {e}")
 
-    def _calculate_limit_price(self, market_data: MarketData, side: str, coin: str = "") -> float:
-        sz_dec = self.market_data.get_sz_decimals(coin) if coin else 0
-        perp = not is_hip3(coin) if coin else True
+    def _calculate_limit_price(self, market_data: MarketData, side: str,
+                               coin: Optional[str] = None) -> float:
+        sz_dec, perp = self.market_data.price_rounding_params(coin) if coin is not None else (0, True)
         if side == 'buy':
             return round_price(market_data.bid, sz_dec, perp)
         else:

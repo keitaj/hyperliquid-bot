@@ -1,10 +1,11 @@
 import logging
 import time
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime
 import pandas as pd
 from hyperliquid.info import Info
+from coin_utils import is_hip3
 from rate_limiter import api_wrapper, API_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,10 @@ class MarketDataManager:
         except API_ERRORS as e:
             logger.error(f"Error getting sz_decimals for {coin} (using default=3): {e}")
             return 3
+
+    def price_rounding_params(self, coin: str) -> Tuple[int, bool]:
+        """Return ``(sz_decimals, is_perp)`` for use with :func:`round_price`."""
+        return self.get_sz_decimals(coin), not is_hip3(coin)
 
     def round_size(self, coin: str, size: float) -> float:
         """Round *size* to the sz_decimals precision for *coin*."""
