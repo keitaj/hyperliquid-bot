@@ -164,8 +164,15 @@ class PositionCloser:
                 else:
                     return  # Close order still active at correct tier, wait
             else:
-                # Close order was filled or cancelled -- position should be gone next cycle
+                # Close order was filled or cancelled — defer to next cycle
+                # to let update_positions() refresh before re-placing.
+                # This prevents reduce-only rejections from stale position data.
                 self._open_positions[coin] = (entry_time, None, current_tier)
+                logger.debug(
+                    f"[mm] Close order {close_oid} for {coin} no longer alive, "
+                    f"deferring re-place to next cycle"
+                )
+                return
 
         # Place take-profit close order with price based on position age
         placed = self._place_take_profit(coin, size, entry_price, entry_time, desired_tier)
@@ -283,6 +290,20 @@ class PositionCloser:
         entry_time: float, tier: int,
     ) -> bool:
         """Place a take-profit close order. Returns True if placement was attempted."""
+        # Verify position still exists before placing reduce_only order.
+        # Catches races where the position closed between update_positions()
+        # and this call (e.g., close fill detected via WS).
+        try:
+            positions = self.order_manager.get_all_positions()
+            pos = next((p for p in positions if p.get('coin') == coin), None)
+            if pos is None or abs(float(pos.get('szi', 0))) == 0:
+                logger.info(f"[mm] Position for {coin} already closed, skipping close order")
+                self._open_positions.pop(coin, None)
+                self._consecutive_close_failures.pop(coin, None)
+                return False
+        except Exception:
+            pass  # Proceed with placement — rejection is safer than missing a close
+
         coin_spread = self._get_spread_for_coin(coin)
         effective_spread = self._tier_spread_bps(tier) if coin_spread == self.spread_bps else (
             coin_spread if tier == _TIER_NORMAL else 0.0 if tier == _TIER_BREAKEVEN else -self.aggressive_loss_bps

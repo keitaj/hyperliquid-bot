@@ -118,6 +118,7 @@ def _make_closer(max_age=120, maker_only=False, spread_bps=10):
         maker_only=maker_only,
         taker_fallback_age_seconds=None,
     )
+    om.get_all_positions.return_value = [{'coin': 'BTC', 'szi': '1.0'}, {'coin': 'ETH', 'szi': '1.0'}]
     return closer, om, md
 
 
