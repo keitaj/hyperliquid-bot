@@ -346,9 +346,19 @@ class HyperliquidBot:
         from rate_limiter import api_wrapper
         api_wrapper.rate_limiter.reset_backoff()
 
-        # Start WebSocket market data feed (optional, non-blocking)
+        # Start WebSocket market data feed (optional, non-blocking).
+        # Exchange creates Info with skip_ws=True, so we need a separate
+        # Info instance with WebSocket enabled for the feed.
         if self._enable_ws:
-            self.ws_feed = MarketDataFeed(self.info, self.market_data, self.coins)
+            from hyperliquid.info import Info as WsInfo
+            perp_dexs = self._build_perp_dexs()
+            ws_info = WsInfo(
+                base_url=Config.API_URL,
+                skip_ws=False,
+                perp_dexs=perp_dexs,
+                timeout=self.api_timeout,
+            )
+            self.ws_feed = MarketDataFeed(ws_info, self.market_data, self.coins)
             self.ws_feed.start()
 
         consecutive_errors = 0
@@ -530,6 +540,7 @@ class HyperliquidBot:
 
         if self.ws_feed:
             self.ws_feed.stop()
+            self.ws_feed = None
 
         try:
             # Set a timeout for order cancellation to avoid hanging
