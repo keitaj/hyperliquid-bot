@@ -20,7 +20,7 @@ from position_closer import close_position_market  # noqa: E402
 from rate_limiter import API_ERRORS  # noqa: E402
 from exceptions import TransientError, DataError, ConfigurationError  # noqa: E402
 from circuit_breaker import CircuitBreaker  # noqa: E402
-from ws import MarketDataFeed, FillFeed, BboGuard, ImbalanceGuard, WsReconnector  # noqa: E402
+from ws import MarketDataFeed, FillFeed, BboGuard, ImbalanceGuard, CloseRefreshGuard, WsReconnector  # noqa: E402
 from strategies import (  # noqa: E402
     SimpleMAStrategy,
     RSIStrategy,
@@ -64,6 +64,7 @@ class HyperliquidBot:
         self.fill_feed: Optional[FillFeed] = None
         self.bbo_guard: Optional[BboGuard] = None
         self.imbalance_guard: Optional[ImbalanceGuard] = None
+        self.close_refresh_guard: Optional[CloseRefreshGuard] = None
         self._ws_reconnector: Optional[WsReconnector] = None
 
         # ------------------------------------------------------------------ #
@@ -395,6 +396,21 @@ class HyperliquidBot:
                         imb_threshold, self.imbalance_guard.depth,
                     )
 
+                # Phase 5: Close order refresh on BBO change
+                closer = getattr(self.strategy, '_closer', None)
+                close_refresh_threshold = self.strategy_config.get('close_refresh_threshold_bps', 0.0)
+                if closer is not None and close_refresh_threshold > 0:
+                    self.close_refresh_guard = CloseRefreshGuard(
+                        closer,
+                        threshold_bps=close_refresh_threshold,
+                        min_refresh_interval=3.0,
+                    )
+                    self.ws_feed.add_listener(self.close_refresh_guard.on_l2_update)
+                    logger.info(
+                        "[ws] CloseRefreshGuard enabled (threshold=%.1f bps)",
+                        close_refresh_threshold,
+                    )
+
         if self._enable_ws and self.ws_feed is not None:
             self._ws_reconnector = WsReconnector(stale_threshold=60.0)
 
@@ -582,6 +598,9 @@ class HyperliquidBot:
         if self.imbalance_guard:
             self.imbalance_guard.stop()
             self.imbalance_guard = None
+        if self.close_refresh_guard:
+            self.close_refresh_guard.stop()
+            self.close_refresh_guard = None
         if self.bbo_guard:
             self.bbo_guard.stop()
             self.bbo_guard = None
@@ -911,6 +930,8 @@ if __name__ == "__main__":
                         help='Cancel one side when L2 imbalance exceeds this (0-1); 0 to disable (default: 0)')
     parser.add_argument('--imbalance-guard-depth', type=int,
                         help='Number of L2 book levels for imbalance guard calculation (default: 5)')
+    parser.add_argument('--close-refresh-threshold-bps', type=float,
+                        help='Refresh close orders when BBO changes by this many bps; 0 to disable (default: 0)')
     parser.add_argument('--quiet-hours-utc', type=str, default='',
                         help='UTC hours to reduce/stop quoting, comma-separated (e.g. "17" or "17,18")')
     parser.add_argument('--quiet-hours-spread-multiplier', type=float, default=0.0,
@@ -1006,6 +1027,7 @@ if __name__ == "__main__":
             'vol_adjust_multiplier',
             'vol_lookback',
             'vol_adjust_max_offset',
+            'close_refresh_threshold_bps',
             'quiet_hours_utc',
             'quiet_hours_spread_multiplier',
         ],

@@ -76,6 +76,34 @@ class PositionCloser:
         self._open_positions.pop(coin, None)
         self._consecutive_close_failures.pop(coin, None)
 
+    def invalidate_close_order(self, coin: str) -> bool:
+        """Cancel and clear the current close order so manage() re-places it.
+
+        Called by CloseRefreshGuard when BBO changes significantly.
+        Returns True if a close order was actually cancelled.
+
+        Thread-safe: may be called from the WS thread.
+        """
+        entry = self._open_positions.get(coin)
+        if entry is None:
+            return False
+
+        entry_time, close_oid, tier = entry
+        if close_oid is None:
+            return False
+
+        try:
+            self.order_manager.cancel_order(close_oid, coin)
+        except Exception as e:
+            logger.debug(f"[mm] Could not cancel close order for {coin} (refresh): {e}")
+
+        self._open_positions[coin] = (entry_time, None, tier)
+        logger.info(
+            f"[mm] Invalidated close order {close_oid} for {coin} "
+            f"(BBO refresh, tier={tier}, age={time.monotonic() - entry_time:.0f}s)"
+        )
+        return True
+
     def on_position_closed(self, coin: str) -> None:
         """Remove tracking after an immediate close."""
         self._open_positions.pop(coin, None)
