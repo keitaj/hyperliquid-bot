@@ -31,6 +31,9 @@ def _make_strategy():
     strategy.loss_streak_cooldown = 300
     strategy._loss_streaks = defaultdict(int)
     strategy._coin_cooldown_until = {}
+    strategy._quiet_hours = set()
+    strategy._quiet_spread_multiplier = 0.0
+    strategy._was_quiet = False
 
     tracker = MagicMock(spec=OrderTracker)
     strategy._tracker = tracker

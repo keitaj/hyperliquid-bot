@@ -24,6 +24,9 @@ def _make_strategy(bbo_mode=False, bbo_offset_bps=0, spread_bps=10, maker_only=T
     s.loss_streak_cooldown = 300
     s._loss_streaks = defaultdict(int)
     s._coin_cooldown_until = {}
+    s._quiet_hours = set()
+    s._quiet_spread_multiplier = 0.0
+    s._was_quiet = False
     s.vol_adjust_enabled = False
     s.vol_adjust_multiplier = 2.0
     s.vol_lookback = 30

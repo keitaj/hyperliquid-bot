@@ -12,7 +12,8 @@ import logging
 import os
 import time
 from collections import defaultdict, deque
-from typing import Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Dict, List, Optional, Set
 
 from strategies.base_strategy import BaseStrategy
 from strategies.mm_order_tracker import OrderTracker
@@ -64,6 +65,23 @@ class MarketMakingStrategy(BaseStrategy):
             raise ValueError(f"loss_streak_cooldown must be > 0 when limit is set, got {self.loss_streak_cooldown}")
         self._loss_streaks: Dict[str, int] = defaultdict(int)  # coin -> consecutive losses
         self._coin_cooldown_until: Dict[str, float] = {}  # coin -> monotonic deadline
+
+        # ---- Quiet hours ---- #
+        quiet_hours_str = config.get('quiet_hours_utc', '')
+        self._quiet_hours: Set[int] = set()
+        if quiet_hours_str:
+            for h in str(quiet_hours_str).split(','):
+                h = h.strip()
+                if h:
+                    try:
+                        self._quiet_hours.add(int(h))
+                    except ValueError:
+                        logger.warning(f"[mm] Invalid quiet hour value: '{h}', skipping")
+        self._quiet_spread_multiplier: float = config.get('quiet_hours_spread_multiplier', 0.0)
+        self._was_quiet: bool = False
+        if self._quiet_hours:
+            mode = "spread×%.1f" % self._quiet_spread_multiplier if self._quiet_spread_multiplier > 0 else "stop"
+            logger.info(f"[mm] Quiet hours enabled: UTC {sorted(self._quiet_hours)} mode={mode}")
 
         # ---- Volatility-adjusted BBO offset ---- #
         self.vol_adjust_enabled: bool = config.get('vol_adjust_enabled', False)
@@ -173,6 +191,37 @@ class MarketMakingStrategy(BaseStrategy):
         self._prev_position_coins = current_position_coins
 
         self._log_fill_rate()
+
+        # ---- Quiet hours: full-stop mode ---- #
+        is_quiet = self._is_quiet_hour()
+        if is_quiet and self._quiet_spread_multiplier <= 0:
+            if not self._was_quiet:
+                utc_hour = datetime.now(timezone.utc).hour
+                logger.info(f"[mm] Entering quiet hours (UTC {utc_hour}), cancelling all orders")
+                for coin in coins:
+                    self._tracker.cancel_all_orders_for_coin(coin)
+                self._was_quiet = True
+            # Still process existing positions but skip new order placement
+            for coin in coins:
+                try:
+                    has_position = coin in self.positions and abs(self.positions[coin]['size']) > 0
+                    if has_position:
+                        if self.close_immediately:
+                            self.close_position(coin)
+                            self._closer.on_position_closed(coin)
+                        else:
+                            self._closer.manage(coin, self.positions[coin], self.close_position)
+                    else:
+                        self._closer.cleanup_closed(coin)
+                except API_ERRORS as e:
+                    logger.error(f"[mm] Error processing {coin} during quiet hours: {e}")
+            self._log_cycle(coins, " [QUIET]")
+            return
+
+        if self._was_quiet and not is_quiet:
+            utc_hour = datetime.now(timezone.utc).hour
+            logger.info(f"[mm] Exiting quiet hours (UTC {utc_hour}), resuming quotes")
+            self._was_quiet = False
 
         for coin in coins:
             try:
@@ -351,6 +400,9 @@ class MarketMakingStrategy(BaseStrategy):
             # BBO-following mode: place at/near best bid and ask
             self._record_mid_price(coin, mid_price)
             effective_offset_bps = self._get_volatility_adjusted_offset(coin)
+            # Widen spread during quiet hours (spread-multiplier mode)
+            if self._quiet_spread_multiplier > 0 and self._is_quiet_hour():
+                effective_offset_bps *= self._quiet_spread_multiplier
             offset = effective_offset_bps / 10_000
             buy_price = round_price(market_data.bid * (1 - offset), *rp)
             sell_price = round_price(market_data.ask * (1 + offset), *rp)
@@ -359,6 +411,12 @@ class MarketMakingStrategy(BaseStrategy):
             # (bid/ask=0) even in bbo_mode. Maker-only clamping below
             # ensures Alo orders don't cross the spread.
             raw_buy, raw_sell = self._get_spread_prices(mid_price)
+            # Widen spread during quiet hours (spread-multiplier mode)
+            if self._quiet_spread_multiplier > 0 and self._is_quiet_hour():
+                spread_offset = mid_price * self.spread_bps / 10_000
+                extra = spread_offset * (self._quiet_spread_multiplier - 1)
+                raw_buy -= extra
+                raw_sell += extra
             buy_price = round_price(raw_buy, *rp)
             sell_price = round_price(raw_sell, *rp)
             # Clamp prices to stay outside BBO for maker-only (Alo) orders
@@ -503,6 +561,30 @@ class MarketMakingStrategy(BaseStrategy):
     # ------------------------------------------------------------------ #
     #  Helpers
     # ------------------------------------------------------------------ #
+
+    def _is_quiet_hour(self) -> bool:
+        """Check if the current UTC hour is in the quiet hours set."""
+        if not self._quiet_hours:
+            return False
+        return datetime.now(timezone.utc).hour in self._quiet_hours
+
+    def _log_cycle(self, coins: List[str], suffix: str = "") -> None:
+        """Log a cycle status line with optional suffix."""
+        active_positions = sum(
+            1 for coin in coins
+            if coin in self.positions and self.positions[coin].get('size', 0) != 0
+        )
+        coin_statuses = []
+        for coin in coins:
+            pos = self.positions.get(coin)
+            if pos and pos['size'] != 0:
+                coin_statuses.append(f"{coin}:pos")
+            else:
+                coin_statuses.append(f"{coin}:idle")
+        status_str = " | ".join(coin_statuses[:10])
+        if len(coin_statuses) > 10:
+            status_str += f" ... +{len(coin_statuses) - 10} more"
+        logger.info(f"[cycle] {len(coins)} coins, {active_positions} pos | {status_str}{suffix}")
 
     @staticmethod
     def _get_risk_multiplier() -> float:

@@ -911,6 +911,10 @@ if __name__ == "__main__":
                         help='Cancel one side when L2 imbalance exceeds this (0-1); 0 to disable (default: 0)')
     parser.add_argument('--imbalance-guard-depth', type=int,
                         help='Number of L2 book levels for imbalance guard calculation (default: 5)')
+    parser.add_argument('--quiet-hours-utc', type=str, default='',
+                        help='UTC hours to reduce/stop quoting, comma-separated (e.g. "17" or "17,18")')
+    parser.add_argument('--quiet-hours-spread-multiplier', type=float, default=0.0,
+                        help='Spread multiplier during quiet hours (0=stop quoting, >0=widen spread)')
     parser.add_argument('--vol-adjust', action='store_true', default=False,
                         help='Enable volatility-adjusted BBO offset (market_making)')
     parser.add_argument('--vol-adjust-multiplier', type=float,
@@ -1002,6 +1006,8 @@ if __name__ == "__main__":
             'vol_adjust_multiplier',
             'vol_lookback',
             'vol_adjust_max_offset',
+            'quiet_hours_utc',
+            'quiet_hours_spread_multiplier',
         ],
     }
 

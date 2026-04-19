@@ -39,6 +39,9 @@ def _make_strategy(inventory_skew_bps=2, order_size_usd=100):
     s.loss_streak_cooldown = 300
     s._loss_streaks = defaultdict(int)
     s._coin_cooldown_until = {}
+    s._quiet_hours = set()
+    s._quiet_spread_multiplier = 0.0
+    s._was_quiet = False
     s._max_coin_status_display = 10
 
     om = MagicMock()
