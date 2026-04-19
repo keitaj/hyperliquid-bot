@@ -20,7 +20,7 @@ from position_closer import close_position_market  # noqa: E402
 from rate_limiter import API_ERRORS  # noqa: E402
 from exceptions import TransientError, DataError, ConfigurationError  # noqa: E402
 from circuit_breaker import CircuitBreaker  # noqa: E402
-from ws import MarketDataFeed, FillFeed, BboGuard, ImbalanceGuard  # noqa: E402
+from ws import MarketDataFeed, FillFeed, BboGuard, ImbalanceGuard, WsReconnector  # noqa: E402
 from strategies import (  # noqa: E402
     SimpleMAStrategy,
     RSIStrategy,
@@ -64,6 +64,7 @@ class HyperliquidBot:
         self.fill_feed: Optional[FillFeed] = None
         self.bbo_guard: Optional[BboGuard] = None
         self.imbalance_guard: Optional[ImbalanceGuard] = None
+        self._ws_reconnector: Optional[WsReconnector] = None
 
         # ------------------------------------------------------------------ #
         # HIP-3 Multi-DEX setup
@@ -394,6 +395,9 @@ class HyperliquidBot:
                         imb_threshold, self.imbalance_guard.depth,
                     )
 
+        if self._enable_ws and self.ws_feed is not None:
+            self._ws_reconnector = WsReconnector(stale_threshold=60.0)
+
         consecutive_errors = 0
 
         while self.running:
@@ -405,6 +409,10 @@ class HyperliquidBot:
                         self._reset_connections()
                         self.last_connection_reset = current_time
                         consecutive_errors = 0
+
+                # Check WebSocket health and reconnect if needed
+                if self._ws_reconnector is not None:
+                    self._ws_reconnector.maybe_reconnect(self)
 
                 self._trading_loop()
                 consecutive_errors = 0  # Reset on successful iteration
