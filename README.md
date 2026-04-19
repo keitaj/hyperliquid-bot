@@ -250,6 +250,7 @@ python3 bot.py --strategy macd
 |---|---|
 | `--dex DEX [DEX ...]` | HIP-3 DEX names to trade (overrides `TRADING_DEXES` env var) |
 | `--no-hl` | Disable standard Hyperliquid perps, trade only HIP-3 DEXes |
+| `--enable-ws` | Enable WebSocket feed for real-time L2 book updates (reduces REST API calls) |
 
 ### How HIP-3 Works Internally
 
@@ -559,6 +560,7 @@ hip3:
   cli:
     --dex: []                     # HIP-3 DEX names (overrides TRADING_DEXES)
     --no-hl: false                # Disable standard HL perps
+    --enable-ws: false            # Enable WebSocket L2 book feed
 
 config_merge_order: "default_configs[strategy] ← CLI overrides (only non-null)"
 priority: "CLI flag > env var > default_configs > strategy constructor fallback"
