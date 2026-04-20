@@ -296,9 +296,20 @@ The bot handles this automatically at startup:
 | 6 | `breakout` | Support/resistance breakout with volume and ATR confirmation |
 | 7 | `market_making` | Symmetric buy/sell limits around mid price for spread capture |
 
-The `market_making` strategy uses **progressive close pricing**: as a position ages, the take-profit price is tightened from full spread → breakeven (at 50% of max age) → small loss (at 75%), reducing costly taker force-closes. The loss tolerance is configurable via `--aggressive-loss-bps` (default: 1 bps).
+The `market_making` strategy uses **progressive close pricing**: as a position ages, the take-profit price is tightened from full spread → breakeven (at 50% of max age) → small loss (at 75%), reducing costly taker force-closes. The loss tolerance is configurable via `--aggressive-loss-bps` (default: 1 bps). During the force-close phase, `--force-close-max-loss-bps` enables progressive loss acceptance that scales from `aggressive-loss-bps` to the configured maximum as the position approaches the taker deadline.
 
 **BBO mode** (`--bbo-mode`): Places orders at the best bid/ask instead of `mid ± spread_bps`. On Hyperliquid, market spreads are typically 0.1–2 bps, so even `SPREAD_BPS=5` places orders 4–5 bps away from BBO, resulting in low fill rates. BBO mode improves fill rates by tracking the current best prices. Use `--bbo-offset-bps N` to place orders N bps behind BBO (default: 0 = at BBO). Falls back to `mid ± spread_bps` when BBO is unavailable.
+
+**Per-coin overrides** (`--coin-offset-overrides`, `--coin-spread-overrides`): Override BBO offset or spread per coin. Format: `"SP500:0.5,MSFT:3"`. Supports both bare names and DEX-prefixed names (`xyz:SP500:0.5`). Unspecified coins use the global default.
+
+**Quiet hours** (`--quiet-hours-utc`): Stop or widen quoting during specific UTC hours (e.g., `"17"` or `"17,18"`). Default: stop quoting entirely. With `--quiet-hours-spread-multiplier N`, widens spread by Nx instead. Positions are still managed during quiet hours.
+
+**WebSocket guards** (require `--enable-ws`):
+- `--bbo-guard-threshold-bps`: Cancel stale entry orders when BBO moves (default: 2.0)
+- `--imbalance-guard-threshold`: Cancel one side when L2 book is skewed (0–1, default: 0)
+- `--close-refresh-threshold-bps`: Refresh close orders on BBO change to improve maker fill rate (default: 0 = disabled)
+
+**Adverse selection logging** (`--enable-adverse-selection-log`): Measures mid-price movement 5s/30s/60s after each fill, logging per-coin summaries every 300s. Observation only — no trading impact.
 
 All parameters are configurable via CLI flags with sensible defaults.
 Run `python3 bot.py --help` for the full list, or see [Parameter Reference](#parameter-reference-for-ai-agents) below.
@@ -517,9 +528,14 @@ strategies:
     maker_only: false                  # --maker-only
     taker_fallback_age_seconds: null   # --taker-fallback-age  (seconds after max-position-age to fall back to taker; null = never)
     aggressive_loss_bps: 1.0           # --aggressive-loss-bps (max loss in bps accepted to avoid taker close; 0 = breakeven only)
+    force_close_max_loss_bps: 0        # --force-close-max-loss-bps (progressive loss in force-close phase; 0 = disabled)
     bbo_mode: false                    # --bbo-mode  (place orders at best bid/ask instead of mid ± spread)
     bbo_offset_bps: 0                  # --bbo-offset-bps  (bps behind BBO; 0 = at BBO)
     inventory_skew_bps: 0              # --inventory-skew-bps (skew per unit of inventory; 0 = disabled)
+    coin_offset_overrides: ""          # --coin-offset-overrides  (per-coin BBO offset: "SP500:0.5,MSFT:3")
+    coin_spread_overrides: ""          # --coin-spread-overrides  (per-coin spread: "SP500:8,XYZ100:15")
+    quiet_hours_utc: ""                # --quiet-hours-utc  (UTC hours to stop/reduce quoting: "17" or "17,18")
+    quiet_hours_spread_multiplier: 0   # --quiet-hours-spread-multiplier  (0 = stop, >0 = widen spread by Nx)
     vol_adjust_enabled: false          # --vol-adjust  (enable volatility-adjusted BBO offset)
     vol_adjust_multiplier: 2.0         # --vol-adjust-multiplier  (offset += multiplier × avg_move_bps)
     vol_adjust_max_offset: 50          # --vol-adjust-max-offset  (max offset bps after vol adjustment)
@@ -560,7 +576,15 @@ hip3:
   cli:
     --dex: []                     # HIP-3 DEX names (overrides TRADING_DEXES)
     --no-hl: false                # Disable standard HL perps
-    --enable-ws: false            # Enable WebSocket L2 book feed
+    --enable-ws: false            # Enable WebSocket L2 book feed + WS guards
+
+ws_guards:                         # All require --enable-ws
+  bbo_guard_threshold_bps: 2.0     # --bbo-guard-threshold-bps  (cancel entry orders on BBO change; 0 = disabled)
+  imbalance_guard_threshold: 0     # --imbalance-guard-threshold  (cancel one side on L2 skew; 0 = disabled)
+  imbalance_guard_depth: 5         # --imbalance-guard-depth  (L2 levels for imbalance calc)
+  close_refresh_threshold_bps: 0   # --close-refresh-threshold-bps  (refresh close orders on BBO change; 0 = disabled)
+  enable_adverse_selection_log: false  # --enable-adverse-selection-log  (post-fill mid tracking)
+  adverse_selection_log_interval: 300  # --adverse-selection-log-interval  (summary log interval in seconds)
 
 config_merge_order: "default_configs[strategy] ← CLI overrides (only non-null)"
 priority: "CLI flag > env var > default_configs > strategy constructor fallback"
