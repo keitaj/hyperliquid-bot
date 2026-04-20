@@ -21,6 +21,9 @@ class MarketData:
     spread: float
     timestamp: datetime
     book_imbalance: float = 0.0  # >0 = bid-heavy (buy pressure), <0 = ask-heavy (sell pressure)
+    bid_size_top: float = 0.0  # top-of-book bid size
+    ask_size_top: float = 0.0  # top-of-book ask size
+    micro_price: float = 0.0  # size-weighted mid: bid*(ask_sz/(bid_sz+ask_sz)) + ask*(bid_sz/(bid_sz+ask_sz))
 
 
 class MarketDataManager:
@@ -120,6 +123,15 @@ class MarketDataManager:
         mid_price = (best_bid + best_ask) / 2
         spread = best_ask - best_bid
 
+        # Top-of-book sizes for micro-price calculation
+        bid_size_top = float(bids[0]['sz'])
+        ask_size_top = float(asks[0]['sz'])
+        top_total = bid_size_top + ask_size_top
+        micro_price = (
+            (best_bid * ask_size_top + best_ask * bid_size_top) / top_total
+            if top_total > 0 else mid_price
+        )
+
         depth = min(self._imbalance_depth, len(bids), len(asks))
         bid_size = sum(float(bids[i]['sz']) for i in range(depth))
         ask_size = sum(float(asks[i]['sz']) for i in range(depth))
@@ -134,6 +146,9 @@ class MarketDataManager:
             spread=spread,
             timestamp=datetime.now(),
             book_imbalance=book_imbalance,
+            bid_size_top=bid_size_top,
+            ask_size_top=ask_size_top,
+            micro_price=micro_price,
         )
 
     def update_from_ws(self, coin: str, levels) -> None:
