@@ -33,6 +33,7 @@ class CloseRefreshGuard:
         position_closer: Any,
         threshold_bps: float = 1.0,
         min_refresh_interval: float = 3.0,
+        summary_interval: float = 300.0,
     ) -> None:
         self.position_closer = position_closer
         self.threshold_bps = threshold_bps
@@ -47,6 +48,12 @@ class CloseRefreshGuard:
         self._skipped_no_order = 0
         self._error_count = 0
         self._running = True
+
+        # Periodic summary
+        self._summary_interval = summary_interval
+        self._last_summary_time = time.monotonic()
+        self._period_refreshes = 0
+        self._period_skips = 0
 
     # ------------------------------------------------------------------ #
     #  Callback
@@ -95,16 +102,33 @@ class CloseRefreshGuard:
         if last is not None and now - last < self.min_refresh_interval:
             return
 
-        self._last_refresh_time[coin] = now
         refreshed = self.position_closer.invalidate_close_order(coin)
         if refreshed:
+            # Only apply rate limit when a close order was actually cancelled.
+            # When close_oid is None (no order to invalidate), we do NOT update
+            # _last_refresh_time so the next BBO change retries immediately.
+            self._last_refresh_time[coin] = now
             self._refreshes_triggered += 1
+            self._period_refreshes += 1
             logger.info(
                 "[close-refresh] BBO change %.1f bps for %s — refreshed close order",
                 change_bps, coin,
             )
         else:
             self._skipped_no_order += 1
+            self._period_skips += 1
+
+        # Periodic summary
+        if now - self._last_summary_time >= self._summary_interval:
+            logger.info(
+                "[close-refresh] Summary: refreshes=%d skipped_no_order=%d "
+                "(period: refreshes=%d, skips=%d)",
+                self._refreshes_triggered, self._skipped_no_order,
+                self._period_refreshes, self._period_skips,
+            )
+            self._period_refreshes = 0
+            self._period_skips = 0
+            self._last_summary_time = now
 
     # ------------------------------------------------------------------ #
     #  Lifecycle
