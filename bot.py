@@ -956,6 +956,15 @@ if __name__ == "__main__":
     parser.add_argument('--force-close-max-loss-bps', type=float,
                         help='Max loss bps during force-close phase, scaling from aggressive-loss-bps '
                              '(default: 0 = disabled, use BBO-only pricing)')
+    parser.add_argument('--close-spread-bps', type=float,
+                        help='Close order spread in bps (default: same as --spread-bps). '
+                             'Lower values increase maker close fill rate.')
+    parser.add_argument('--close-breakeven-pct', type=float,
+                        help='Fraction of max_position_age at which close tier transitions to breakeven '
+                             '(default: 0.50, i.e. 50%% of max age)')
+    parser.add_argument('--close-aggressive-pct', type=float,
+                        help='Fraction of max_position_age at which close tier transitions to aggressive '
+                             '(default: 0.75, i.e. 75%% of max age)')
     parser.add_argument('--bbo-mode', action='store_true',
                         help='Place orders at BBO instead of mid±spread (market_making)')
     parser.add_argument('--bbo-offset-bps', type=float,
@@ -1084,6 +1093,9 @@ if __name__ == "__main__":
             ('taker_fallback_age', 'taker_fallback_age_seconds'),
             'aggressive_loss_bps',
             'force_close_max_loss_bps',
+            'close_spread_bps',
+            'close_breakeven_pct',
+            'close_aggressive_pct',
             'bbo_mode',
             'bbo_offset_bps',
             'inventory_skew_bps',
