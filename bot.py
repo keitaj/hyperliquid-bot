@@ -556,6 +556,8 @@ class HyperliquidBot:
                 self.circuit_breaker.record_success("strategy")
                 if self.adverse_tracker:
                     self.adverse_tracker.maybe_log_summary()
+                if self.imbalance_guard:
+                    self.imbalance_guard.maybe_log_summary()
             except TransientError as e:
                 logger.warning(f"Strategy execution hit transient error: {e}")
                 self.circuit_breaker.record_failure("strategy")

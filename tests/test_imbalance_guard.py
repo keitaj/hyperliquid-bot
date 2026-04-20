@@ -247,3 +247,66 @@ class TestOrderTrackerCancelBySide:
 
         tracker.cancel_orders_by_side("BTC", "B")
         om.bulk_cancel_orders.assert_not_called()
+
+
+class TestImbalanceGuardSummary:
+    """Tests for periodic summary logging."""
+
+    def test_max_imbalance_tracked(self):
+        guard, tracker = _make_guard(threshold=0.9)  # High threshold so no cancels
+        # imbalance = (10-10)/20 = 0.0
+        guard.on_l2_update("BTC", _make_levels([10], [10]))
+        # imbalance = (15-5)/20 = 0.5
+        guard.on_l2_update("BTC", _make_levels([15], [5]))
+
+        assert guard._max_imbalance.get("BTC", 0) >= 0.5
+        assert guard._update_count == 2
+
+    def test_summary_resets_max_imbalance(self):
+        guard, tracker = _make_guard(threshold=0.9)
+        guard.on_l2_update("BTC", _make_levels([15], [5]))
+
+        assert "BTC" in guard._max_imbalance
+        guard._log_summary()
+        assert len(guard._max_imbalance) == 0
+
+    @patch("ws.imbalance_guard.time")
+    def test_maybe_log_summary_interval(self, mock_time):
+        guard, tracker = _make_guard(threshold=0.9)
+        mock_time.monotonic.return_value = 0.0
+        guard._last_summary_time = 0.0
+        guard.on_l2_update("BTC", _make_levels([15], [5]))
+
+        # Not enough time
+        mock_time.monotonic.return_value = 100.0
+        guard.maybe_log_summary()
+        assert guard._update_count == 1  # Not reset
+
+        # Enough time (300s+)
+        mock_time.monotonic.return_value = 301.0
+        guard.maybe_log_summary()
+        assert guard._update_count == 0  # Reset
+
+    def test_stats_includes_new_fields(self):
+        guard, tracker = _make_guard()
+        guard.on_l2_update("BTC", _make_levels([10], [10]))
+
+        stats = guard.stats
+        assert "update_count" in stats
+        assert "max_imbalance" in stats
+        assert "skipped_rate_limit" in stats
+        assert stats["update_count"] == 1
+
+    def test_skipped_rate_limit_counted(self):
+        guard, tracker = _make_guard(threshold=0.5, min_cancel_interval=10.0)
+        guard.on_l2_update("BTC", _make_levels([10], [10]))
+
+        with patch("ws.imbalance_guard.time") as mock_time:
+            mock_time.monotonic.return_value = 1000.0
+            guard.on_l2_update("BTC", _make_levels([2], [18]))   # cancel
+            assert guard._skipped_rate_limit == 0
+
+            mock_time.monotonic.return_value = 1001.0
+            guard.on_l2_update("BTC", _make_levels([10], [10]))  # neutral
+            guard.on_l2_update("BTC", _make_levels([2], [18]))   # buy_risky, rate-limited
+            assert guard._skipped_rate_limit == 1

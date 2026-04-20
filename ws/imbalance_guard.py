@@ -57,8 +57,15 @@ class ImbalanceGuard:
         # Counters
         self._changes_detected = 0
         self._cancels_triggered = 0
+        self._skipped_rate_limit = 0
         self._error_count = 0
+        self._update_count = 0
         self._running = True
+
+        # Per-coin max absolute imbalance seen (for diagnostics)
+        self._max_imbalance: Dict[str, float] = {}
+        self._summary_interval = 300.0  # seconds
+        self._last_summary_time = time.monotonic()
 
     # ------------------------------------------------------------------ #
     #  Callback
@@ -72,6 +79,12 @@ class ImbalanceGuard:
             imbalance = self._compute_imbalance(levels)
             if imbalance is None:
                 return
+
+            self._update_count += 1
+            abs_imb = abs(imbalance)
+            prev_max = self._max_imbalance.get(coin, 0.0)
+            if abs_imb > prev_max:
+                self._max_imbalance[coin] = abs_imb
 
             # Determine current state
             if imbalance < -self.threshold:
@@ -127,6 +140,7 @@ class ImbalanceGuard:
         key = f"{coin}:{side}"
         last = self._last_cancel_time.get(key, 0)
         if now - last < self.min_cancel_interval:
+            self._skipped_rate_limit += 1
             return
 
         self._last_cancel_time[key] = now
@@ -142,9 +156,44 @@ class ImbalanceGuard:
     #  Lifecycle
     # ------------------------------------------------------------------ #
 
+    def maybe_log_summary(self) -> None:
+        """Log periodic summary if interval has elapsed.
+
+        Should be called from the main loop (e.g., after strategy.run()).
+        """
+        now = time.monotonic()
+        if now - self._last_summary_time < self._summary_interval:
+            return
+        self._last_summary_time = now
+        self._log_summary()
+
+    def _log_summary(self) -> None:
+        """Log summary with max imbalance per coin and reset counters."""
+        max_imb = dict(self._max_imbalance)
+        updates = self._update_count
+        cancels = self._cancels_triggered
+        skipped = self._skipped_rate_limit
+
+        # Reset periodic counters
+        self._max_imbalance.clear()
+        self._update_count = 0
+        # Don't reset cumulative cancels/changes — those are lifetime counters
+
+        if not max_imb and updates == 0:
+            return
+
+        coin_parts = ", ".join(
+            f"{coin}={imb:.2f}" for coin, imb in sorted(max_imb.items(), key=lambda x: -x[1])
+        )
+        logger.info(
+            f"[imb-guard] Summary: updates={updates} cancels={cancels} skipped={skipped} "
+            f"threshold={self.threshold:.2f} max_imbalance=[{coin_parts}]"
+        )
+
     def stop(self) -> None:
         """Stop the guard and log summary."""
         self._running = False
+        self._log_summary()
         logger.info(
             "[imb-guard] Stopped (changes=%d, cancels=%d, errors=%d)",
             self._changes_detected,
@@ -166,5 +215,8 @@ class ImbalanceGuard:
             "running": self._running,
             "changes_detected": self._changes_detected,
             "cancels_triggered": self._cancels_triggered,
+            "skipped_rate_limit": self._skipped_rate_limit,
             "errors": self._error_count,
+            "update_count": self._update_count,
+            "max_imbalance": dict(self._max_imbalance),
         }
