@@ -313,6 +313,8 @@ The `market_making` strategy uses **progressive close pricing**: as a position a
 
 **Adverse selection logging** (`--enable-adverse-selection-log`): Measures mid-price movement 5s/30s/60s after each fill, logging per-coin summaries every 300s. Observation only — no trading impact.
 
+**Dynamic offset** (`--dynamic-offset`): Auto-adjusts per-coin BBO offset based on adverse selection severity from the tracker. Coins with higher adverse selection get wider offsets; favorable coins get tighter offsets. Requires `--enable-ws` and `--enable-adverse-selection-log`. Manual `--coin-offset-overrides` serve as the baseline; dynamic adjustment adds/subtracts from it.
+
 All parameters are configurable via CLI flags with sensible defaults.
 Run `python3 bot.py --help` for the full list, or see [Parameter Reference](#parameter-reference-for-ai-agents) below.
 
@@ -539,6 +541,13 @@ strategies:
     inventory_skew_bps: 0              # --inventory-skew-bps (skew per unit of inventory; 0 = disabled)
     coin_offset_overrides: ""          # --coin-offset-overrides  (per-coin BBO offset: "SP500:0.5,MSFT:3")
     coin_spread_overrides: ""          # --coin-spread-overrides  (per-coin spread: "SP500:8,XYZ100:15")
+    dynamic_offset_enabled: false      # --dynamic-offset  (auto-adjust offset from adverse selection tracker)
+    dynamic_offset_sensitivity: 0.5    # --dynamic-offset-sensitivity  (offset widening per 1bps adverse)
+    dynamic_offset_tighten_rate: 0.25  # --dynamic-offset-tighten-rate  (offset tightening for favorable fills)
+    dynamic_offset_max_addition: 3.0   # --dynamic-offset-max-add  (max offset addition in bps)
+    dynamic_offset_max_reduction: 1.0  # --dynamic-offset-max-reduce  (max offset reduction in bps)
+    dynamic_offset_floor: 0.5          # --dynamic-offset-floor  (minimum offset bps)
+    dynamic_offset_min_fills: 5        # --dynamic-offset-min-fills  (min fills before adjustment activates)
     microprice_skew_enabled: false     # --microprice-skew  (asymmetric offset based on micro-price skew)
     microprice_skew_multiplier: 1.0    # --microprice-skew-multiplier  (skew scaling factor)
     microprice_max_skew_bps: 2.0       # --microprice-max-skew-bps  (max offset adjustment from skew)

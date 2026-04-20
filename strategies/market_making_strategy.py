@@ -90,6 +90,21 @@ class MarketMakingStrategy(BaseStrategy):
         if self._spread_schedule:
             logger.info(f"[mm] Spread schedule: {dict(sorted(self._spread_schedule.items()))}")
 
+        # ---- Dynamic offset auto-adjustment ---- #
+        self._dynamic_offset_enabled: bool = config.get('dynamic_offset_enabled', False)
+        self._dynamic_offset_sensitivity: float = config.get('dynamic_offset_sensitivity', 0.5)
+        self._dynamic_offset_tighten_rate: float = config.get('dynamic_offset_tighten_rate', 0.25)
+        self._dynamic_offset_max_addition: float = config.get('dynamic_offset_max_addition', 3.0)
+        self._dynamic_offset_max_reduction: float = config.get('dynamic_offset_max_reduction', 1.0)
+        self._dynamic_offset_floor: float = config.get('dynamic_offset_floor', 0.5)
+        self._dynamic_offset_min_fills: int = config.get('dynamic_offset_min_fills', 5)
+        self._adverse_tracker = None  # set by bot.py after WS init
+        if self._dynamic_offset_enabled:
+            logger.info(
+                f"[mm] Dynamic offset enabled: sensitivity={self._dynamic_offset_sensitivity}, "
+                f"floor={self._dynamic_offset_floor}, max_add={self._dynamic_offset_max_addition}"
+            )
+
         # ---- Per-coin offset/spread overrides ---- #
         self._coin_offset_overrides: Dict[str, float] = self._parse_coin_overrides(
             config.get('coin_offset_overrides', '')
@@ -677,16 +692,47 @@ class MarketMakingStrategy(BaseStrategy):
         return result
 
     def _get_coin_offset(self, coin: str) -> float:
-        """Get BBO offset for a specific coin, checking overrides first.
+        """Get BBO offset for a specific coin, with optional dynamic adjustment.
 
-        Lookup: full name → bare name → global default.
+        Lookup: full name → bare name → global default → dynamic adjust.
         """
         if coin in self._coin_offset_overrides:
-            return self._coin_offset_overrides[coin]
-        bare = coin.split(':', 1)[-1] if ':' in coin else coin
-        if bare in self._coin_offset_overrides:
-            return self._coin_offset_overrides[bare]
-        return self.bbo_offset_bps
+            base = self._coin_offset_overrides[coin]
+        else:
+            bare = coin.split(':', 1)[-1] if ':' in coin else coin
+            if bare in self._coin_offset_overrides:
+                base = self._coin_offset_overrides[bare]
+            else:
+                base = self.bbo_offset_bps
+        return self._apply_dynamic_offset(coin, base)
+
+    def _apply_dynamic_offset(self, coin: str, base_offset: float) -> float:
+        """Adjust offset based on adverse selection severity from tracker stats."""
+        if not self._dynamic_offset_enabled or not self._adverse_tracker:
+            return base_offset
+
+        stats = self._adverse_tracker.stats
+        coin_stats = stats.get(coin)
+        if not coin_stats or coin_stats.get("fills", 0) < self._dynamic_offset_min_fills:
+            return base_offset
+
+        avg_adverse = coin_stats.get("avg_5s", 0.0)  # negative = adverse
+
+        if avg_adverse < 0:
+            adjustment = abs(avg_adverse) * self._dynamic_offset_sensitivity
+        else:
+            adjustment = -avg_adverse * self._dynamic_offset_tighten_rate
+
+        adjustment = max(-self._dynamic_offset_max_reduction,
+                         min(adjustment, self._dynamic_offset_max_addition))
+        result = max(base_offset + adjustment, self._dynamic_offset_floor)
+
+        if abs(adjustment) > 0.1:
+            logger.debug(
+                f"[mm] Dynamic offset {coin}: base={base_offset:.1f} "
+                f"adj={adjustment:+.1f} → {result:.1f} (adverse_5s={avg_adverse:+.1f}bps)"
+            )
+        return result
 
     def _get_coin_spread(self, coin: str) -> float:
         """Get spread_bps for a specific coin, checking overrides first."""
