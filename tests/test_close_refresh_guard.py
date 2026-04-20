@@ -127,6 +127,83 @@ class TestCloseRefreshGuard:
         guard.on_l2_update("SP500", "not-a-list")
         assert guard.stats["errors"] == 1
 
+    @patch('ws.close_refresh_guard.time')
+    def test_skip_does_not_update_rate_limit(self, mock_time):
+        """When close_oid is None (skip), rate limit timer should NOT be updated.
+
+        This ensures that the next BBO change after close order placement
+        can immediately trigger a refresh.
+        """
+        closer = MagicMock()
+        guard = CloseRefreshGuard(closer, threshold_bps=1.0, min_refresh_interval=3.0)
+
+        mock_time.monotonic.return_value = 100.0
+        guard.on_l2_update("SP500", _make_levels(100.0, 100.1))
+
+        # First BBO change: close_oid=None → skip, should NOT set rate limit
+        closer.invalidate_close_order.return_value = False
+        mock_time.monotonic.return_value = 100.5
+        guard.on_l2_update("SP500", _make_levels(100.05, 100.15))
+        assert guard.stats["skipped_no_order"] == 1
+        assert "SP500" not in guard._last_refresh_time
+
+        # Second BBO change at t=101 (within 3s of skip): close_oid now exists
+        # Should NOT be rate-limited because the skip didn't set the timer
+        closer.invalidate_close_order.return_value = True
+        mock_time.monotonic.return_value = 101.0
+        guard.on_l2_update("SP500", _make_levels(100.10, 100.20))
+        assert guard.stats["refreshes_triggered"] == 1
+        assert guard._last_refresh_time["SP500"] == 101.0
+
+    @patch('ws.close_refresh_guard.time')
+    def test_refresh_sets_rate_limit(self, mock_time):
+        """After a successful refresh, subsequent calls within interval are blocked."""
+        closer = MagicMock()
+        closer.invalidate_close_order.return_value = True
+        guard = CloseRefreshGuard(closer, threshold_bps=1.0, min_refresh_interval=3.0)
+
+        mock_time.monotonic.return_value = 100.0
+        guard.on_l2_update("SP500", _make_levels(100.0, 100.1))
+
+        # First refresh succeeds
+        mock_time.monotonic.return_value = 101.0
+        guard.on_l2_update("SP500", _make_levels(100.05, 100.15))
+        assert closer.invalidate_close_order.call_count == 1
+
+        # Within rate limit (1s later, < 3s interval)
+        mock_time.monotonic.return_value = 102.0
+        guard.on_l2_update("SP500", _make_levels(100.10, 100.20))
+        assert closer.invalidate_close_order.call_count == 1  # blocked
+
+        # After rate limit expires
+        mock_time.monotonic.return_value = 105.0
+        guard.on_l2_update("SP500", _make_levels(100.15, 100.25))
+        assert closer.invalidate_close_order.call_count == 2
+
+    @patch('ws.close_refresh_guard.time.monotonic')
+    def test_periodic_summary_log(self, mock_monotonic):
+        """Summary log is emitted after summary_interval."""
+        closer = MagicMock()
+        closer.invalidate_close_order.return_value = False
+
+        mock_monotonic.return_value = 0.0
+        guard = CloseRefreshGuard(
+            closer, threshold_bps=1.0, summary_interval=10.0
+        )
+
+        guard.on_l2_update("SP500", _make_levels(100.0, 100.1))
+
+        # Trigger within summary interval — no summary yet
+        mock_monotonic.return_value = 5.0
+        guard.on_l2_update("SP500", _make_levels(100.05, 100.15))
+        assert guard._period_skips == 1
+
+        # Trigger after summary interval — should reset counters
+        mock_monotonic.return_value = 11.0
+        guard.on_l2_update("SP500", _make_levels(100.10, 100.20))
+        assert guard._period_skips == 0  # reset after summary
+        assert guard._last_summary_time == 11.0
+
 
 class TestInvalidateCloseOrder:
     """Tests for PositionCloser.invalidate_close_order()."""

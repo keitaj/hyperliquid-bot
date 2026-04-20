@@ -131,7 +131,7 @@ class WsReconnector:
     def _rebuild(self, bot: "HyperliquidBot") -> None:  # noqa: F821
         """Create fresh WS Info + feeds + guards."""
         from hyperliquid.info import Info as WsInfo
-        from ws import MarketDataFeed, FillFeed, BboGuard, ImbalanceGuard
+        from ws import MarketDataFeed, FillFeed, BboGuard, ImbalanceGuard, CloseRefreshGuard
         from config import Config
 
         perp_dexs = bot._build_perp_dexs()
@@ -167,4 +167,19 @@ class WsReconnector:
                 logger.info(
                     "[ws-reconnect] ImbalanceGuard re-enabled (threshold=%.2f, depth=%d)",
                     imb_threshold, bot.imbalance_guard.depth,
+                )
+
+            # Re-register CloseRefreshGuard
+            closer = getattr(bot.strategy, '_closer', None)
+            close_refresh_threshold = bot.strategy_config.get('close_refresh_threshold_bps', 0.0)
+            if closer is not None and close_refresh_threshold > 0:
+                bot.close_refresh_guard = CloseRefreshGuard(
+                    closer,
+                    threshold_bps=close_refresh_threshold,
+                    min_refresh_interval=3.0,
+                )
+                bot.ws_feed.add_listener(bot.close_refresh_guard.on_l2_update)
+                logger.info(
+                    "[ws-reconnect] CloseRefreshGuard re-enabled (threshold=%.1f bps)",
+                    close_refresh_threshold,
                 )
