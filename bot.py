@@ -22,7 +22,7 @@ from exceptions import TransientError, DataError, ConfigurationError  # noqa: E4
 from circuit_breaker import CircuitBreaker  # noqa: E402
 from ws import (  # noqa: E402
     MarketDataFeed, FillFeed, BboGuard, ImbalanceGuard,
-    CloseRefreshGuard, AdverseSelectionTracker, WsReconnector,
+    CloseRefreshGuard, BboVelocityGuard, AdverseSelectionTracker, WsReconnector,
 )
 from strategies import (  # noqa: E402
     SimpleMAStrategy,
@@ -68,6 +68,7 @@ class HyperliquidBot:
         self.bbo_guard: Optional[BboGuard] = None
         self.imbalance_guard: Optional[ImbalanceGuard] = None
         self.close_refresh_guard: Optional[CloseRefreshGuard] = None
+        self.velocity_guard: Optional[BboVelocityGuard] = None
         self.adverse_tracker: Optional[AdverseSelectionTracker] = None
         self._ws_reconnector: Optional[WsReconnector] = None
 
@@ -404,6 +405,24 @@ class HyperliquidBot:
                         imb_threshold, self.imbalance_guard.depth,
                     )
 
+                # Phase 4b: BBO velocity → directional cancel
+                if self.strategy_config.get('velocity_guard_enabled', False):
+                    self.velocity_guard = BboVelocityGuard(
+                        tracker,
+                        consecutive_threshold=int(
+                            self.strategy_config.get('velocity_consecutive', 3)
+                        ),
+                        min_total_move_bps=float(
+                            self.strategy_config.get('velocity_min_move_bps', 1.0)
+                        ),
+                    )
+                    self.ws_feed.add_listener(self.velocity_guard.on_l2_update)
+                    logger.info(
+                        "[ws] BboVelocityGuard enabled (consecutive=%d, min_move=%.1f bps)",
+                        self.velocity_guard.consecutive_threshold,
+                        self.velocity_guard.min_total_move_bps,
+                    )
+
                 # Phase 5: Close order refresh on BBO change
                 closer = getattr(self.strategy, '_closer', None)
                 close_refresh_threshold = self.strategy_config.get('close_refresh_threshold_bps', 0.0)
@@ -625,6 +644,9 @@ class HyperliquidBot:
         if self.close_refresh_guard:
             self.close_refresh_guard.stop()
             self.close_refresh_guard = None
+        if self.velocity_guard:
+            self.velocity_guard.stop()
+            self.velocity_guard = None
         if self.bbo_guard:
             self.bbo_guard.stop()
             self.bbo_guard = None
@@ -971,6 +993,18 @@ if __name__ == "__main__":
                         help='UTC hours to reduce/stop quoting, comma-separated (e.g. "17" or "17,18")')
     parser.add_argument('--quiet-hours-spread-multiplier', type=float, default=0.0,
                         help='Spread multiplier during quiet hours (0=stop quoting, >0=widen spread)')
+    parser.add_argument('--microprice-skew', action='store_true', default=False,
+                        help='Enable micro-price asymmetric offset for taker fill prevention (market_making)')
+    parser.add_argument('--microprice-skew-multiplier', type=float,
+                        help='Micro-price skew scaling factor (default: 1.0, market_making)')
+    parser.add_argument('--microprice-max-skew-bps', type=float,
+                        help='Max offset adjustment from micro-price skew in bps (default: 2.0)')
+    parser.add_argument('--velocity-guard', action='store_true', default=False,
+                        help='Enable BBO velocity guard — cancel orders on sustained directional BBO moves')
+    parser.add_argument('--velocity-consecutive', type=int,
+                        help='Number of consecutive same-direction BBO moves to trigger cancel (default: 3)')
+    parser.add_argument('--velocity-min-move-bps', type=float,
+                        help='Minimum cumulative BBO move in bps to trigger cancel (default: 1.0)')
     parser.add_argument('--vol-adjust', action='store_true', default=False,
                         help='Enable volatility-adjusted BBO offset (market_making)')
     parser.add_argument('--vol-adjust-multiplier', type=float,
@@ -1069,6 +1103,12 @@ if __name__ == "__main__":
             'close_refresh_threshold_bps',
             'quiet_hours_utc',
             'quiet_hours_spread_multiplier',
+            ('microprice_skew', 'microprice_skew_enabled'),
+            'microprice_skew_multiplier',
+            'microprice_max_skew_bps',
+            ('velocity_guard', 'velocity_guard_enabled'),
+            'velocity_consecutive',
+            'velocity_min_move_bps',
         ],
     }
 

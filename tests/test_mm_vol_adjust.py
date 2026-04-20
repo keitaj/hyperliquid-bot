@@ -36,6 +36,7 @@ def _make_strategy(bbo_mode=False, bbo_offset_bps=1.0, vol_adjust_enabled=False,
     s.vol_lookback = vol_lookback
     s.vol_adjust_max_offset = vol_adjust_max_offset
     s._recent_mids = {}
+    s._microprice_enabled = False
     s.positions = {}
     s._orders_placed = 0
     s._orders_placed_per_coin = defaultdict(int)

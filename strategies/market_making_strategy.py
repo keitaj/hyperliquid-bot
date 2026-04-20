@@ -13,7 +13,7 @@ import os
 import time
 from collections import defaultdict, deque
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 from strategies.base_strategy import BaseStrategy
 from strategies.mm_order_tracker import OrderTracker
@@ -94,6 +94,16 @@ class MarketMakingStrategy(BaseStrategy):
             logger.info(f"[mm] Per-coin offset overrides: {self._coin_offset_overrides}")
         if self._coin_spread_overrides:
             logger.info(f"[mm] Per-coin spread overrides: {self._coin_spread_overrides}")
+
+        # ---- Micro-price asymmetric offset ---- #
+        self._microprice_enabled: bool = config.get('microprice_skew_enabled', False)
+        self._microprice_multiplier: float = config.get('microprice_skew_multiplier', 1.0)
+        self._microprice_max_skew_bps: float = config.get('microprice_max_skew_bps', 2.0)
+        if self._microprice_enabled:
+            logger.info(
+                f"[mm] Micro-price skew enabled: multiplier={self._microprice_multiplier}, "
+                f"max_skew={self._microprice_max_skew_bps}bps"
+            )
 
         # ---- Volatility-adjusted BBO offset ---- #
         self.vol_adjust_enabled: bool = config.get('vol_adjust_enabled', False)
@@ -429,9 +439,12 @@ class MarketMakingStrategy(BaseStrategy):
             # Widen spread during quiet hours (spread-multiplier mode)
             if self._quiet_spread_multiplier > 0 and self._is_quiet_hour():
                 effective_offset_bps *= self._quiet_spread_multiplier
-            offset = effective_offset_bps / 10_000
-            buy_price = round_price(market_data.bid * (1 - offset), *rp)
-            sell_price = round_price(market_data.ask * (1 + offset), *rp)
+            # Micro-price asymmetric offset
+            buy_offset_bps, sell_offset_bps = self._calculate_microprice_offsets(
+                coin, effective_offset_bps
+            )
+            buy_price = round_price(market_data.bid * (1 - buy_offset_bps / 10_000), *rp)
+            sell_price = round_price(market_data.ask * (1 + sell_offset_bps / 10_000), *rp)
         else:
             # Fallback: mid ± spread. Also used when BBO is unavailable
             # (bid/ask=0) even in bbo_mode. Maker-only clamping below
@@ -636,6 +649,39 @@ class MarketMakingStrategy(BaseStrategy):
         if bare in self._coin_spread_overrides:
             return self._coin_spread_overrides[bare]
         return self.spread_bps
+
+    def _calculate_microprice_offsets(
+        self, coin: str, base_offset_bps: float
+    ) -> Tuple[float, float]:
+        """Calculate asymmetric buy/sell offsets based on micro-price skew.
+
+        Returns (buy_offset_bps, sell_offset_bps).
+        When micro_price > mid (buy pressure), sell side is riskier → widen sell offset.
+        When micro_price < mid (sell pressure), buy side is riskier → widen buy offset.
+        """
+        if not self._microprice_enabled:
+            return (base_offset_bps, base_offset_bps)
+
+        md = self.market_data.get_market_data(coin)
+        if not md or md.micro_price <= 0 or md.mid_price <= 0:
+            return (base_offset_bps, base_offset_bps)
+
+        skew_bps = (md.micro_price - md.mid_price) / md.mid_price * 10_000
+        skew_factor = min(
+            abs(skew_bps) * self._microprice_multiplier,
+            self._microprice_max_skew_bps,
+        )
+
+        if skew_bps > 0:
+            # Buy pressure → sell orders at higher risk
+            buy_offset = max(base_offset_bps - skew_factor * 0.5, 0.5)
+            sell_offset = base_offset_bps + skew_factor
+        else:
+            # Sell pressure → buy orders at higher risk
+            buy_offset = base_offset_bps + skew_factor
+            sell_offset = max(base_offset_bps - skew_factor * 0.5, 0.5)
+
+        return (buy_offset, sell_offset)
 
     def _is_quiet_hour(self) -> bool:
         """Check if the current UTC hour is in the quiet hours set."""

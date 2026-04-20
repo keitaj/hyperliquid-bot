@@ -35,6 +35,7 @@ def _make_strategy(imbalance_threshold=0.0, loss_streak_limit=0, loss_streak_coo
     s.vol_adjust_enabled = False
     s.vol_adjust_multiplier = 2.0
     s.vol_lookback = 30
+    s._microprice_enabled = False
     s._recent_mids = {}
     s.positions = {}
     s._orders_placed = 0
