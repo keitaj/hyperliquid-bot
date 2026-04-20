@@ -998,6 +998,8 @@ if __name__ == "__main__":
                         help='Per-coin spread overrides in bps (e.g. "SP500:8,XYZ100:15")')
     parser.add_argument('--close-refresh-threshold-bps', type=float,
                         help='Refresh close orders when BBO changes by this many bps; 0 to disable (default: 0)')
+    parser.add_argument('--spread-schedule', type=str, default='',
+                        help='Per-hour spread multiplier schedule: "HOUR:MULT,..." (e.g. "14:1.5,15:1.5,3:2.0")')
     parser.add_argument('--quiet-hours-utc', type=str, default='',
                         help='UTC hours to reduce/stop quoting, comma-separated (e.g. "17" or "17,18")')
     parser.add_argument('--quiet-hours-spread-multiplier', type=float, default=0.0,
@@ -1113,6 +1115,7 @@ if __name__ == "__main__":
             'coin_offset_overrides',
             'coin_spread_overrides',
             'close_refresh_threshold_bps',
+            'spread_schedule',
             'quiet_hours_utc',
             'quiet_hours_spread_multiplier',
             ('microprice_skew', 'microprice_skew_enabled'),

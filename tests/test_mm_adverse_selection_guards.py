@@ -31,6 +31,7 @@ def _make_strategy(imbalance_threshold=0.0, loss_streak_limit=0, loss_streak_coo
     s._coin_offset_overrides = {}
     s._coin_spread_overrides = {}
     s._quiet_spread_multiplier = 0.0
+    s._spread_schedule = {}
     s._was_quiet = False
     s.vol_adjust_enabled = False
     s.vol_adjust_multiplier = 2.0

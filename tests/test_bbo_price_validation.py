@@ -155,6 +155,7 @@ class TestPlaceOrdersBBOClamping:
         s._coin_offset_overrides = {}
         s._coin_spread_overrides = {}
         s._quiet_spread_multiplier = 0.0
+        s._spread_schedule = {}
         s._was_quiet = False
         s.positions = {}
         s._orders_placed = 0

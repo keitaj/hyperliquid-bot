@@ -83,6 +83,13 @@ class MarketMakingStrategy(BaseStrategy):
             mode = "spread×%.1f" % self._quiet_spread_multiplier if self._quiet_spread_multiplier > 0 else "stop"
             logger.info(f"[mm] Quiet hours enabled: UTC {sorted(self._quiet_hours)} mode={mode}")
 
+        # ---- Hourly spread schedule ---- #
+        self._spread_schedule: Dict[int, float] = self._parse_spread_schedule(
+            config.get('spread_schedule', '')
+        )
+        if self._spread_schedule:
+            logger.info(f"[mm] Spread schedule: {dict(sorted(self._spread_schedule.items()))}")
+
         # ---- Per-coin offset/spread overrides ---- #
         self._coin_offset_overrides: Dict[str, float] = self._parse_coin_overrides(
             config.get('coin_offset_overrides', '')
@@ -250,6 +257,9 @@ class MarketMakingStrategy(BaseStrategy):
             logger.info(f"[mm] Exiting quiet hours (UTC {utc_hour}), resuming quotes")
             self._was_quiet = False
 
+        # Track hourly spread multiplier for cycle log suffix
+        _hourly_mult = self._get_hourly_spread_multiplier()
+
         for coin in coins:
             try:
                 has_position = coin in self.positions and abs(self.positions[coin]['size']) > 0
@@ -335,8 +345,9 @@ class MarketMakingStrategy(BaseStrategy):
         else:
             shown = coin_statuses[:max_display]
             status_str = " | ".join(shown) + f" ... +{len(coin_statuses) - max_display} more"
+        suffix = f" [SPREAD×{_hourly_mult:.1f}]" if _hourly_mult != 1.0 else ""
         logger.info(
-            f"[cycle] {len(coins)} coins, {active_positions} pos | {status_str}"
+            f"[cycle] {len(coins)} coins, {active_positions} pos | {status_str}{suffix}"
         )
 
     # ------------------------------------------------------------------ #
@@ -442,6 +453,10 @@ class MarketMakingStrategy(BaseStrategy):
             # Widen spread during quiet hours (spread-multiplier mode)
             if self._quiet_spread_multiplier > 0 and self._is_quiet_hour():
                 effective_offset_bps *= self._quiet_spread_multiplier
+            # Hourly spread schedule
+            hourly_mult = self._get_hourly_spread_multiplier()
+            if hourly_mult != 1.0:
+                effective_offset_bps *= hourly_mult
             # Micro-price asymmetric offset
             buy_offset_bps, sell_offset_bps = self._calculate_microprice_offsets(
                 coin, effective_offset_bps
@@ -459,6 +474,12 @@ class MarketMakingStrategy(BaseStrategy):
             # Widen spread during quiet hours (spread-multiplier mode)
             if self._quiet_spread_multiplier > 0 and self._is_quiet_hour():
                 extra = spread_offset * (self._quiet_spread_multiplier - 1)
+                raw_buy -= extra
+                raw_sell += extra
+            # Hourly spread schedule
+            hourly_mult = self._get_hourly_spread_multiplier()
+            if hourly_mult != 1.0 and hourly_mult > 0:
+                extra = spread_offset * (hourly_mult - 1)
                 raw_buy -= extra
                 raw_sell += extra
             buy_price = round_price(raw_buy, *rp)
@@ -632,6 +653,29 @@ class MarketMakingStrategy(BaseStrategy):
                 logger.warning(f"[mm] Invalid BPS value in coin override: '{pair}'")
         return result
 
+    @staticmethod
+    def _parse_spread_schedule(raw: str) -> Dict[int, float]:
+        """Parse ``'HOUR:MULT,HOUR:MULT,...'`` into ``{hour: multiplier}`` dict."""
+        result: Dict[int, float] = {}
+        if not raw or not str(raw).strip():
+            return result
+        for entry in str(raw).split(','):
+            entry = entry.strip()
+            if not entry:
+                continue
+            try:
+                hour_str, mult_str = entry.split(':')
+                hour = int(hour_str)
+                mult = float(mult_str)
+                if not (0 <= hour <= 23):
+                    raise ValueError(f"hour must be 0-23, got {hour}")
+                if mult < 0:
+                    raise ValueError(f"multiplier must be >= 0, got {mult}")
+                result[hour] = mult
+            except (ValueError, IndexError) as e:
+                logger.warning(f"[mm] Invalid spread_schedule entry: '{entry}', skipping ({e})")
+        return result
+
     def _get_coin_offset(self, coin: str) -> float:
         """Get BBO offset for a specific coin, checking overrides first.
 
@@ -687,10 +731,21 @@ class MarketMakingStrategy(BaseStrategy):
         return (buy_offset, sell_offset)
 
     def _is_quiet_hour(self) -> bool:
-        """Check if the current UTC hour is in the quiet hours set."""
-        if not self._quiet_hours:
-            return False
-        return datetime.now(timezone.utc).hour in self._quiet_hours
+        """Check if the current UTC hour should stop quoting entirely."""
+        hour = datetime.now(timezone.utc).hour
+        if self._quiet_hours and hour in self._quiet_hours:
+            return True
+        # spread_schedule with multiplier 0 also triggers full-stop
+        if self._spread_schedule and self._spread_schedule.get(hour, 1.0) == 0:
+            return True
+        return False
+
+    def _get_hourly_spread_multiplier(self) -> float:
+        """Get spread multiplier for current UTC hour. Returns 1.0 if no schedule."""
+        if not self._spread_schedule:
+            return 1.0
+        hour = datetime.now(timezone.utc).hour
+        return self._spread_schedule.get(hour, 1.0)
 
     def _log_cycle(self, coins: List[str], suffix: str = "") -> None:
         """Log a cycle status line with optional suffix."""
