@@ -261,6 +261,21 @@ class BaseStrategy(ABC):
         if not position:
             return
 
+        # Verify position with fresh API data before sending reduce_only order.
+        # Cached self.positions may be stale if a WS fill closed the position
+        # between the last update_positions() and this call.
+        try:
+            fresh_positions = self.order_manager.get_all_positions()
+            fresh_pos = next((p for p in fresh_positions if p.get('coin') == coin), None)
+            if fresh_pos is None or abs(float(fresh_pos.get('szi', 0))) == 0:
+                logger.info(f"[mm] Position for {coin} already closed (fresh check), skipping close")
+                self.positions.pop(coin, None)
+                return
+            # Use fresh size for the close order
+            position = {'size': float(fresh_pos.get('szi', 0)), 'entry_price': position.get('entry_price', 0)}
+        except Exception as e:
+            logger.debug(f"[mm] Could not verify position for {coin}: {e}, using cached data")
+
         close_position_market(
             coin, position['size'], self.market_data, self.order_manager,
         )

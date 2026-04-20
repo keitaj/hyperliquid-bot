@@ -212,6 +212,24 @@ class PositionCloser:
             except API_ERRORS as e:
                 logger.debug(f"[mm] Could not cancel close order for {coin}: {e}")
 
+        # Verify position still exists before force close.
+        # WS fill feed may have closed the position between the last
+        # update_positions() cycle and this force-close attempt.
+        try:
+            positions = self.order_manager.get_all_positions()
+            pos = next((p for p in positions if p.get('coin') == coin), None)
+            if pos is None or abs(float(pos.get('szi', 0))) == 0:
+                logger.info(
+                    f"[mm] Position for {coin} already closed before force close "
+                    f"(age={age:.0f}s) — skipping"
+                )
+                self._open_positions.pop(coin, None)
+                self._consecutive_close_failures.pop(coin, None)
+                return
+        except Exception as e:
+            logger.debug(f"[mm] Could not verify position for {coin} before force close: {e}")
+            # Proceed — better to get a rejection than miss a real force close
+
         # Check if taker fallback should be used
         use_taker = False
         if not self.maker_only:

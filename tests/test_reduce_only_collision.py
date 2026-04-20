@@ -17,6 +17,9 @@ def _make_closer(**kwargs):
     """Create a PositionCloser with mocked dependencies."""
     om = MagicMock()
     md = MagicMock()
+    # Default: get_all_positions returns a position so force-close
+    # verification passes (existing tests assume position exists).
+    om.get_all_positions.return_value = [{'coin': 'SP500', 'szi': '0.5'}]
     defaults = dict(
         order_manager=om, market_data=md,
         spread_bps=10, max_position_age_seconds=120,
