@@ -42,6 +42,9 @@ class PositionCloser:
         aggressive_loss_bps: float = 1.0,
         force_close_max_loss_bps: float = 0.0,
         coin_spread_overrides: Optional[Dict[str, float]] = None,
+        close_spread_bps: Optional[float] = None,
+        close_breakeven_pct: float = 0.50,
+        close_aggressive_pct: float = 0.75,
     ) -> None:
         self.order_manager = order_manager
         self.market_data = market_data
@@ -54,6 +57,11 @@ class PositionCloser:
         # 0 = disabled (use BBO-only pricing in force close phase)
         self.force_close_max_loss_bps = max(force_close_max_loss_bps, aggressive_loss_bps) \
             if force_close_max_loss_bps > 0 else 0.0
+        # Close-specific spread (None = use entry spread_bps for backward compat)
+        self.close_spread_bps = close_spread_bps if close_spread_bps is not None else spread_bps
+        # Tier transition timing (fraction of max_position_age)
+        self.close_breakeven_pct = close_breakeven_pct
+        self.close_aggressive_pct = close_aggressive_pct
 
         # coin -> (entry_time, close_oid or None, close_tier)
         self._open_positions: Dict[str, Tuple[float, Optional[int], int]] = {}
@@ -324,8 +332,8 @@ class PositionCloser:
 
     def _get_tier(self, age: float) -> int:
         """Return the close price tier for the given position age."""
-        threshold_breakeven = self.max_position_age_seconds * 0.50
-        threshold_aggressive = self.max_position_age_seconds * 0.75
+        threshold_breakeven = self.max_position_age_seconds * self.close_breakeven_pct
+        threshold_aggressive = self.max_position_age_seconds * self.close_aggressive_pct
 
         if age >= threshold_aggressive:
             return _TIER_AGGRESSIVE
@@ -337,7 +345,7 @@ class PositionCloser:
     def _tier_spread_bps(self, tier: int) -> float:
         """Return the spread in bps for a given close tier."""
         if tier == _TIER_NORMAL:
-            return self.spread_bps
+            return self.close_spread_bps
         elif tier == _TIER_BREAKEVEN:
             return 0.0
         else:
@@ -363,7 +371,7 @@ class PositionCloser:
             pass  # Proceed with placement — rejection is safer than missing a close
 
         coin_spread = self._get_spread_for_coin(coin)
-        effective_spread = self._tier_spread_bps(tier) if coin_spread == self.spread_bps else (
+        effective_spread = self._tier_spread_bps(tier) if coin_spread == self.close_spread_bps else (
             coin_spread if tier == _TIER_NORMAL else 0.0 if tier == _TIER_BREAKEVEN else -self.aggressive_loss_bps
         )
         age = time.monotonic() - entry_time
@@ -371,27 +379,34 @@ class PositionCloser:
         rp = self.market_data.price_rounding_params(coin)
 
         close_side = OrderSide.SELL if size > 0 else OrderSide.BUY
-        if size > 0:
-            close_price = round_price(entry_price * (1 + effective_spread / 10_000), *rp)
-        else:
-            close_price = round_price(entry_price * (1 - effective_spread / 10_000), *rp)
 
-        # Clamp take-profit price outside BBO to avoid post-only rejections
-        if self.maker_only:
-            md = self.market_data.get_market_data(coin)
-            if md and md.bid > 0 and md.ask > 0:
+        # Entry-based close price
+        if size > 0:
+            entry_close = round_price(entry_price * (1 + effective_spread / 10_000), *rp)
+        else:
+            entry_close = round_price(entry_price * (1 - effective_spread / 10_000), *rp)
+
+        # BBO-tracking: use the more aggressive of entry-based and BBO-based price
+        close_price = entry_close
+        md = self.market_data.get_market_data(coin)
+        try:
+            has_bbo = md is not None and md.bid > 0 and md.ask > 0
+        except (TypeError, AttributeError):
+            has_bbo = False
+        if has_bbo:
+            if close_side == OrderSide.SELL:
+                bbo_close = round_price(md.ask * (1 + BBO_OFFSET), *rp)
+                close_price = min(entry_close, bbo_close)
+            else:
+                bbo_close = round_price(md.bid * (1 - BBO_OFFSET), *rp)
+                close_price = max(entry_close, bbo_close)
+
+            # Maker-only clamp: ensure price stays outside BBO
+            if self.maker_only:
                 if close_side == OrderSide.SELL and close_price <= md.ask:
                     close_price = round_price(md.ask * (1 + BBO_OFFSET), *rp)
-                    logger.debug(
-                        f"[mm] Clamped take-profit sell for {coin} to {close_price:.6f} "
-                        f"(ask={md.ask:.6f})"
-                    )
-                if close_side == OrderSide.BUY and close_price >= md.bid:
+                elif close_side == OrderSide.BUY and close_price >= md.bid:
                     close_price = round_price(md.bid * (1 - BBO_OFFSET), *rp)
-                    logger.debug(
-                        f"[mm] Clamped take-profit buy for {coin} to {close_price:.6f} "
-                        f"(bid={md.bid:.6f})"
-                    )
 
         abs_size = self.market_data.round_size(coin, abs(size))
         if abs_size <= 0:

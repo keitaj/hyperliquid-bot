@@ -138,6 +138,9 @@ class MarketMakingStrategy(BaseStrategy):
             aggressive_loss_bps=config.get('aggressive_loss_bps', 1.0),
             force_close_max_loss_bps=config.get('force_close_max_loss_bps', 0.0),
             coin_spread_overrides=self._coin_spread_overrides,
+            close_spread_bps=config.get('close_spread_bps', None),
+            close_breakeven_pct=config.get('close_breakeven_pct', 0.50),
+            close_aggressive_pct=config.get('close_aggressive_pct', 0.75),
         )
 
     @property
