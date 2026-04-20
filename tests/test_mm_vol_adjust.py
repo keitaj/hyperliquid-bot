@@ -31,6 +31,8 @@ def _make_strategy(bbo_mode=False, bbo_offset_bps=1.0, vol_adjust_enabled=False,
     s._coin_spread_overrides = {}
     s._quiet_spread_multiplier = 0.0
     s._spread_schedule = {}
+    s._dynamic_offset_enabled = False
+    s._adverse_tracker = None
     s._was_quiet = False
     s.vol_adjust_enabled = vol_adjust_enabled
     s.vol_adjust_multiplier = vol_adjust_multiplier

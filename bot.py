@@ -447,6 +447,11 @@ class HyperliquidBot:
                     self.fill_feed.set_adverse_selection_tracker(self.adverse_tracker)
                     logger.info("[ws] AdverseSelectionTracker enabled")
 
+        # Inject adverse tracker into strategy for dynamic offset
+        if self.adverse_tracker and self.strategy_config.get('dynamic_offset_enabled', False):
+            self.strategy._adverse_tracker = self.adverse_tracker
+            logger.info("[ws] Dynamic offset linked to AdverseSelectionTracker")
+
         if self._enable_ws and self.ws_feed is not None:
             self._ws_reconnector = WsReconnector(stale_threshold=60.0)
 
@@ -1016,6 +1021,20 @@ if __name__ == "__main__":
                         help='Number of consecutive same-direction BBO moves to trigger cancel (default: 3)')
     parser.add_argument('--velocity-min-move-bps', type=float,
                         help='Minimum cumulative BBO move in bps to trigger cancel (default: 1.0)')
+    parser.add_argument('--dynamic-offset', action='store_true', default=False,
+                        help='Enable dynamic offset auto-adjustment based on adverse selection (requires --enable-ws)')
+    parser.add_argument('--dynamic-offset-sensitivity', type=float,
+                        help='Offset widening per 1bps of adverse selection (default: 0.5)')
+    parser.add_argument('--dynamic-offset-tighten-rate', type=float,
+                        help='Offset tightening rate for favorable fills (default: 0.25)')
+    parser.add_argument('--dynamic-offset-max-add', type=float,
+                        help='Max offset addition in bps (default: 3.0)')
+    parser.add_argument('--dynamic-offset-max-reduce', type=float,
+                        help='Max offset reduction in bps (default: 1.0)')
+    parser.add_argument('--dynamic-offset-floor', type=float,
+                        help='Minimum offset floor in bps (default: 0.5)')
+    parser.add_argument('--dynamic-offset-min-fills', type=int,
+                        help='Min fills before dynamic adjustment activates (default: 5)')
     parser.add_argument('--vol-adjust', action='store_true', default=False,
                         help='Enable volatility-adjusted BBO offset (market_making)')
     parser.add_argument('--vol-adjust-multiplier', type=float,
@@ -1124,6 +1143,13 @@ if __name__ == "__main__":
             ('velocity_guard', 'velocity_guard_enabled'),
             'velocity_consecutive',
             'velocity_min_move_bps',
+            ('dynamic_offset', 'dynamic_offset_enabled'),
+            'dynamic_offset_sensitivity',
+            'dynamic_offset_tighten_rate',
+            ('dynamic_offset_max_add', 'dynamic_offset_max_addition'),
+            ('dynamic_offset_max_reduce', 'dynamic_offset_max_reduction'),
+            'dynamic_offset_floor',
+            'dynamic_offset_min_fills',
         ],
     }
 
