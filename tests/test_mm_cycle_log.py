@@ -43,6 +43,7 @@ def _make_strategy(inventory_skew_bps=2, order_size_usd=100):
     s._coin_offset_overrides = {}
     s._coin_spread_overrides = {}
     s._quiet_spread_multiplier = 0.0
+    s._spread_schedule = {}
     s._was_quiet = False
     s._max_coin_status_display = 10
 

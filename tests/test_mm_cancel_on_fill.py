@@ -35,6 +35,7 @@ def _make_strategy():
     strategy._coin_offset_overrides = {}
     strategy._coin_spread_overrides = {}
     strategy._quiet_spread_multiplier = 0.0
+    strategy._spread_schedule = {}
     strategy._was_quiet = False
 
     tracker = MagicMock(spec=OrderTracker)
