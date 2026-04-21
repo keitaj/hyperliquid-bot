@@ -248,6 +248,12 @@ class PositionCloser:
                 use_taker = True
 
         if use_taker:
+            # Final guard: FillFeed may have already closed this position on the WS thread.
+            # _open_positions is updated by on_position_closed() with no cache delay,
+            # unlike get_all_positions() which has a 2-second TTL cache.
+            if coin not in self._open_positions:
+                logger.info(f"[mm] Position {coin} already closed (WS fill) before taker force close")
+                return
             logger.warning(f"[mm] Position {coin} held {age:.0f}s -- force closing with taker order")
             close_position_fn(coin)
             self._open_positions.pop(coin, None)
@@ -298,6 +304,10 @@ class PositionCloser:
 
         abs_size = self.market_data.round_size(coin, abs(size))
         if abs_size > 0:
+            # Final guard before reduce_only order (same as taker path above)
+            if coin not in self._open_positions:
+                logger.info(f"[mm] Position {coin} already closed (WS fill) before maker force close")
+                return
             try:
                 order = self.order_manager.create_limit_order(
                     coin=coin, side=close_side, size=abs_size,
@@ -411,6 +421,11 @@ class PositionCloser:
         abs_size = self.market_data.round_size(coin, abs(size))
         if abs_size <= 0:
             return False  # Size rounding issue, not a placement failure
+
+        # Final guard: WS fill may have closed position between manage() and here
+        if coin not in self._open_positions:
+            logger.info(f"[mm] Position {coin} already closed (WS fill) before take-profit placement")
+            return False
 
         try:
             order = self.order_manager.create_limit_order(

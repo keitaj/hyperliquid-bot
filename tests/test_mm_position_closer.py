@@ -204,6 +204,7 @@ class TestClosePriceCalculation:
         om.create_limit_order.return_value = mock_order
 
         entry_time = time.monotonic()  # just now, age ~0
+        closer._open_positions['BTC'] = (entry_time, None, 0)
         closer._place_take_profit('BTC', 0.5, 50000.0, entry_time, _TIER_NORMAL)
 
         call_kwargs = om.create_limit_order.call_args.kwargs
@@ -219,6 +220,7 @@ class TestClosePriceCalculation:
         om.create_limit_order.return_value = mock_order
 
         entry_time = time.monotonic() - 65  # past 50%
+        closer._open_positions['BTC'] = (entry_time, None, 0)
         closer._place_take_profit('BTC', 0.5, 50000.0, entry_time, _TIER_BREAKEVEN)
 
         call_kwargs = om.create_limit_order.call_args.kwargs
@@ -234,6 +236,7 @@ class TestClosePriceCalculation:
         om.create_limit_order.return_value = mock_order
 
         entry_time = time.monotonic() - 95  # past 75%
+        closer._open_positions['BTC'] = (entry_time, None, 0)
         closer._place_take_profit('BTC', 0.5, 50000.0, entry_time, _TIER_AGGRESSIVE)
 
         call_kwargs = om.create_limit_order.call_args.kwargs
@@ -249,6 +252,7 @@ class TestClosePriceCalculation:
         om.create_limit_order.return_value = mock_order
 
         entry_time = time.monotonic() - 95
+        closer._open_positions['BTC'] = (entry_time, None, 0)
         closer._place_take_profit('BTC', -0.5, 50000.0, entry_time, _TIER_AGGRESSIVE)
 
         call_kwargs = om.create_limit_order.call_args.kwargs

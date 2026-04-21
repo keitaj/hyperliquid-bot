@@ -41,6 +41,7 @@ class TestTakeProfitBBOClamping:
         entry_time = time.monotonic()
         # entry at 100.01, spread 5bps → take-profit sell at 100.06
         # but ask is 100.02, so 100.06 > ask → no clamping needed
+        closer._open_positions['BTC'] = (entry_time, None, 0)
         closer._place_take_profit('BTC', 1.0, 100.01, entry_time, 0)
         om.create_limit_order.assert_called_once()
         call_kwargs = om.create_limit_order.call_args[1]
@@ -57,6 +58,7 @@ class TestTakeProfitBBOClamping:
         entry_time = time.monotonic()
         # entry at 100.00, spread 1bps → take-profit sell at ~100.01
         # ask is 100.05, so 100.01 < ask → must clamp to ask + offset
+        closer._open_positions['BTC'] = (entry_time, None, 0)
         closer._place_take_profit('BTC', 1.0, 100.00, entry_time, 0)
         om.create_limit_order.assert_called_once()
         call_kwargs = om.create_limit_order.call_args[1]
@@ -72,6 +74,7 @@ class TestTakeProfitBBOClamping:
         entry_time = time.monotonic()
         # short entry at 100.00, spread 1bps → take-profit buy at ~99.99
         # bid is 99.95, so 99.99 > bid → must clamp to bid - offset
+        closer._open_positions['BTC'] = (entry_time, None, 0)
         closer._place_take_profit('BTC', -1.0, 100.00, entry_time, 0)
         om.create_limit_order.assert_called_once()
         call_kwargs = om.create_limit_order.call_args[1]
