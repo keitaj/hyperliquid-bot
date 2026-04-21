@@ -108,6 +108,9 @@ class WsReconnector:
 
     def _teardown(self, bot: "HyperliquidBot") -> None:  # noqa: F821
         """Stop all WS feeds and guards, then close the WS manager."""
+        if bot.velocity_guard:
+            bot.velocity_guard.stop()
+            bot.velocity_guard = None
         if bot.imbalance_guard:
             bot.imbalance_guard.stop()
             bot.imbalance_guard = None
@@ -131,7 +134,7 @@ class WsReconnector:
     def _rebuild(self, bot: "HyperliquidBot") -> None:  # noqa: F821
         """Create fresh WS Info + feeds + guards."""
         from hyperliquid.info import Info as WsInfo
-        from ws import MarketDataFeed, FillFeed, BboGuard, ImbalanceGuard, CloseRefreshGuard
+        from ws import MarketDataFeed, FillFeed, BboGuard, ImbalanceGuard, CloseRefreshGuard, BboVelocityGuard
         from config import Config
 
         perp_dexs = bot._build_perp_dexs()
@@ -148,6 +151,14 @@ class WsReconnector:
         tracker = getattr(bot.strategy, 'order_tracker', None)
         if tracker is not None:
             bot.fill_feed = FillFeed(ws_info, tracker, bot.account_address)
+            # Re-register PositionCloser for close-fill cleanup
+            closer = getattr(bot.strategy, '_closer', None)
+            if closer is not None:
+                bot.fill_feed.set_position_closer(closer)
+            # Re-register AdverseSelectionTracker
+            if bot.adverse_tracker is not None:
+                bot.fill_feed.set_adverse_selection_tracker(bot.adverse_tracker)
+                logger.info("[ws-reconnect] AdverseSelectionTracker re-linked")
             bot.fill_feed.start()
 
             threshold = bot.strategy_config.get('bbo_guard_threshold_bps', 2.0)
@@ -167,6 +178,20 @@ class WsReconnector:
                 logger.info(
                     "[ws-reconnect] ImbalanceGuard re-enabled (threshold=%.2f, depth=%d)",
                     imb_threshold, bot.imbalance_guard.depth,
+                )
+
+            # Re-register BboVelocityGuard
+            if bot.strategy_config.get('velocity_guard_enabled', False):
+                bot.velocity_guard = BboVelocityGuard(
+                    tracker,
+                    consecutive_threshold=int(bot.strategy_config.get('velocity_consecutive', 3)),
+                    min_total_move_bps=float(bot.strategy_config.get('velocity_min_move_bps', 1.0)),
+                )
+                bot.ws_feed.add_listener(bot.velocity_guard.on_l2_update)
+                logger.info(
+                    "[ws-reconnect] BboVelocityGuard re-enabled (consecutive=%d, min_move=%.1f bps)",
+                    bot.velocity_guard.consecutive_threshold,
+                    bot.velocity_guard.min_total_move_bps,
                 )
 
             # Re-register CloseRefreshGuard
