@@ -137,6 +137,9 @@ class TestBaseStrategyClosePositionVerify:
         strategy.order_manager = MagicMock()
         strategy.market_data = MagicMock()
         strategy.positions = {}
+        # close_position override needs _closer with _open_positions
+        strategy._closer = MagicMock()
+        strategy._closer._open_positions = {'xyz:SP500': (0, None, 0)}
         return strategy
 
     def test_close_skips_when_fresh_check_shows_flat(self):
