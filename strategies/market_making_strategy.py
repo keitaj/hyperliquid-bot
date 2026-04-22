@@ -389,6 +389,19 @@ class MarketMakingStrategy(BaseStrategy):
 
         return self._apply_account_cap(base_size_usd, market_data.mid_price, cap_pct=self.account_cap_pct)
 
+    def close_position(self, coin: str) -> None:
+        """Override to add _open_positions guard before reduce_only close.
+
+        FillFeed updates ``_open_positions`` on the WS thread with zero cache
+        delay, making it more reliable than the 2-second TTL position cache
+        used by the base class fresh check.
+        """
+        if coin not in self._closer._open_positions:
+            logger.info(f"[mm] Position {coin} already closed (WS fill) before close_position")
+            self.positions.pop(coin, None)
+            return
+        super().close_position(coin)
+
     # ------------------------------------------------------------------ #
     #  Order placement
     # ------------------------------------------------------------------ #
