@@ -27,6 +27,9 @@ _TIER_AGGRESSIVE = 2   # -1 bps (accept small loss)
 # Clear stale position tracking after this many consecutive close failures
 _GHOST_CLEAR_THRESHOLD = 5
 
+# Human-readable tier names for logging
+_TIER_NAMES = {_TIER_NORMAL: "normal", _TIER_BREAKEVEN: "breakeven", _TIER_AGGRESSIVE: "aggressive"}
+
 # Close reason constants
 CLOSE_REASON_MAKER = "maker"           # closed by maker close order fill
 CLOSE_REASON_TAKER_AGE = "taker_age"   # force closed by taker (age exceeded)
@@ -93,8 +96,7 @@ class PositionCloser:
         """Record a position close event with reason and context."""
         self._close_stats[reason] += 1
         self._close_stats_by_coin[coin][reason] += 1
-        tier_names = {_TIER_NORMAL: "normal", _TIER_BREAKEVEN: "breakeven", _TIER_AGGRESSIVE: "aggressive"}
-        tier_name = tier_names.get(tier, f"tier{tier}")
+        tier_name = _TIER_NAMES.get(tier, f"tier{tier}")
         logger.info(
             f"[close-reason] {coin} reason={reason} age={age:.0f}s "
             f"last_tier={tier_name}"
@@ -325,8 +327,7 @@ class PositionCloser:
             if coin not in self._open_positions:
                 logger.info(f"[mm] Position {coin} already closed (WS fill) before taker force close")
                 return
-            tier_names = {_TIER_NORMAL: "normal", _TIER_BREAKEVEN: "breakeven", _TIER_AGGRESSIVE: "aggressive"}
-            tier_name = tier_names.get(current_tier, f"tier{current_tier}")
+            tier_name = _TIER_NAMES.get(current_tier, f"tier{current_tier}")
             logger.warning(
                 f"[mm] Position {coin} held {age:.0f}s -- force closing with taker order "
                 f"(last_tier={tier_name}, had_close_order={close_oid is not None})"
