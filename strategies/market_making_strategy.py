@@ -684,7 +684,11 @@ class MarketMakingStrategy(BaseStrategy):
 
     @staticmethod
     def _parse_spread_schedule(raw: str) -> Dict[int, float]:
-        """Parse ``'HOUR:MULT,HOUR:MULT,...'`` into ``{hour: multiplier}`` dict."""
+        """Parse spread schedule into ``{hour: multiplier}`` dict.
+
+        Supports single hours (``'14:1.5'``) and ranges (``'0-3:1.5'``).
+        Ranges wrap around midnight (``'22-2:1.5'`` → hours 22,23,0,1,2).
+        """
         result: Dict[int, float] = {}
         if not raw or not str(raw).strip():
             return result
@@ -693,14 +697,37 @@ class MarketMakingStrategy(BaseStrategy):
             if not entry:
                 continue
             try:
-                hour_str, mult_str = entry.split(':')
-                hour = int(hour_str)
+                # Split on the last ':' to separate hour(s) from multiplier
+                parts = entry.rsplit(':', 1)
+                if len(parts) != 2:
+                    raise ValueError(f"expected 'HOUR:MULT' or 'START-END:MULT', got '{entry}'")
+                hour_part, mult_str = parts
                 mult = float(mult_str)
-                if not (0 <= hour <= 23):
-                    raise ValueError(f"hour must be 0-23, got {hour}")
                 if mult < 0:
                     raise ValueError(f"multiplier must be >= 0, got {mult}")
-                result[hour] = mult
+
+                if '-' in hour_part:
+                    # Range format: START-END
+                    start_str, end_str = hour_part.split('-', 1)
+                    start_hour = int(start_str.strip())
+                    end_hour = int(end_str.strip())
+                    if not (0 <= start_hour <= 23):
+                        raise ValueError(f"start hour must be 0-23, got {start_hour}")
+                    if not (0 <= end_hour <= 23):
+                        raise ValueError(f"end hour must be 0-23, got {end_hour}")
+                    # Expand range (supports wrap-around: 22-2 → 22,23,0,1,2)
+                    h = start_hour
+                    while True:
+                        result[h] = mult
+                        if h == end_hour:
+                            break
+                        h = (h + 1) % 24
+                else:
+                    # Single hour format
+                    hour = int(hour_part.strip())
+                    if not (0 <= hour <= 23):
+                        raise ValueError(f"hour must be 0-23, got {hour}")
+                    result[hour] = mult
             except (ValueError, IndexError) as e:
                 logger.warning(f"[mm] Invalid spread_schedule entry: '{entry}', skipping ({e})")
         return result

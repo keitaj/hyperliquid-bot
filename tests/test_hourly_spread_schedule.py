@@ -81,6 +81,50 @@ class TestParseSpreadSchedule:
         result = MarketMakingStrategy._parse_spread_schedule('14:1.5,')
         assert result == {14: 1.5}
 
+    # ── Range format tests ──
+
+    def test_range_expands_hours(self):
+        result = MarketMakingStrategy._parse_spread_schedule('0-3:1.5')
+        assert result == {0: 1.5, 1: 1.5, 2: 1.5, 3: 1.5}
+
+    def test_range_wraps_around_midnight(self):
+        result = MarketMakingStrategy._parse_spread_schedule('22-2:1.5')
+        assert result == {22: 1.5, 23: 1.5, 0: 1.5, 1: 1.5, 2: 1.5}
+
+    def test_range_same_hour(self):
+        result = MarketMakingStrategy._parse_spread_schedule('5-5:2.0')
+        assert result == {5: 2.0}
+
+    def test_range_mixed_with_single(self):
+        result = MarketMakingStrategy._parse_spread_schedule('0-3:1.5,14:1.5,20:1.5')
+        assert result == {0: 1.5, 1: 1.5, 2: 1.5, 3: 1.5, 14: 1.5, 20: 1.5}
+
+    def test_range_invalid_start_skipped(self):
+        result = MarketMakingStrategy._parse_spread_schedule('25-3:1.5,14:2.0')
+        assert result == {14: 2.0}
+
+    def test_range_invalid_end_skipped(self):
+        result = MarketMakingStrategy._parse_spread_schedule('0-25:1.5,14:2.0')
+        assert result == {14: 2.0}
+
+    def test_range_zero_multiplier(self):
+        """Range with multiplier 0 should expand all hours to 0."""
+        result = MarketMakingStrategy._parse_spread_schedule('17-18:0')
+        assert result == {17: 0.0, 18: 0.0}
+
+    def test_range_later_entry_overwrites_earlier(self):
+        """When ranges overlap, later entry wins (dict assignment order)."""
+        result = MarketMakingStrategy._parse_spread_schedule('0-5:1.5,3-7:2.0')
+        # Hours 0-2 get 1.5, hours 3-7 get 2.0 (overwritten)
+        assert result[0] == 1.5
+        assert result[2] == 1.5
+        assert result[3] == 2.0
+        assert result[7] == 2.0
+
+    def test_range_with_spaces(self):
+        result = MarketMakingStrategy._parse_spread_schedule(' 0 - 3 : 1.5 ')
+        assert result == {0: 1.5, 1: 1.5, 2: 1.5, 3: 1.5}
+
 
 # ── Multiplier retrieval ─────────────────────────────────────────────
 
