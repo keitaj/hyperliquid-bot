@@ -11,6 +11,7 @@ fill probability before the expensive taker fallback kicks in:
 
 import logging
 import time
+from collections import defaultdict
 from typing import Dict, Optional, Tuple
 
 from order_manager import BBO_OFFSET, OrderSide, round_price
@@ -25,6 +26,11 @@ _TIER_AGGRESSIVE = 2   # -1 bps (accept small loss)
 
 # Clear stale position tracking after this many consecutive close failures
 _GHOST_CLEAR_THRESHOLD = 5
+
+# Close reason constants
+CLOSE_REASON_MAKER = "maker"           # closed by maker close order fill
+CLOSE_REASON_TAKER_AGE = "taker_age"   # force closed by taker (age exceeded)
+CLOSE_REASON_EXTERNAL = "external"     # closed externally (e.g. risk manager)
 
 
 class PositionCloser:
@@ -68,9 +74,61 @@ class PositionCloser:
         # coin -> consecutive cycles where manage() failed to place a close order
         self._consecutive_close_failures: Dict[str, int] = {}
 
+        # Close reason statistics: reason -> count, coin-level: (coin, reason) -> count
+        self._close_stats: Dict[str, int] = defaultdict(int)
+        self._close_stats_by_coin: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        self._close_stats_log_interval: float = 300.0
+        self._last_close_stats_log: float = 0.0
+
     @property
     def tracked_coins(self) -> set:
         return set(self._open_positions.keys())
+
+    @property
+    def close_stats(self) -> Dict[str, int]:
+        """Read-only access to close reason counters."""
+        return dict(self._close_stats)
+
+    def _record_close(self, coin: str, reason: str, age: float, tier: int) -> None:
+        """Record a position close event with reason and context."""
+        self._close_stats[reason] += 1
+        self._close_stats_by_coin[coin][reason] += 1
+        tier_names = {_TIER_NORMAL: "normal", _TIER_BREAKEVEN: "breakeven", _TIER_AGGRESSIVE: "aggressive"}
+        tier_name = tier_names.get(tier, f"tier{tier}")
+        logger.info(
+            f"[close-reason] {coin} reason={reason} age={age:.0f}s "
+            f"last_tier={tier_name}"
+        )
+
+    def log_close_stats(self) -> None:
+        """Log close reason summary periodically. Called from strategy run()."""
+        now = time.monotonic()
+        if now - self._last_close_stats_log < self._close_stats_log_interval:
+            return
+        self._last_close_stats_log = now
+
+        total = sum(self._close_stats.values())
+        if total == 0:
+            return
+
+        parts = [f"{reason}={count}" for reason, count in sorted(self._close_stats.items())]
+        logger.info(f"[close-reason] Summary: total={total} {' '.join(parts)}")
+
+        # Per-coin breakdown for taker closes
+        taker_coins = []
+        for coin, reasons in sorted(self._close_stats_by_coin.items()):
+            taker = reasons.get(CLOSE_REASON_TAKER_AGE, 0)
+            if taker > 0:
+                maker = reasons.get(CLOSE_REASON_MAKER, 0)
+                total_coin = taker + maker + reasons.get(CLOSE_REASON_EXTERNAL, 0)
+                taker_pct = taker / total_coin * 100 if total_coin > 0 else 0
+                taker_coins.append(f"{coin}={taker}/{total_coin}({taker_pct:.0f}%)")
+        if taker_coins:
+            logger.info(f"[close-reason] Taker closes by coin: {' '.join(taker_coins)}")
+
+        # Reset counters
+        self._close_stats.clear()
+        self._close_stats_by_coin.clear()
 
     def get_close_oid(self, coin: str) -> Optional[int]:
         """Return the close order OID for a coin, or None."""
@@ -78,15 +136,21 @@ class PositionCloser:
         return entry[1] if entry else None
 
     def cleanup_closed(self, coin: str) -> None:
-        """Clean up tracking when a position has been closed externally."""
+        """Clean up tracking when a position has been closed (maker fill or external)."""
         if coin not in self._open_positions:
             return
-        close_oid = self._open_positions[coin][1]
+        entry_time, close_oid, tier = self._open_positions[coin]
+        age = time.monotonic() - entry_time
+        # Position was closed while we had a close order → likely maker fill
         if close_oid is not None:
+            self._record_close(coin, CLOSE_REASON_MAKER, age, tier)
             try:
                 self.order_manager.cancel_order(close_oid, coin)
             except API_ERRORS as e:
                 logger.debug(f"[mm] Could not cancel leftover close order for {coin}: {e}")
+        else:
+            # No close order was pending → external close (risk manager, etc.)
+            self._record_close(coin, CLOSE_REASON_EXTERNAL, age, tier)
         self._open_positions.pop(coin, None)
         self._consecutive_close_failures.pop(coin, None)
 
@@ -120,6 +184,12 @@ class PositionCloser:
 
     def on_position_closed(self, coin: str) -> None:
         """Remove tracking after an immediate close."""
+        entry = self._open_positions.get(coin)
+        if entry is not None:
+            entry_time, close_oid, tier = entry
+            age = time.monotonic() - entry_time
+            reason = CLOSE_REASON_MAKER if close_oid is not None else CLOSE_REASON_EXTERNAL
+            self._record_close(coin, reason, age, tier)
         self._open_positions.pop(coin, None)
         self._consecutive_close_failures.pop(coin, None)
 
@@ -151,7 +221,7 @@ class PositionCloser:
         # Check if max age exceeded -- force close
         if age >= self.max_position_age_seconds:
             self._handle_force_close(coin, size, age, entry_time, close_oid, close_position_fn,
-                                     entry_price=entry_price)
+                                     entry_price=entry_price, current_tier=current_tier)
             return
 
         # Determine desired tier for this age
@@ -212,6 +282,7 @@ class PositionCloser:
         self, coin: str, size: float, age: float,
         entry_time: float, close_oid: Optional[int],
         close_position_fn, entry_price: float = 0.0,
+        current_tier: int = _TIER_NORMAL,
     ) -> None:
         # Cancel existing close order if any
         if close_oid is not None:
@@ -254,7 +325,13 @@ class PositionCloser:
             if coin not in self._open_positions:
                 logger.info(f"[mm] Position {coin} already closed (WS fill) before taker force close")
                 return
-            logger.warning(f"[mm] Position {coin} held {age:.0f}s -- force closing with taker order")
+            tier_names = {_TIER_NORMAL: "normal", _TIER_BREAKEVEN: "breakeven", _TIER_AGGRESSIVE: "aggressive"}
+            tier_name = tier_names.get(current_tier, f"tier{current_tier}")
+            logger.warning(
+                f"[mm] Position {coin} held {age:.0f}s -- force closing with taker order "
+                f"(last_tier={tier_name}, had_close_order={close_oid is not None})"
+            )
+            self._record_close(coin, CLOSE_REASON_TAKER_AGE, age, current_tier)
             close_position_fn(coin)
             self._open_positions.pop(coin, None)
             return

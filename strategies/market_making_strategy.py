@@ -240,6 +240,7 @@ class MarketMakingStrategy(BaseStrategy):
         self._prev_position_coins = current_position_coins
 
         self._log_fill_rate()
+        self._closer.log_close_stats()
 
         # ---- Quiet hours: full-stop mode ---- #
         is_quiet = self._is_quiet_hour()
