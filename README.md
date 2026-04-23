@@ -304,7 +304,7 @@ The `market_making` strategy uses **progressive close pricing**: as a position a
 
 **Quiet hours** (`--quiet-hours-utc`): Stop or widen quoting during specific UTC hours (e.g., `"17"` or `"17,18"`). Default: stop quoting entirely. With `--quiet-hours-spread-multiplier N`, widens spread by Nx instead. Positions are still managed during quiet hours.
 
-**Spread schedule** (`--spread-schedule`): Per-hour spread multiplier for time-of-day spread control. Format: `"HOUR:MULT,..."` (e.g., `"0:1.5,3:2.0,14:1.5"`). Hours not in the schedule use multiplier 1.0 (no change). Multiplier 0 triggers full-stop mode (same as quiet hours). Coexists with quiet hours — quiet hours full-stop takes priority; otherwise multipliers stack.
+**Spread schedule** (`--spread-schedule`): Per-hour spread multiplier for time-of-day spread control. Format: `"HOUR:MULT,..."` or `"START-END:MULT,..."` for ranges (e.g., `"0-3:1.5,14:1.5,20:1.5"`). Ranges wrap around midnight (`"22-2:1.5"` covers hours 22,23,0,1,2). Hours not in the schedule use multiplier 1.0 (no change). Multiplier 0 triggers full-stop mode (same as quiet hours). Coexists with quiet hours — quiet hours full-stop takes priority; otherwise multipliers stack.
 
 **WebSocket guards** (require `--enable-ws`):
 - `--bbo-guard-threshold-bps`: Cancel stale entry orders when BBO moves (default: 2.0)
@@ -551,7 +551,7 @@ strategies:
     microprice_skew_enabled: false     # --microprice-skew  (asymmetric offset based on micro-price skew)
     microprice_skew_multiplier: 1.0    # --microprice-skew-multiplier  (skew scaling factor)
     microprice_max_skew_bps: 2.0       # --microprice-max-skew-bps  (max offset adjustment from skew)
-    spread_schedule: ""                # --spread-schedule  (per-hour spread multiplier: "14:1.5,15:1.5,3:2.0")
+    spread_schedule: ""                # --spread-schedule  (spread multiplier: "14:1.5,0-3:1.5,22-2:2.0")
     quiet_hours_utc: ""                # --quiet-hours-utc  (UTC hours to stop/reduce quoting: "17" or "17,18")
     quiet_hours_spread_multiplier: 0   # --quiet-hours-spread-multiplier  (0 = stop, >0 = widen spread by Nx)
     vol_adjust_enabled: false          # --vol-adjust  (enable volatility-adjusted BBO offset)
