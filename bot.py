@@ -215,7 +215,12 @@ class HyperliquidBot:
             hip3_coins.extend(f"{dex}:{c}" for c in dex_coin_names)
 
         all_coins = (hl_coins if Config.ENABLE_STANDARD_HL else []) + hip3_coins
-        self.trading_coins = all_coins or ['BTC', 'ETH']
+
+        unique_coins, duplicates = self._deduplicate_coins(all_coins)
+        if duplicates:
+            logger.warning(f"Duplicate coins removed from trading list: {duplicates}")
+
+        self.trading_coins = unique_coins or ['BTC', 'ETH']
 
         if hip3_coins:
             logger.info(f"HIP-3 coins: {hip3_coins}")
@@ -244,6 +249,23 @@ class HyperliquidBot:
             raise ValueError(f"Unknown strategy: {strategy_name}. Available strategies: {available_strategies}")
 
         self.coins = self.trading_coins
+
+    @staticmethod
+    def _deduplicate_coins(coins: List[str]) -> tuple:
+        """Remove duplicate coins while preserving order.
+
+        Returns (unique_coins, duplicates) tuple.
+        """
+        seen: set = set()
+        unique: List[str] = []
+        dups: List[str] = []
+        for coin in coins:
+            if coin in seen:
+                dups.append(coin)
+            else:
+                seen.add(coin)
+                unique.append(coin)
+        return unique, dups
 
     def _load_wallet(self) -> Any:
         from eth_account import Account
