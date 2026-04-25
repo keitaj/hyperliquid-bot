@@ -500,10 +500,15 @@ class OrderManager:
                     order.status = OrderStatus.FILLED
                 else:
                     order.status = OrderStatus.CANCELLED
-                del self.active_orders[order_id]
+                # Use pop() to be race-safe: order may have been removed
+                # concurrently by cancel_order/bulk_cancel.
+                self.active_orders.pop(order_id, None)
 
         except API_ERRORS as e:
-            logger.error(f"Error updating order status ({len(self.active_orders)} active orders): {e}")
+            logger.error(
+                f"Error updating order status ({type(e).__name__}, "
+                f"{len(self.active_orders)} active orders): {e}"
+            )
 
     def _get_cached_user_state(self) -> Dict:
         """Return user_state, using a short-lived cache to avoid redundant API calls."""
