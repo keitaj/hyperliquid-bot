@@ -139,6 +139,18 @@ class MarketMakingStrategy(BaseStrategy):
         self.vol_adjust_max_offset: float = config.get('vol_adjust_max_offset', 50.0)
         self._recent_mids: Dict[str, deque] = {}  # coin -> deque of recent mid prices
 
+        # ---- Dynamic position age (volatility-adjusted MAX_POSITION_AGE) ---- #
+        self._dynamic_age_enabled: bool = config.get('dynamic_age_enabled', False)
+        self._dynamic_age_baseline_vol: float = config.get('dynamic_age_baseline_vol', 1.0)
+        self._dynamic_age_min: float = config.get('dynamic_age_min', 60.0)
+        self._dynamic_age_max: float = config.get('dynamic_age_max', 300.0)
+        self._base_max_position_age: float = config.get('max_position_age_seconds', 120.0)
+        if self._dynamic_age_enabled:
+            logger.info(
+                f"[mm] Dynamic position age enabled: baseline_vol={self._dynamic_age_baseline_vol}bps, "
+                f"min={self._dynamic_age_min}s, max={self._dynamic_age_max}s"
+            )
+
         # ---- Fill rate tracking ---- #
         self._orders_placed: int = 0
         self._fills_detected: int = 0
@@ -266,7 +278,9 @@ class MarketMakingStrategy(BaseStrategy):
                             self.close_position(coin)
                             self._closer.on_position_closed(coin)
                         else:
-                            self._closer.manage(coin, self.positions[coin], self.close_position)
+                            dynamic_age = self._get_dynamic_position_age(coin)
+                            self._closer.manage(coin, self.positions[coin], self.close_position,
+                                                max_age_override=dynamic_age)
                     else:
                         self._closer.cleanup_closed(coin)
                 except API_ERRORS as e:
@@ -296,7 +310,9 @@ class MarketMakingStrategy(BaseStrategy):
                         self._closer.on_position_closed(coin)
                         continue
                     else:
-                        self._closer.manage(coin, self.positions[coin], self.close_position)
+                        dynamic_age = self._get_dynamic_position_age(coin)
+                        self._closer.manage(coin, self.positions[coin], self.close_position,
+                                            max_age_override=dynamic_age)
                         continue
                 else:
                     # Position was closed — clean up tracking
@@ -415,7 +431,7 @@ class MarketMakingStrategy(BaseStrategy):
 
     def _record_mid_price(self, coin: str, mid_price: float) -> None:
         """Record a mid price for volatility tracking. Call once per cycle."""
-        if not self.vol_adjust_enabled:
+        if not self.vol_adjust_enabled and not getattr(self, '_dynamic_age_enabled', False):
             return
         if coin not in self._recent_mids:
             self._recent_mids[coin] = deque(maxlen=self.vol_lookback)
@@ -453,6 +469,35 @@ class MarketMakingStrategy(BaseStrategy):
         # Scale offset with cap to prevent extreme values during flash crashes
         adjusted = base_offset + self.vol_adjust_multiplier * avg_move_bps
         return min(adjusted, self.vol_adjust_max_offset)
+
+    def _get_dynamic_position_age(self, coin: str) -> Optional[float]:
+        """Calculate volatility-adjusted MAX_POSITION_AGE for a coin.
+
+        Returns None if disabled or insufficient data (use default).
+        """
+        if not getattr(self, '_dynamic_age_enabled', False):
+            return None
+
+        mids = self._recent_mids.get(coin)
+        if not mids or len(mids) < 5:
+            return None
+
+        # Calculate realized volatility (avg absolute return in bps)
+        returns_bps = []
+        for i in range(1, len(mids)):
+            ret = abs(mids[i] - mids[i - 1]) / mids[i - 1] * 10_000
+            returns_bps.append(ret)
+        avg_move_bps = sum(returns_bps) / len(returns_bps)
+
+        # Scale: high vol -> short age, low vol -> long age
+        # baseline_vol (bps) = typical move per cycle (calibrated)
+        ratio = self._dynamic_age_baseline_vol / max(avg_move_bps, self._dynamic_age_baseline_vol * 0.1)
+        age = self._base_max_position_age * ratio
+
+        # Clamp to [min_age, max_age]
+        age = max(self._dynamic_age_min, min(age, self._dynamic_age_max))
+
+        return age
 
     def _place_orders(self, coin: str) -> None:
         """Place a buy and a sell limit order.

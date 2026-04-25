@@ -315,6 +315,8 @@ The `market_making` strategy uses **progressive close pricing**: as a position a
 
 **Dynamic offset** (`--dynamic-offset`): Auto-adjusts per-coin BBO offset based on adverse selection severity from the tracker. Coins with higher adverse selection get wider offsets; favorable coins get tighter offsets. Requires `--enable-ws` and `--enable-adverse-selection-log`. Manual `--coin-offset-overrides` serve as the baseline; dynamic adjustment adds/subtracts from it.
 
+**Dynamic position age** (`--dynamic-age`): Adjusts `MAX_POSITION_AGE` per coin based on recent volatility. High-volatility coins get shorter holding times (reducing adverse selection risk), while low-volatility coins get longer times (improving maker fill probability). Uses the same mid-price history as `--vol-adjust`. Configure `--dynamic-age-baseline-vol` (bps) as the "normal" volatility reference, and `--dynamic-age-min` / `--dynamic-age-max` (seconds) for clamping bounds. Falls back to the fixed `--max-position-age` when data is insufficient.
+
 All parameters are configurable via CLI flags with sensible defaults.
 Run `python3 bot.py --help` for the full list, or see [Parameter Reference](#parameter-reference-for-ai-agents) below.
 
@@ -559,6 +561,10 @@ strategies:
     vol_adjust_enabled: false          # --vol-adjust  (enable volatility-adjusted BBO offset)
     vol_adjust_multiplier: 2.0         # --vol-adjust-multiplier  (offset += multiplier × avg_move_bps)
     vol_adjust_max_offset: 50          # --vol-adjust-max-offset  (max offset bps after vol adjustment)
+    dynamic_age_enabled: false         # --dynamic-age  (volatility-adjusted MAX_POSITION_AGE)
+    dynamic_age_baseline_vol: 1.0      # --dynamic-age-baseline-vol  (bps reference for "normal" volatility)
+    dynamic_age_min: 60                # --dynamic-age-min  (minimum position age in seconds)
+    dynamic_age_max: 300               # --dynamic-age-max  (maximum position age in seconds)
     account_cap_pct: 0.05              # --account-cap-pct
     max_positions: 3
     take_profit_percent: 1

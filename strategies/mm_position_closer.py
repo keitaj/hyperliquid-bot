@@ -199,7 +199,8 @@ class PositionCloser:
         self._open_positions.pop(coin, None)
         self._consecutive_close_failures.pop(coin, None)
 
-    def manage(self, coin: str, position: Dict, close_position_fn) -> None:
+    def manage(self, coin: str, position: Dict, close_position_fn,
+               max_age_override: Optional[float] = None) -> None:
         """Manage take-profit close for an open position.
 
         Parameters
@@ -207,6 +208,9 @@ class PositionCloser:
         coin : str
         position : dict with 'size' and 'entry_price' keys
         close_position_fn : callable(coin) that market-closes the position
+        max_age_override : float, optional
+            If provided, overrides ``max_position_age_seconds`` for this call.
+            Used by volatility-adjusted dynamic age.
         """
         size = position.get('size', 0)
         if abs(size) == 0:
@@ -223,6 +227,7 @@ class PositionCloser:
 
         entry_time, close_oid, current_tier = self._open_positions[coin]
         age = now - entry_time
+        effective_max_age = max_age_override if max_age_override is not None else self.max_position_age_seconds
 
         # Unrealized loss early close: taker close when loss exceeds threshold
         if self.unrealized_loss_close_bps > 0 and entry_price > 0:
@@ -256,13 +261,14 @@ class PositionCloser:
                     return
 
         # Check if max age exceeded -- force close
-        if age >= self.max_position_age_seconds:
+        if age >= effective_max_age:
             self._handle_force_close(coin, size, age, entry_time, close_oid, close_position_fn,
-                                     entry_price=entry_price, current_tier=current_tier)
+                                     entry_price=entry_price, current_tier=current_tier,
+                                     max_age=effective_max_age)
             return
 
         # Determine desired tier for this age
-        desired_tier = self._get_tier(age)
+        desired_tier = self._get_tier(age, max_age=effective_max_age)
 
         # Check if close order is still alive
         if close_oid is not None:
@@ -320,6 +326,7 @@ class PositionCloser:
         entry_time: float, close_oid: Optional[int],
         close_position_fn, entry_price: float = 0.0,
         current_tier: int = _TIER_NORMAL,
+        max_age: Optional[float] = None,
     ) -> None:
         # Cancel existing close order if any
         if close_oid is not None:
@@ -347,11 +354,12 @@ class PositionCloser:
             # Proceed — better to get a rejection than miss a real force close
 
         # Check if taker fallback should be used
+        effective_max_age = max_age if max_age is not None else self.max_position_age_seconds
         use_taker = False
         if not self.maker_only:
             use_taker = True
         elif self.taker_fallback_age_seconds is not None:
-            taker_deadline = self.max_position_age_seconds + self.taker_fallback_age_seconds
+            taker_deadline = effective_max_age + self.taker_fallback_age_seconds
             if age >= taker_deadline:
                 use_taker = True
 
@@ -397,7 +405,7 @@ class PositionCloser:
         # Dynamic loss acceptance: scale from aggressive_loss_bps to
         # force_close_max_loss_bps as position approaches taker deadline.
         if self.force_close_max_loss_bps > 0 and entry_price > 0 and self.taker_fallback_age_seconds:
-            progress = (age - self.max_position_age_seconds) / self.taker_fallback_age_seconds
+            progress = (age - effective_max_age) / self.taker_fallback_age_seconds
             progress = min(max(progress, 0.0), 1.0)
             loss_bps = (self.aggressive_loss_bps
                         + progress * (self.force_close_max_loss_bps - self.aggressive_loss_bps))
@@ -453,10 +461,11 @@ class PositionCloser:
             return self._coin_spread_overrides[bare]
         return self.spread_bps
 
-    def _get_tier(self, age: float) -> int:
+    def _get_tier(self, age: float, max_age: Optional[float] = None) -> int:
         """Return the close price tier for the given position age."""
-        threshold_breakeven = self.max_position_age_seconds * self.close_breakeven_pct
-        threshold_aggressive = self.max_position_age_seconds * self.close_aggressive_pct
+        effective_max_age = max_age if max_age is not None else self.max_position_age_seconds
+        threshold_breakeven = effective_max_age * self.close_breakeven_pct
+        threshold_aggressive = effective_max_age * self.close_aggressive_pct
 
         if age >= threshold_aggressive:
             return _TIER_AGGRESSIVE
