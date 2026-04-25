@@ -37,6 +37,7 @@ def _make_strategy(inventory_skew_bps=2, bbo_mode=False, order_size_usd=100):
     s._quiet_hours = set()
     s._coin_offset_overrides = {}
     s._coin_spread_overrides = {}
+    s._coin_size_overrides = {}
     s._quiet_spread_multiplier = 0.0
     s._spread_schedule = {}
     s._dynamic_offset_enabled = False
