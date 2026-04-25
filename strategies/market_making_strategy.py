@@ -163,6 +163,7 @@ class MarketMakingStrategy(BaseStrategy):
             close_spread_bps=config.get('close_spread_bps', None),
             close_breakeven_pct=config.get('close_breakeven_pct', 0.50),
             close_aggressive_pct=config.get('close_aggressive_pct', 0.75),
+            unrealized_loss_close_bps=config.get('unrealized_loss_close_bps', 0.0),
         )
 
     @property

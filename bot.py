@@ -1057,6 +1057,9 @@ if __name__ == "__main__":
                         help='Minimum offset floor in bps (default: 0.5)')
     parser.add_argument('--dynamic-offset-min-fills', type=int,
                         help='Min fills before dynamic adjustment activates (default: 5)')
+    parser.add_argument('--unrealized-loss-close-bps', type=float,
+                        help='Close position early via taker when unrealized loss exceeds this bps threshold; '
+                             '0 = disabled (default: 0, market_making)')
     parser.add_argument('--vol-adjust', action='store_true', default=False,
                         help='Enable volatility-adjusted BBO offset (market_making)')
     parser.add_argument('--vol-adjust-multiplier', type=float,
@@ -1139,6 +1142,7 @@ if __name__ == "__main__":
             'close_spread_bps',
             'close_breakeven_pct',
             'close_aggressive_pct',
+            'unrealized_loss_close_bps',
             'bbo_mode',
             'bbo_offset_bps',
             'inventory_skew_bps',

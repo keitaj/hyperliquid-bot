@@ -34,6 +34,7 @@ _TIER_NAMES = {_TIER_NORMAL: "normal", _TIER_BREAKEVEN: "breakeven", _TIER_AGGRE
 CLOSE_REASON_MAKER = "maker"           # closed by maker close order fill
 CLOSE_REASON_TAKER_AGE = "taker_age"   # force closed by taker (age exceeded)
 CLOSE_REASON_EXTERNAL = "external"     # closed externally (e.g. risk manager)
+CLOSE_REASON_UNREALIZED_LOSS = "unrealized_loss"  # early taker close on unrealized loss threshold
 
 
 class PositionCloser:
@@ -54,6 +55,7 @@ class PositionCloser:
         close_spread_bps: Optional[float] = None,
         close_breakeven_pct: float = 0.50,
         close_aggressive_pct: float = 0.75,
+        unrealized_loss_close_bps: float = 0.0,
     ) -> None:
         self.order_manager = order_manager
         self.market_data = market_data
@@ -71,6 +73,8 @@ class PositionCloser:
         # Tier transition timing (fraction of max_position_age)
         self.close_breakeven_pct = close_breakeven_pct
         self.close_aggressive_pct = close_aggressive_pct
+        # Unrealized loss early close (0 = disabled)
+        self.unrealized_loss_close_bps = unrealized_loss_close_bps
 
         # coin -> (entry_time, close_oid or None, close_tier)
         self._open_positions: Dict[str, Tuple[float, Optional[int], int]] = {}
@@ -219,6 +223,37 @@ class PositionCloser:
 
         entry_time, close_oid, current_tier = self._open_positions[coin]
         age = now - entry_time
+
+        # Unrealized loss early close: taker close when loss exceeds threshold
+        if self.unrealized_loss_close_bps > 0 and entry_price > 0:
+            md = self.market_data.get_market_data(coin)
+            if md and md.mid_price > 0:
+                if size > 0:  # long
+                    unrealized_bps = (entry_price - md.mid_price) / entry_price * 10_000
+                else:  # short
+                    unrealized_bps = (md.mid_price - entry_price) / entry_price * 10_000
+
+                if unrealized_bps >= self.unrealized_loss_close_bps:
+                    # Cancel existing close order
+                    if close_oid is not None:
+                        try:
+                            self.order_manager.cancel_order(close_oid, coin)
+                        except API_ERRORS:
+                            pass
+
+                    # Verify position still exists (WS fill may have closed it)
+                    if coin not in self._open_positions:
+                        return
+
+                    logger.warning(
+                        f"[mm] Position {coin} unrealized loss {unrealized_bps:.1f}bps "
+                        f"exceeds threshold {self.unrealized_loss_close_bps}bps -- "
+                        f"early taker close (age={age:.0f}s)"
+                    )
+                    self._record_close(coin, CLOSE_REASON_UNREALIZED_LOSS, age, current_tier)
+                    close_position_fn(coin)
+                    self._open_positions.pop(coin, None)
+                    return
 
         # Check if max age exceeded -- force close
         if age >= self.max_position_age_seconds:

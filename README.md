@@ -296,7 +296,7 @@ The bot handles this automatically at startup:
 | 6 | `breakout` | Support/resistance breakout with volume and ATR confirmation |
 | 7 | `market_making` | Symmetric buy/sell limits around mid price for spread capture |
 
-The `market_making` strategy uses **progressive close pricing**: as a position ages, the take-profit price is tightened from full spread → breakeven (at 50% of max age) → small loss (at 75%), reducing costly taker force-closes. The loss tolerance is configurable via `--aggressive-loss-bps` (default: 1 bps). During the force-close phase, `--force-close-max-loss-bps` enables progressive loss acceptance that scales from `aggressive-loss-bps` to the configured maximum as the position approaches the taker deadline.
+The `market_making` strategy uses **progressive close pricing**: as a position ages, the take-profit price is tightened from full spread → breakeven (at 50% of max age) → small loss (at 75%), reducing costly taker force-closes. The loss tolerance is configurable via `--aggressive-loss-bps` (default: 1 bps). During the force-close phase, `--force-close-max-loss-bps` enables progressive loss acceptance that scales from `aggressive-loss-bps` to the configured maximum as the position approaches the taker deadline. **Unrealized loss early close** (`--unrealized-loss-close-bps`): When a position's unrealized loss exceeds this threshold (in bps), it is immediately closed via taker order regardless of position age. This caps large adverse moves before the age-based close triggers. Default: 0 (disabled).
 
 **BBO mode** (`--bbo-mode`): Places orders at the best bid/ask instead of `mid ± spread_bps`. On Hyperliquid, market spreads are typically 0.1–2 bps, so even `SPREAD_BPS=5` places orders 4–5 bps away from BBO, resulting in low fill rates. BBO mode improves fill rates by tracking the current best prices. Use `--bbo-offset-bps N` to place orders N bps behind BBO (default: 0 = at BBO). Falls back to `mid ± spread_bps` when BBO is unavailable.
 
@@ -536,6 +536,7 @@ strategies:
     close_spread_bps: null             # --close-spread-bps  (close order spread; null = same as spread_bps)
     close_breakeven_pct: 0.50          # --close-breakeven-pct  (fraction of max_age for breakeven tier transition)
     close_aggressive_pct: 0.75         # --close-aggressive-pct  (fraction of max_age for aggressive tier transition)
+    unrealized_loss_close_bps: 0       # --unrealized-loss-close-bps  (early taker close when unrealized loss exceeds this bps; 0 = disabled)
     bbo_mode: false                    # --bbo-mode  (place orders at best bid/ask instead of mid ± spread)
     bbo_offset_bps: 0                  # --bbo-offset-bps  (bps behind BBO; 0 = at BBO)
     inventory_skew_bps: 0              # --inventory-skew-bps (skew per unit of inventory; 0 = disabled)
