@@ -145,6 +145,10 @@ class MarketMakingStrategy(BaseStrategy):
         self._dynamic_age_min: float = config.get('dynamic_age_min', 60.0)
         self._dynamic_age_max: float = config.get('dynamic_age_max', 300.0)
         self._base_max_position_age: float = config.get('max_position_age_seconds', 120.0)
+        # coin -> (avg_move_bps, computed_age_seconds) for periodic logging
+        self._dynamic_age_recent: Dict[str, Tuple[float, float]] = {}
+        self._dynamic_age_log_interval: float = config.get('dynamic_age_log_interval', 300.0)
+        self._last_dynamic_age_log: float = 0.0
         if self._dynamic_age_enabled:
             logger.info(
                 f"[mm] Dynamic position age enabled: baseline_vol={self._dynamic_age_baseline_vol}bps, "
@@ -258,6 +262,7 @@ class MarketMakingStrategy(BaseStrategy):
         self._prev_position_coins = current_position_coins
 
         self._log_fill_rate()
+        self._log_dynamic_age()
         self._closer.log_close_stats()
 
         # ---- Quiet hours: full-stop mode ---- #
@@ -497,6 +502,9 @@ class MarketMakingStrategy(BaseStrategy):
         # Clamp to [min_age, max_age]
         age = max(self._dynamic_age_min, min(age, self._dynamic_age_max))
 
+        # Record latest computation for periodic summary log
+        self._dynamic_age_recent[coin] = (avg_move_bps, age)
+
         return age
 
     def _place_orders(self, coin: str) -> None:
@@ -702,6 +710,27 @@ class MarketMakingStrategy(BaseStrategy):
         self._fills_detected = 0
         self._orders_placed_per_coin.clear()
         self._fills_per_coin.clear()
+
+    def _log_dynamic_age(self) -> None:
+        """Log a periodic summary of per-coin dynamic position age."""
+        if not getattr(self, '_dynamic_age_enabled', False):
+            return
+        now = time.monotonic()
+        if now - self._last_dynamic_age_log < self._dynamic_age_log_interval:
+            return
+        self._last_dynamic_age_log = now
+
+        if not self._dynamic_age_recent:
+            return
+
+        parts = [
+            f"{coin}: vol={vol:.2f}bps age={age:.0f}s"
+            for coin, (vol, age) in sorted(self._dynamic_age_recent.items())
+        ]
+        logger.info(f"[mm] Dynamic age: {' | '.join(parts)}")
+
+        # Reset so next log reflects the latest window only
+        self._dynamic_age_recent.clear()
 
     # ------------------------------------------------------------------ #
     #  Helpers

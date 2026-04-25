@@ -79,6 +79,9 @@ def _make_strategy(dynamic_age_enabled: bool = False,
     strategy.vol_adjust_enabled = config.get('vol_adjust_enabled', False)
     strategy.vol_lookback = config.get('vol_lookback', 30)
     strategy._recent_mids = {}
+    strategy._dynamic_age_recent = {}
+    strategy._dynamic_age_log_interval = 300.0
+    strategy._last_dynamic_age_log = 0.0
     return strategy
 
 
