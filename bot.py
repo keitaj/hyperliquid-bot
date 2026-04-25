@@ -1070,6 +1070,14 @@ if __name__ == "__main__":
                         help='Number of recent mid prices for volatility calc (default: 30, market_making)')
     parser.add_argument('--vol-adjust-max-offset', type=float,
                         help='Max BBO offset in bps after vol adjustment (default: 50, market_making)')
+    parser.add_argument('--dynamic-age', action='store_true', default=False,
+                        help='Enable volatility-adjusted MAX_POSITION_AGE (market_making)')
+    parser.add_argument('--dynamic-age-baseline-vol', type=float,
+                        help='Baseline volatility in bps for dynamic age scaling (default: 1.0, market_making)')
+    parser.add_argument('--dynamic-age-min', type=float,
+                        help='Minimum position age in seconds when volatility is high (default: 60, market_making)')
+    parser.add_argument('--dynamic-age-max', type=float,
+                        help='Maximum position age in seconds when volatility is low (default: 300, market_making)')
 
     # Risk guardrail parameters
     parser.add_argument('--max-position-pct', type=float,
@@ -1179,6 +1187,10 @@ if __name__ == "__main__":
             ('dynamic_offset_max_reduce', 'dynamic_offset_max_reduction'),
             'dynamic_offset_floor',
             'dynamic_offset_min_fills',
+            ('dynamic_age', 'dynamic_age_enabled'),
+            'dynamic_age_baseline_vol',
+            'dynamic_age_min',
+            'dynamic_age_max',
         ],
     }
 
