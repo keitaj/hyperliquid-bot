@@ -112,10 +112,15 @@ class MarketMakingStrategy(BaseStrategy):
         self._coin_spread_overrides: Dict[str, float] = self._parse_coin_overrides(
             config.get('coin_spread_overrides', '')
         )
+        self._coin_size_overrides: Dict[str, float] = self._parse_coin_overrides(
+            config.get('coin_size_overrides', '')
+        )
         if self._coin_offset_overrides:
             logger.info(f"[mm] Per-coin offset overrides: {self._coin_offset_overrides}")
         if self._coin_spread_overrides:
             logger.info(f"[mm] Per-coin spread overrides: {self._coin_spread_overrides}")
+        if self._coin_size_overrides:
+            logger.info(f"[mm] Per-coin size overrides: {self._coin_size_overrides}")
 
         # ---- Micro-price asymmetric offset ---- #
         self._microprice_enabled: bool = config.get('microprice_skew_enabled', False)
@@ -381,7 +386,7 @@ class MarketMakingStrategy(BaseStrategy):
         if not market_data or market_data.mid_price <= 0:
             return 0.0
 
-        base_size_usd = self.order_size_usd
+        base_size_usd = self._get_coin_size(coin)
 
         # Apply risk-level multiplier (green=100%, yellow=50%, red/black=0%)
         multiplier = self._get_risk_multiplier()
@@ -784,6 +789,15 @@ class MarketMakingStrategy(BaseStrategy):
         if bare in self._coin_spread_overrides:
             return self._coin_spread_overrides[bare]
         return self.spread_bps
+
+    def _get_coin_size(self, coin: str) -> float:
+        """Get ORDER_SIZE_USD for a specific coin, checking overrides first."""
+        if coin in self._coin_size_overrides:
+            return self._coin_size_overrides[coin]
+        bare = coin.split(':', 1)[-1] if ':' in coin else coin
+        if bare in self._coin_size_overrides:
+            return self._coin_size_overrides[bare]
+        return self.order_size_usd
 
     def _calculate_microprice_offsets(
         self, coin: str, base_offset_bps: float

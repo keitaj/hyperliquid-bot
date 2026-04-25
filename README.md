@@ -300,7 +300,7 @@ The `market_making` strategy uses **progressive close pricing**: as a position a
 
 **BBO mode** (`--bbo-mode`): Places orders at the best bid/ask instead of `mid ± spread_bps`. On Hyperliquid, market spreads are typically 0.1–2 bps, so even `SPREAD_BPS=5` places orders 4–5 bps away from BBO, resulting in low fill rates. BBO mode improves fill rates by tracking the current best prices. Use `--bbo-offset-bps N` to place orders N bps behind BBO (default: 0 = at BBO). Falls back to `mid ± spread_bps` when BBO is unavailable.
 
-**Per-coin overrides** (`--coin-offset-overrides`, `--coin-spread-overrides`): Override BBO offset or spread per coin. Format: `"SP500:0.5,MSFT:3"`. Supports both bare names and DEX-prefixed names (`xyz:SP500:0.5`). Unspecified coins use the global default.
+**Per-coin overrides** (`--coin-offset-overrides`, `--coin-spread-overrides`, `--coin-size-overrides`): Override BBO offset, spread, or order size per coin. Format: `"SP500:0.5,MSFT:3"`. Supports both bare names and DEX-prefixed names (`xyz:SP500:0.5`). Unspecified coins use the global default. Use `--coin-size-overrides` to set per-coin order size in USD (e.g., `"TSLA:150,NVDA:150"`); setting a coin to `0` skips orders for that coin.
 
 **Quiet hours** (`--quiet-hours-utc`): Stop or widen quoting during specific UTC hours (e.g., `"17"` or `"17,18"`). Default: stop quoting entirely. With `--quiet-hours-spread-multiplier N`, widens spread by Nx instead. Positions are still managed during quiet hours.
 
@@ -542,6 +542,7 @@ strategies:
     inventory_skew_bps: 0              # --inventory-skew-bps (skew per unit of inventory; 0 = disabled)
     coin_offset_overrides: ""          # --coin-offset-overrides  (per-coin BBO offset: "SP500:0.5,MSFT:3")
     coin_spread_overrides: ""          # --coin-spread-overrides  (per-coin spread: "SP500:8,XYZ100:15")
+    coin_size_overrides: ""            # --coin-size-overrides  (per-coin order size USD: "TSLA:150,NVDA:150")
     dynamic_offset_enabled: false      # --dynamic-offset  (auto-adjust offset from adverse selection tracker)
     dynamic_offset_sensitivity: 0.5    # --dynamic-offset-sensitivity  (offset widening per 1bps adverse)
     dynamic_offset_tighten_rate: 0.25  # --dynamic-offset-tighten-rate  (offset tightening for favorable fills)

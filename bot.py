@@ -1023,6 +1023,8 @@ if __name__ == "__main__":
                         help='Per-coin BBO offset overrides in bps (e.g. "SP500:0.5,MSFT:3")')
     parser.add_argument('--coin-spread-overrides', type=str, default='',
                         help='Per-coin spread overrides in bps (e.g. "SP500:8,XYZ100:15")')
+    parser.add_argument('--coin-size-overrides', type=str, default='',
+                        help='Per-coin order size overrides in USD (e.g. "TSLA:150,NVDA:150")')
     parser.add_argument('--close-refresh-threshold-bps', type=float,
                         help='Refresh close orders when BBO changes by this many bps; 0 to disable (default: 0)')
     parser.add_argument('--spread-schedule', type=str, default='',
@@ -1159,6 +1161,7 @@ if __name__ == "__main__":
             'adverse_selection_log_interval',
             'coin_offset_overrides',
             'coin_spread_overrides',
+            'coin_size_overrides',
             'close_refresh_threshold_bps',
             'spread_schedule',
             'quiet_hours_utc',
