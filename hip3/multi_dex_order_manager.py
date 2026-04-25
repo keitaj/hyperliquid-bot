@@ -254,14 +254,21 @@ class MultiDexOrderManager(OrderManager):
                             order.status = OrderStatus.FILLED
                         else:
                             order.status = OrderStatus.CANCELLED
-                        del self.active_orders[order_id]
+                        # Use pop() to be race-safe: order may have been removed
+                        # concurrently by cancel_order/bulk_cancel.
+                        self.active_orders.pop(order_id, None)
 
                 except API_ERRORS as e:
-                    logger.error(f"Error checking fills for DEX '{dex}': {e}")
+                    logger.error(
+                        f"Error checking fills for DEX '{dex}' ({type(e).__name__}): {e}"
+                    )
                     # Still clean up orders to avoid retrying indefinitely
                     for order_id, order in orders:
                         order.status = OrderStatus.CANCELLED
-                        del self.active_orders[order_id]
+                        self.active_orders.pop(order_id, None)
 
         except API_ERRORS as e:
-            logger.error(f"Error updating order status: {e}")
+            logger.error(
+                f"Error updating order status ({type(e).__name__}, "
+                f"{len(self.active_orders)} active orders): {e}"
+            )
