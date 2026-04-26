@@ -970,6 +970,11 @@ if __name__ == "__main__":
                         help='Seconds before cancelling stale orders (market_making, default: 30)')
     parser.add_argument('--no-close-immediately', action='store_true', default=False,
                         help='Disable immediate position closing (market_making)')
+    parser.add_argument('--drain-flag-file', type=str,
+                        help='Path to a flag file. When the file exists, the strategy enters '
+                             'drain mode: stops placing new entry orders and only manages '
+                             'existing positions until the file is removed. Used to gracefully '
+                             'unwind before a session switch. Empty/unset = disabled. (market_making)')
     parser.add_argument('--max-position-age', type=float,
                         help='Max seconds to hold a position before force-closing (market_making, default: 120)')
     parser.add_argument('--maker-only', action='store_true', default=False,
@@ -1191,6 +1196,7 @@ if __name__ == "__main__":
             'dynamic_age_baseline_vol',
             'dynamic_age_min',
             'dynamic_age_max',
+            'drain_flag_file',
         ],
     }
 

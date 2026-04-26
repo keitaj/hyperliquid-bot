@@ -40,6 +40,8 @@ def _make_strategy():
     strategy._dynamic_offset_enabled = False
     strategy._adverse_tracker = None
     strategy._was_quiet = False
+    strategy._drain_flag_file = ''
+    strategy._was_drain = False
 
     tracker = MagicMock(spec=OrderTracker)
     strategy._tracker = tracker

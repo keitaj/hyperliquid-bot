@@ -83,6 +83,17 @@ class MarketMakingStrategy(BaseStrategy):
             mode = "spread×%.1f" % self._quiet_spread_multiplier if self._quiet_spread_multiplier > 0 else "stop"
             logger.info(f"[mm] Quiet hours enabled: UTC {sorted(self._quiet_hours)} mode={mode}")
 
+        # ---- Drain mode (graceful pre-shutdown) ---- #
+        # Path to a flag file. When the file exists, the strategy stops
+        # placing new entry orders and only manages existing positions
+        # (maker-first close). Designed to be triggered by an external
+        # process before SIGTERM to reduce taker-close losses at session
+        # boundaries. Empty/None = feature disabled.
+        self._drain_flag_file: str = str(config.get('drain_flag_file', '') or '')
+        self._was_drain: bool = False
+        if self._drain_flag_file:
+            logger.info(f"[mm] Drain mode armed: flag_file={self._drain_flag_file}")
+
         # ---- Hourly spread schedule ---- #
         self._spread_schedule: Dict[int, float] = self._parse_spread_schedule(
             config.get('spread_schedule', '')
@@ -264,6 +275,41 @@ class MarketMakingStrategy(BaseStrategy):
         self._log_fill_rate()
         self._log_dynamic_age()
         self._closer.log_close_stats()
+
+        # ---- Drain mode: pre-shutdown graceful close ---- #
+        # Drain takes precedence over quiet hours: when an external
+        # process signals an imminent shutdown via the flag file, stop
+        # placing new entry orders and let existing positions close via
+        # the normal maker-first PositionCloser flow. The session-switch
+        # script then performs its own IOC fallback after the drain
+        # window expires.
+        if self._is_drain_mode():
+            if not self._was_drain:
+                logger.info("[mm] Entering drain mode, cancelling all orders")
+                for coin in coins:
+                    self._tracker.cancel_all_orders_for_coin(coin)
+                self._was_drain = True
+            for coin in coins:
+                try:
+                    has_position = coin in self.positions and abs(self.positions[coin]['size']) > 0
+                    if has_position:
+                        if self.close_immediately:
+                            self.close_position(coin)
+                            self._closer.on_position_closed(coin)
+                        else:
+                            dynamic_age = self._get_dynamic_position_age(coin)
+                            self._closer.manage(coin, self.positions[coin], self.close_position,
+                                                max_age_override=dynamic_age)
+                    else:
+                        self._closer.cleanup_closed(coin)
+                except API_ERRORS as e:
+                    logger.error(f"[mm] Error processing {coin} during drain: {e}")
+            self._log_cycle(coins, " [DRAIN]")
+            return
+
+        if self._was_drain and not self._is_drain_mode():
+            logger.info("[mm] Exiting drain mode, resuming quotes")
+            self._was_drain = False
 
         # ---- Quiet hours: full-stop mode ---- #
         is_quiet = self._is_quiet_hour()
@@ -915,6 +961,15 @@ class MarketMakingStrategy(BaseStrategy):
         if self._spread_schedule and self._spread_schedule.get(hour, 1.0) == 0:
             return True
         return False
+
+    def _is_drain_mode(self) -> bool:
+        """Check if drain mode is active via the configured flag file."""
+        if not self._drain_flag_file:
+            return False
+        try:
+            return os.path.exists(self._drain_flag_file)
+        except OSError:
+            return False
 
     def _get_hourly_spread_multiplier(self) -> float:
         """Get spread multiplier for current UTC hour. Returns 1.0 if no schedule."""
