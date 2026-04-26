@@ -304,6 +304,8 @@ The `market_making` strategy uses **progressive close pricing**: as a position a
 
 **Quiet hours** (`--quiet-hours-utc`): Stop or widen quoting during specific UTC hours (e.g., `"17"` or `"17,18"`). Default: stop quoting entirely. With `--quiet-hours-spread-multiplier N`, widens spread by Nx instead. Positions are still managed during quiet hours.
 
+**Drain mode** (`--drain-flag-file`): Path to a flag file used for graceful pre-shutdown. When the file exists, the strategy stops placing new entry orders and only manages existing positions via the normal maker-first close flow. Designed to be triggered by an external script (e.g., a session-switch helper) before sending SIGTERM, so positions can unwind via maker close instead of taker IOC close. Drain takes priority over quiet hours when both apply. Empty/unset = disabled.
+
 **Spread schedule** (`--spread-schedule`): Per-hour spread multiplier for time-of-day spread control. Format: `"HOUR:MULT,..."` or `"START-END:MULT,..."` for ranges (e.g., `"0-3:1.5,14:1.5,20:1.5"`). Ranges wrap around midnight (`"22-2:1.5"` covers hours 22,23,0,1,2). Hours not in the schedule use multiplier 1.0 (no change). Multiplier 0 triggers full-stop mode (same as quiet hours). Coexists with quiet hours — quiet hours full-stop takes priority; otherwise multipliers stack.
 
 **WebSocket guards** (require `--enable-ws`):
@@ -558,6 +560,7 @@ strategies:
     spread_schedule: ""                # --spread-schedule  (spread multiplier: "14:1.5,0-3:1.5,22-2:2.0")
     quiet_hours_utc: ""                # --quiet-hours-utc  (UTC hours to stop/reduce quoting: "17" or "17,18")
     quiet_hours_spread_multiplier: 0   # --quiet-hours-spread-multiplier  (0 = stop, >0 = widen spread by Nx)
+    drain_flag_file: ""                # --drain-flag-file  (path to flag file; presence triggers graceful drain mode)
     vol_adjust_enabled: false          # --vol-adjust  (enable volatility-adjusted BBO offset)
     vol_adjust_multiplier: 2.0         # --vol-adjust-multiplier  (offset += multiplier × avg_move_bps)
     vol_adjust_max_offset: 50          # --vol-adjust-max-offset  (max offset bps after vol adjustment)

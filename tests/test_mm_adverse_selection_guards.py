@@ -36,6 +36,8 @@ def _make_strategy(imbalance_threshold=0.0, loss_streak_limit=0, loss_streak_coo
     s._dynamic_offset_enabled = False
     s._adverse_tracker = None
     s._was_quiet = False
+    s._drain_flag_file = ''
+    s._was_drain = False
     s.vol_adjust_enabled = False
     s.vol_adjust_multiplier = 2.0
     s.vol_lookback = 30
