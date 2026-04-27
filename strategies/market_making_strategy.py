@@ -21,6 +21,7 @@ from strategies.mm_config import (
     FILL_RATE_LOG_INTERVAL,
     INVENTORY_SKEW_CAP,
     MMConfig,
+    parse_coin_overrides,
 )
 from strategies.mm_order_tracker import OrderTracker
 from strategies.mm_position_closer import PositionCloser
@@ -791,29 +792,13 @@ class MarketMakingStrategy(BaseStrategy):
 
     @staticmethod
     def _parse_coin_overrides(raw: str) -> Dict[str, float]:
-        """Parse ``'COIN:BPS,COIN:BPS,...'`` into ``{coin: bps}`` dict.
+        """Backward-compat shim — delegates to ``mm_config.parse_coin_overrides``.
 
-        Supports both bare names (``'SP500:1.5'``) and DEX-prefixed names
-        (``'xyz:SP500:1.5'``).  Bare names match any DEX at lookup time.
+        New code should import the helper directly. Kept here so existing
+        external callers (and tests that exercised this static method) keep
+        working until they migrate.
         """
-        result: Dict[str, float] = {}
-        if not raw or not str(raw).strip():
-            return result
-        for pair in str(raw).split(','):
-            pair = pair.strip()
-            if not pair:
-                continue
-            parts = pair.rsplit(':', 1)
-            if len(parts) != 2:
-                logger.warning(f"[mm] Invalid coin override format: '{pair}', expected 'COIN:BPS'")
-                continue
-            coin_key, bps_str = parts
-            try:
-                bps = float(bps_str)
-                result[coin_key] = bps
-            except ValueError:
-                logger.warning(f"[mm] Invalid BPS value in coin override: '{pair}'")
-        return result
+        return parse_coin_overrides(raw)
 
     @staticmethod
     def _parse_spread_schedule(raw: str) -> Dict[int, float]:

@@ -428,15 +428,22 @@ class HyperliquidBot:
                     )
 
                 # Phase 4b: BBO velocity → directional cancel
-                if self.strategy_config.get('velocity_guard_enabled', False):
+                # Read from strategy.cfg.velocity when available (MM strategy);
+                # fall back to flat config dict for non-MM strategies.
+                strategy_cfg = getattr(self.strategy, 'cfg', None)
+                if strategy_cfg is not None:
+                    velocity_enabled = strategy_cfg.velocity.enabled
+                    velocity_consecutive = strategy_cfg.velocity.consecutive
+                    velocity_min_move = strategy_cfg.velocity.min_move_bps
+                else:
+                    velocity_enabled = bool(self.strategy_config.get('velocity_guard_enabled', False))
+                    velocity_consecutive = int(self.strategy_config.get('velocity_consecutive', 3))
+                    velocity_min_move = float(self.strategy_config.get('velocity_min_move_bps', 1.0))
+                if velocity_enabled:
                     self.velocity_guard = BboVelocityGuard(
                         tracker,
-                        consecutive_threshold=int(
-                            self.strategy_config.get('velocity_consecutive', 3)
-                        ),
-                        min_total_move_bps=float(
-                            self.strategy_config.get('velocity_min_move_bps', 1.0)
-                        ),
+                        consecutive_threshold=velocity_consecutive,
+                        min_total_move_bps=velocity_min_move,
                     )
                     self.ws_feed.add_listener(self.velocity_guard.on_l2_update)
                     logger.info(

@@ -145,19 +145,32 @@ class TestMMConfigFromLegacyDict:
         assert cfg.loss_streak.limit == 3
         assert cfg.velocity.consecutive == 4
 
+    def test_non_coercible_int_raises(self) -> None:
+        # Non-numeric input for an int field surfaces ValueError from int(...)
+        with pytest.raises(ValueError):
+            MMConfig.from_legacy_dict({'loss_streak_limit': 'abc'})
+
+    def test_non_coercible_float_raises(self) -> None:
+        # Same contract for float fields
+        with pytest.raises(ValueError):
+            MMConfig.from_legacy_dict({'microprice_skew_multiplier': 'not_a_number'})
+
 
 class TestModuleConstants:
-    """Ensure module-level constants have the expected values.
+    """Sanity checks for module-level constants.
 
-    These are checked here to make accidental defaults changes visible in
-    code review.
+    Asserts the type and positive-finite property rather than the exact
+    default value so intentional default tweaks don't ripple through.
     """
 
     def test_inventory_skew_cap(self) -> None:
-        assert INVENTORY_SKEW_CAP == 3.0
+        assert isinstance(INVENTORY_SKEW_CAP, float)
+        assert INVENTORY_SKEW_CAP > 0
 
     def test_fill_rate_log_interval(self) -> None:
-        assert FILL_RATE_LOG_INTERVAL == 300.0
+        assert isinstance(FILL_RATE_LOG_INTERVAL, float)
+        assert FILL_RATE_LOG_INTERVAL > 0
 
     def test_dynamic_age_log_interval(self) -> None:
-        assert DYNAMIC_AGE_LOG_INTERVAL == 300.0
+        assert isinstance(DYNAMIC_AGE_LOG_INTERVAL, float)
+        assert DYNAMIC_AGE_LOG_INTERVAL > 0

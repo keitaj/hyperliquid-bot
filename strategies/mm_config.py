@@ -10,8 +10,11 @@ historically read via ``config.get`` but never exposed via CLI/env. They
 are kept here as a single source of truth.
 """
 
+import logging
 from dataclasses import dataclass, field
 from typing import Dict
+
+logger = logging.getLogger(__name__)
 
 
 # ---- Module-level constants (previously pseudo-config) ---- #
@@ -32,10 +35,10 @@ def parse_coin_overrides(value: object) -> Dict[str, float]:
     """Parse a ``"COIN:BPS,COIN:BPS,..."`` string into ``{coin: bps}``.
 
     Supports both bare names (``"SP500:1.5"``) and DEX-prefixed names
-    (``"xyz:SP500:1.5"``); bare names match any DEX at lookup time. Empty /
-    falsy input returns an empty dict. Items with missing colons or
-    non-numeric values are silently skipped — callers should log unknown
-    formats themselves if needed.
+    (``"xyz:SP500:1.5"``); bare names match any DEX at lookup time.
+    Empty / falsy input returns an empty dict. Pairs with missing colons
+    or non-numeric values are skipped after a single warning log per
+    offending pair.
     """
     result: Dict[str, float] = {}
     if not value or not str(value).strip():
@@ -46,12 +49,13 @@ def parse_coin_overrides(value: object) -> Dict[str, float]:
             continue
         parts = pair.rsplit(':', 1)
         if len(parts) != 2:
+            logger.warning(f"[mm] Invalid coin override format: '{pair}', expected 'COIN:BPS'")
             continue
         coin_key, bps_str = parts
         try:
             result[coin_key] = float(bps_str)
         except ValueError:
-            continue
+            logger.warning(f"[mm] Invalid BPS value in coin override: '{pair}'")
     return result
 
 
@@ -90,8 +94,8 @@ class MicropriceConfig:
 class VelocityGuardConfig:
     """Cancel orders on consecutive directional BBO moves.
 
-    Consumed by ``bot.py`` when wiring the WS guard; the MM strategy itself
-    does not read these fields.
+    Read by ``bot.py`` via ``strategy.cfg.velocity`` when wiring the WS
+    ``BboVelocityGuard``; the MM strategy itself does not read these fields.
     """
 
     enabled: bool = False
