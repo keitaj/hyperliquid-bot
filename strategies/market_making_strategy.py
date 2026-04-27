@@ -16,6 +16,13 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Set, Tuple
 
 from strategies.base_strategy import BaseStrategy
+from strategies.mm_config import (
+    DYNAMIC_AGE_LOG_INTERVAL,
+    FILL_RATE_LOG_INTERVAL,
+    INVENTORY_SKEW_CAP,
+    MMConfig,
+    parse_coin_overrides,
+)
 from strategies.mm_order_tracker import OrderTracker
 from strategies.mm_position_closer import PositionCloser
 from order_manager import BBO_OFFSET, OrderSide, round_price
@@ -30,6 +37,13 @@ class MarketMakingStrategy(BaseStrategy):
 
     def __init__(self, market_data_manager, order_manager, config: Dict) -> None:
         super().__init__(market_data_manager, order_manager, config)
+
+        # ---- Phase 1 grouped config (LossStreak / Microprice / Velocity / PerCoin) ---- #
+        # The flat ``self.X`` attributes below remain as aliases for backward
+        # compatibility with tests and call-sites that bypass __init__ (e.g.
+        # ``MarketMakingStrategy.__new__(cls)``). Future refactor phases will
+        # migrate internal references to ``self.cfg.<group>.<field>`` directly.
+        self.cfg: MMConfig = MMConfig.from_legacy_dict(config)
 
         # ---- Configurable parameters ---- #
         self.spread_bps: float = config.get('spread_bps', 5)
@@ -49,20 +63,16 @@ class MarketMakingStrategy(BaseStrategy):
         else:
             self.bbo_offset_bps = 0.0
         self.inventory_skew_bps: float = config.get('inventory_skew_bps', 0)
-        self.inventory_skew_cap: float = config.get('inventory_skew_cap', 3.0)
+        self.inventory_skew_cap: float = config.get('inventory_skew_cap', INVENTORY_SKEW_CAP)
 
         # ---- L2 book imbalance guard ---- #
         self.imbalance_threshold: float = config.get('imbalance_threshold', 0.0)
         if not (0 <= self.imbalance_threshold <= 1):
             raise ValueError(f"imbalance_threshold must be in [0, 1], got {self.imbalance_threshold}")
 
-        # ---- Per-coin loss streak cooldown ---- #
-        self.loss_streak_limit: int = config.get('loss_streak_limit', 0)
-        self.loss_streak_cooldown: float = config.get('loss_streak_cooldown', 300)
-        if self.loss_streak_limit < 0:
-            raise ValueError(f"loss_streak_limit must be >= 0, got {self.loss_streak_limit}")
-        if self.loss_streak_limit > 0 and self.loss_streak_cooldown <= 0:
-            raise ValueError(f"loss_streak_cooldown must be > 0 when limit is set, got {self.loss_streak_cooldown}")
+        # ---- Per-coin loss streak cooldown (alias of self.cfg.loss_streak) ---- #
+        self.loss_streak_limit: int = self.cfg.loss_streak.limit
+        self.loss_streak_cooldown: float = self.cfg.loss_streak.cooldown_seconds
         self._loss_streaks: Dict[str, int] = defaultdict(int)  # coin -> consecutive losses
         self._coin_cooldown_until: Dict[str, float] = {}  # coin -> monotonic deadline
 
@@ -116,16 +126,10 @@ class MarketMakingStrategy(BaseStrategy):
                 f"floor={self._dynamic_offset_floor}, max_add={self._dynamic_offset_max_addition}"
             )
 
-        # ---- Per-coin offset/spread overrides ---- #
-        self._coin_offset_overrides: Dict[str, float] = self._parse_coin_overrides(
-            config.get('coin_offset_overrides', '')
-        )
-        self._coin_spread_overrides: Dict[str, float] = self._parse_coin_overrides(
-            config.get('coin_spread_overrides', '')
-        )
-        self._coin_size_overrides: Dict[str, float] = self._parse_coin_overrides(
-            config.get('coin_size_overrides', '')
-        )
+        # ---- Per-coin offset/spread/size overrides (aliases of self.cfg.per_coin) ---- #
+        self._coin_offset_overrides: Dict[str, float] = self.cfg.per_coin.offset
+        self._coin_spread_overrides: Dict[str, float] = self.cfg.per_coin.spread
+        self._coin_size_overrides: Dict[str, float] = self.cfg.per_coin.size
         if self._coin_offset_overrides:
             logger.info(f"[mm] Per-coin offset overrides: {self._coin_offset_overrides}")
         if self._coin_spread_overrides:
@@ -133,10 +137,10 @@ class MarketMakingStrategy(BaseStrategy):
         if self._coin_size_overrides:
             logger.info(f"[mm] Per-coin size overrides: {self._coin_size_overrides}")
 
-        # ---- Micro-price asymmetric offset ---- #
-        self._microprice_enabled: bool = config.get('microprice_skew_enabled', False)
-        self._microprice_multiplier: float = config.get('microprice_skew_multiplier', 1.0)
-        self._microprice_max_skew_bps: float = config.get('microprice_max_skew_bps', 2.0)
+        # ---- Micro-price asymmetric offset (aliases of self.cfg.microprice) ---- #
+        self._microprice_enabled: bool = self.cfg.microprice.enabled
+        self._microprice_multiplier: float = self.cfg.microprice.multiplier
+        self._microprice_max_skew_bps: float = self.cfg.microprice.max_skew_bps
         if self._microprice_enabled:
             logger.info(
                 f"[mm] Micro-price skew enabled: multiplier={self._microprice_multiplier}, "
@@ -158,7 +162,9 @@ class MarketMakingStrategy(BaseStrategy):
         self._base_max_position_age: float = config.get('max_position_age_seconds', 120.0)
         # coin -> (avg_move_bps, computed_age_seconds) for periodic logging
         self._dynamic_age_recent: Dict[str, Tuple[float, float]] = {}
-        self._dynamic_age_log_interval: float = config.get('dynamic_age_log_interval', 300.0)
+        self._dynamic_age_log_interval: float = config.get(
+            'dynamic_age_log_interval', DYNAMIC_AGE_LOG_INTERVAL
+        )
         self._last_dynamic_age_log: float = 0.0
         if self._dynamic_age_enabled:
             logger.info(
@@ -171,7 +177,9 @@ class MarketMakingStrategy(BaseStrategy):
         self._fills_detected: int = 0
         self._orders_placed_per_coin: Dict[str, int] = defaultdict(int)
         self._fills_per_coin: Dict[str, int] = defaultdict(int)
-        self._fill_rate_log_interval: float = config.get('fill_rate_log_interval', 300)
+        self._fill_rate_log_interval: float = config.get(
+            'fill_rate_log_interval', FILL_RATE_LOG_INTERVAL
+        )
         self._last_fill_rate_log: float = 0.0
         self._prev_position_coins: set = set()  # coins that had positions last cycle
         self._prev_positions: Dict[str, Dict] = {}  # snapshot for loss streak detection
@@ -784,29 +792,13 @@ class MarketMakingStrategy(BaseStrategy):
 
     @staticmethod
     def _parse_coin_overrides(raw: str) -> Dict[str, float]:
-        """Parse ``'COIN:BPS,COIN:BPS,...'`` into ``{coin: bps}`` dict.
+        """Backward-compat shim — delegates to ``mm_config.parse_coin_overrides``.
 
-        Supports both bare names (``'SP500:1.5'``) and DEX-prefixed names
-        (``'xyz:SP500:1.5'``).  Bare names match any DEX at lookup time.
+        New code should import the helper directly. Kept here so existing
+        external callers (and tests that exercised this static method) keep
+        working until they migrate.
         """
-        result: Dict[str, float] = {}
-        if not raw or not str(raw).strip():
-            return result
-        for pair in str(raw).split(','):
-            pair = pair.strip()
-            if not pair:
-                continue
-            parts = pair.rsplit(':', 1)
-            if len(parts) != 2:
-                logger.warning(f"[mm] Invalid coin override format: '{pair}', expected 'COIN:BPS'")
-                continue
-            coin_key, bps_str = parts
-            try:
-                bps = float(bps_str)
-                result[coin_key] = bps
-            except ValueError:
-                logger.warning(f"[mm] Invalid BPS value in coin override: '{pair}'")
-        return result
+        return parse_coin_overrides(raw)
 
     @staticmethod
     def _parse_spread_schedule(raw: str) -> Dict[int, float]:
