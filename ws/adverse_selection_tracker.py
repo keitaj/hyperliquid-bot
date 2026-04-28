@@ -29,6 +29,9 @@ SAMPLE_LABELS = ["5s", "30s", "60s"]
 # Max fills to keep in memory
 MAX_FILL_BUFFER = 200
 
+# Max per-coin summary snapshots retained for recent-window queries
+MAX_HISTORY = 10
+
 
 @dataclass
 class FillSnapshot:
@@ -65,6 +68,12 @@ class AdverseSelectionTracker:
             lambda: defaultdict(list)
         )
         self._fill_count: Dict[str, int] = defaultdict(int)
+
+        # Recent-window summary history (for downstream consumers like
+        # auto-exclude). Each snapshot mirrors the per-coin row produced
+        # by ``_log_summary`` and is appended just before the aggregates
+        # are reset at the end of the interval.
+        self._history: Dict[str, deque] = defaultdict(lambda: deque(maxlen=MAX_HISTORY))
 
     # ------------------------------------------------------------------ #
     #  Fill recording
@@ -184,7 +193,11 @@ class AdverseSelectionTracker:
         self._log_summary()
 
     def _log_summary(self) -> None:
-        """Log per-coin adverse selection summary and reset aggregates."""
+        """Log per-coin adverse selection summary and reset aggregates.
+
+        Also appends a snapshot to ``self._history[coin]`` so downstream
+        consumers (e.g. auto-exclude) can inspect the recent N windows.
+        """
         with self._lock:
             aggregates = dict(self._aggregates)
             fill_counts = dict(self._fill_count)
@@ -194,20 +207,45 @@ class AdverseSelectionTracker:
         if not aggregates:
             return
 
+        snapshot_ts = time.time()
         lines = [f"[adverse] Summary (last {self.log_interval:.0f}s):"]
         for coin in sorted(aggregates.keys()):
             fills = fill_counts.get(coin, 0)
             parts = [f"  {coin}: fills={fills}"]
+            snapshot: Dict[str, Any] = {"ts": snapshot_ts, "fills": fills}
             for label in SAMPLE_LABELS:
                 values = aggregates[coin].get(label, [])
                 if values:
                     avg = sum(values) / len(values)
                     parts.append(f"avg_{label}={avg:+.1f}bps")
+                    snapshot[f"avg_{label}"] = avg
                 else:
                     parts.append(f"avg_{label}=n/a")
+                    snapshot[f"avg_{label}"] = None
             lines.append("  ".join(parts))
+            with self._lock:
+                self._history[coin].append(snapshot)
 
         logger.info("\n".join(lines))
+
+    # ------------------------------------------------------------------ #
+    #  Recent-window history (consumed by auto-exclude)
+    # ------------------------------------------------------------------ #
+
+    def get_recent_windows(self, coin: str, n: int) -> List[Dict[str, Any]]:
+        """Return up to the last ``n`` summary snapshots for ``coin``.
+
+        Each snapshot is a dict with keys ``ts``, ``fills``, ``avg_5s``,
+        ``avg_30s``, ``avg_60s``.  ``avg_*`` values may be ``None`` when
+        no fills produced a sample for that label in the window.
+        """
+        if n <= 0:
+            return []
+        with self._lock:
+            history = self._history.get(coin)
+            if not history:
+                return []
+            return list(history)[-n:]
 
     # ------------------------------------------------------------------ #
     #  Lifecycle

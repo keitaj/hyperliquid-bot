@@ -260,6 +260,45 @@ class DynamicAgeConfig:
 
 
 @dataclass
+class AutoExcludeConfig:
+    """Auto-exclude a coin after consecutive adverse-selection windows.
+
+    Reads observations from ``AdverseSelectionTracker``'s recent-window
+    history; when ``consecutive`` summary windows in a row show
+    ``avg_<window_label>`` at or below ``threshold_bps`` (with at least
+    ``min_fills`` per window), the coin is paused for
+    ``cooldown_seconds`` via the existing ``_coin_cooldown_until`` map
+    shared with ``LossStreakConfig``.
+    """
+
+    enabled: bool = False
+    threshold_bps: float = -3.0
+    consecutive: int = 3
+    min_fills: int = 5
+    cooldown_seconds: int = 1800
+    window_label: str = "60s"
+
+    def __post_init__(self) -> None:
+        if self.consecutive < 1:
+            raise ValueError(
+                f"auto_exclude_consecutive must be >= 1, got {self.consecutive}"
+            )
+        if self.min_fills < 1:
+            raise ValueError(
+                f"auto_exclude_min_fills must be >= 1, got {self.min_fills}"
+            )
+        if self.cooldown_seconds <= 0:
+            raise ValueError(
+                f"auto_exclude_cooldown must be > 0, got {self.cooldown_seconds}"
+            )
+        if self.window_label not in ("5s", "30s", "60s"):
+            raise ValueError(
+                f"auto_exclude_window_label must be one of '5s'/'30s'/'60s', "
+                f"got {self.window_label!r}"
+            )
+
+
+@dataclass
 class MMConfig:
     """Root config for ``MarketMakingStrategy``.
 
@@ -277,6 +316,7 @@ class MMConfig:
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
     dynamic_offset: DynamicOffsetConfig = field(default_factory=DynamicOffsetConfig)
     dynamic_age: DynamicAgeConfig = field(default_factory=DynamicAgeConfig)
+    auto_exclude: AutoExcludeConfig = field(default_factory=AutoExcludeConfig)
 
     @classmethod
     def from_legacy_dict(cls, d: Dict) -> "MMConfig":
@@ -339,5 +379,13 @@ class MMConfig:
                 baseline_vol_bps=float(d.get('dynamic_age_baseline_vol', 1.0)),
                 min_seconds=float(d.get('dynamic_age_min', 60.0)),
                 max_seconds=float(d.get('dynamic_age_max', 300.0)),
+            ),
+            auto_exclude=AutoExcludeConfig(
+                enabled=bool(d.get('auto_exclude_enabled', False)),
+                threshold_bps=float(d.get('auto_exclude_threshold_bps', -3.0)),
+                consecutive=int(d.get('auto_exclude_consecutive', 3)),
+                min_fills=int(d.get('auto_exclude_min_fills', 5)),
+                cooldown_seconds=int(d.get('auto_exclude_cooldown', 1800)),
+                window_label=str(d.get('auto_exclude_window_label', '60s')),
             ),
         )

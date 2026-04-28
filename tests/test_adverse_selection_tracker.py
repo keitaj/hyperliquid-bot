@@ -349,3 +349,94 @@ class TestStopAndStats:
         assert "SP500" in stats
         assert stats["SP500"]["fills"] == 2
         assert abs(stats["SP500"]["avg_5s"] - (-2.0)) < 0.01
+
+
+class TestRecentWindowHistory:
+    """Tests for the recent-window history surface used by auto-exclude."""
+
+    @staticmethod
+    def _seed_summary(tracker, coin, fills, avg_5s=None, avg_30s=None, avg_60s=None):
+        """Seed a single window's data into aggregates and trigger _log_summary."""
+        if avg_5s is not None:
+            tracker._aggregates[coin]["5s"].extend([avg_5s] * max(fills, 1))
+        if avg_30s is not None:
+            tracker._aggregates[coin]["30s"].extend([avg_30s] * max(fills, 1))
+        if avg_60s is not None:
+            tracker._aggregates[coin]["60s"].extend([avg_60s] * max(fills, 1))
+        tracker._fill_count[coin] = fills
+        tracker._log_summary()
+
+    def test_log_summary_appends_history_entry(self):
+        md_mgr = _make_market_data(100.0)
+        tracker = AdverseSelectionTracker(md_mgr)
+
+        self._seed_summary(tracker, "SP500", fills=4, avg_5s=-1.0, avg_30s=-2.0, avg_60s=-3.0)
+
+        history = tracker.get_recent_windows("SP500", n=5)
+        assert len(history) == 1
+        snap = history[0]
+        assert snap["fills"] == 4
+        assert abs(snap["avg_5s"] - (-1.0)) < 1e-9
+        assert abs(snap["avg_30s"] - (-2.0)) < 1e-9
+        assert abs(snap["avg_60s"] - (-3.0)) < 1e-9
+        assert "ts" in snap
+
+    def test_get_recent_windows_returns_last_n(self):
+        md_mgr = _make_market_data(100.0)
+        tracker = AdverseSelectionTracker(md_mgr)
+
+        # Three sequential windows with distinguishable averages
+        self._seed_summary(tracker, "SP500", fills=2, avg_5s=-1.0)
+        self._seed_summary(tracker, "SP500", fills=2, avg_5s=-2.0)
+        self._seed_summary(tracker, "SP500", fills=2, avg_5s=-3.0)
+
+        last_two = tracker.get_recent_windows("SP500", n=2)
+        assert len(last_two) == 2
+        assert [w["avg_5s"] for w in last_two] == [-2.0, -3.0]
+
+    def test_get_recent_windows_returns_all_when_n_exceeds_history(self):
+        md_mgr = _make_market_data(100.0)
+        tracker = AdverseSelectionTracker(md_mgr)
+
+        self._seed_summary(tracker, "SP500", fills=1, avg_5s=-1.0)
+
+        windows = tracker.get_recent_windows("SP500", n=5)
+        assert len(windows) == 1
+
+    def test_get_recent_windows_unknown_coin(self):
+        md_mgr = _make_market_data(100.0)
+        tracker = AdverseSelectionTracker(md_mgr)
+        assert tracker.get_recent_windows("UNKNOWN", n=3) == []
+
+    def test_get_recent_windows_n_zero_or_negative(self):
+        md_mgr = _make_market_data(100.0)
+        tracker = AdverseSelectionTracker(md_mgr)
+
+        self._seed_summary(tracker, "SP500", fills=1, avg_5s=-1.0)
+        assert tracker.get_recent_windows("SP500", n=0) == []
+        assert tracker.get_recent_windows("SP500", n=-1) == []
+
+    def test_history_capped_at_max(self):
+        from ws.adverse_selection_tracker import MAX_HISTORY
+
+        md_mgr = _make_market_data(100.0)
+        tracker = AdverseSelectionTracker(md_mgr)
+
+        for i in range(MAX_HISTORY + 3):
+            self._seed_summary(tracker, "SP500", fills=1, avg_5s=float(-i))
+
+        windows = tracker.get_recent_windows("SP500", n=MAX_HISTORY + 5)
+        assert len(windows) == MAX_HISTORY
+        # Oldest retained window has avg_5s = -3 (i=0..2 dropped); newest = -(MAX_HISTORY+2)
+        assert windows[0]["avg_5s"] == -3.0
+        assert windows[-1]["avg_5s"] == float(-(MAX_HISTORY + 2))
+
+    def test_avg_none_when_no_samples_in_window(self):
+        md_mgr = _make_market_data(100.0)
+        tracker = AdverseSelectionTracker(md_mgr)
+
+        self._seed_summary(tracker, "SP500", fills=2, avg_5s=-1.0)
+        snap = tracker.get_recent_windows("SP500", n=1)[0]
+        assert snap["avg_5s"] is not None
+        assert snap["avg_30s"] is None
+        assert snap["avg_60s"] is None

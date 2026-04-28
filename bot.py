@@ -1107,6 +1107,25 @@ if __name__ == "__main__":
                         help='Minimum position age in seconds when volatility is high (default: 60, market_making)')
     parser.add_argument('--dynamic-age-max', type=float,
                         help='Maximum position age in seconds when volatility is low (default: 300, market_making)')
+    parser.add_argument('--auto-exclude', dest='auto_exclude_enabled',
+                        action='store_true', default=False,
+                        help='Auto-pause a coin when adverse selection stays past --auto-exclude-threshold-bps '
+                             'for --auto-exclude-consecutive consecutive summary windows (requires '
+                             '--enable-adverse-selection-log)')
+    parser.add_argument('--auto-exclude-threshold-bps', type=float,
+                        help='Adverse-selection threshold (bps) for auto-exclude; values <= this trigger '
+                             '(default: -3.0, market_making)')
+    parser.add_argument('--auto-exclude-consecutive', type=int,
+                        help='Consecutive adverse summary windows required to trigger auto-exclude '
+                             '(default: 3, market_making)')
+    parser.add_argument('--auto-exclude-min-fills', type=int,
+                        help='Minimum fills per summary window for auto-exclude to consider it '
+                             '(default: 5, market_making)')
+    parser.add_argument('--auto-exclude-cooldown', type=int,
+                        help='Cooldown seconds after auto-exclude triggers (default: 1800, market_making)')
+    parser.add_argument('--auto-exclude-window-label', type=str,
+                        help='Adverse-selection sample window for auto-exclude: 5s|30s|60s '
+                             '(default: 60s, market_making)')
 
     # Risk guardrail parameters
     parser.add_argument('--max-position-pct', type=float,
@@ -1220,6 +1239,12 @@ if __name__ == "__main__":
             'dynamic_age_baseline_vol',
             'dynamic_age_min',
             'dynamic_age_max',
+            'auto_exclude_enabled',
+            'auto_exclude_threshold_bps',
+            'auto_exclude_consecutive',
+            'auto_exclude_min_fills',
+            'auto_exclude_cooldown',
+            'auto_exclude_window_label',
             'drain_flag_file',
         ],
     }
