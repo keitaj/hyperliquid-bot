@@ -7,6 +7,8 @@ from strategies.mm_config import (
     FILL_RATE_LOG_INTERVAL,
     INVENTORY_SKEW_CAP,
     CloseConfig,
+    DynamicAgeConfig,
+    DynamicOffsetConfig,
     ImbalanceConfig,
     LossStreakConfig,
     MicropriceConfig,
@@ -176,6 +178,27 @@ class TestScheduleConfig:
         assert cfg.quiet_hours_spread_multiplier == 0.0
 
 
+class TestDynamicOffsetConfig:
+    def test_defaults_are_disabled(self) -> None:
+        cfg = DynamicOffsetConfig()
+        assert cfg.enabled is False
+        assert cfg.sensitivity == 0.5
+        assert cfg.tighten_rate == 0.25
+        assert cfg.max_addition == 3.0
+        assert cfg.max_reduction == 1.0
+        assert cfg.floor == 0.5
+        assert cfg.min_fills == 5
+
+
+class TestDynamicAgeConfig:
+    def test_defaults_are_disabled(self) -> None:
+        cfg = DynamicAgeConfig()
+        assert cfg.enabled is False
+        assert cfg.baseline_vol_bps == 1.0
+        assert cfg.min_seconds == 60.0
+        assert cfg.max_seconds == 300.0
+
+
 class TestMMConfigFromLegacyDict:
     def test_empty_dict_yields_defaults(self) -> None:
         cfg = MMConfig.from_legacy_dict({})
@@ -183,6 +206,8 @@ class TestMMConfigFromLegacyDict:
         assert cfg.microprice.enabled is False
         assert cfg.velocity.enabled is False
         assert cfg.per_coin.offset == {}
+        assert cfg.dynamic_offset.enabled is False
+        assert cfg.dynamic_age.enabled is False
 
     def test_full_dict_populates_all_groups(self) -> None:
         d = {
@@ -209,6 +234,17 @@ class TestMMConfigFromLegacyDict:
             'spread_schedule': '0:1.5,12:1.3',
             'quiet_hours_utc': '17,18',
             'quiet_hours_spread_multiplier': 1.5,
+            'dynamic_offset_enabled': True,
+            'dynamic_offset_sensitivity': 0.4,
+            'dynamic_offset_tighten_rate': 0.2,
+            'dynamic_offset_max_addition': 4.0,
+            'dynamic_offset_max_reduction': 1.5,
+            'dynamic_offset_floor': 0.7,
+            'dynamic_offset_min_fills': 10,
+            'dynamic_age_enabled': True,
+            'dynamic_age_baseline_vol': 1.5,
+            'dynamic_age_min': 90.0,
+            'dynamic_age_max': 240.0,
         }
         cfg = MMConfig.from_legacy_dict(d)
         assert cfg.loss_streak.limit == 3
@@ -234,6 +270,17 @@ class TestMMConfigFromLegacyDict:
         assert cfg.schedule.spread_schedule == {0: 1.5, 12: 1.3}
         assert cfg.schedule.quiet_hours_utc == {17, 18}
         assert cfg.schedule.quiet_hours_spread_multiplier == 1.5
+        assert cfg.dynamic_offset.enabled is True
+        assert cfg.dynamic_offset.sensitivity == 0.4
+        assert cfg.dynamic_offset.tighten_rate == 0.2
+        assert cfg.dynamic_offset.max_addition == 4.0
+        assert cfg.dynamic_offset.max_reduction == 1.5
+        assert cfg.dynamic_offset.floor == 0.7
+        assert cfg.dynamic_offset.min_fills == 10
+        assert cfg.dynamic_age.enabled is True
+        assert cfg.dynamic_age.baseline_vol_bps == 1.5
+        assert cfg.dynamic_age.min_seconds == 90.0
+        assert cfg.dynamic_age.max_seconds == 240.0
 
     def test_close_spread_bps_none_when_omitted(self) -> None:
         # Distinguish "not provided" from "0.0" — closer needs Optional[float]

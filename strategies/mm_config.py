@@ -226,11 +226,46 @@ class ScheduleConfig:
 
 
 @dataclass
-class MMConfig:
-    """Root config for ``MarketMakingStrategy`` (Phase 1 subset).
+class DynamicOffsetConfig:
+    """Auto-adjust BBO offset from observed adverse-selection data.
 
-    Future phases will fold additional groups (close, dynamic offset,
-    dynamic age, imbalance, schedule) into this same root.
+    The strategy widens the offset when recent fills look adversely selected
+    and tightens it after favourable fills, bounded by the floor and the
+    asymmetric ``max_addition`` / ``max_reduction`` caps.  Activates only
+    after ``min_fills`` samples are accumulated for a coin.
+    """
+
+    enabled: bool = False
+    sensitivity: float = 0.5
+    tighten_rate: float = 0.25
+    max_addition: float = 3.0
+    max_reduction: float = 1.0
+    floor: float = 0.5
+    min_fills: int = 5
+
+
+@dataclass
+class DynamicAgeConfig:
+    """Volatility-adjusted ``MAX_POSITION_AGE``.
+
+    Recent mid-price volatility scales the per-coin position age between
+    ``min_seconds`` (high vol) and ``max_seconds`` (low vol), pivoting
+    around ``baseline_vol_bps``.
+    """
+
+    enabled: bool = False
+    baseline_vol_bps: float = 1.0
+    min_seconds: float = 60.0
+    max_seconds: float = 300.0
+
+
+@dataclass
+class MMConfig:
+    """Root config for ``MarketMakingStrategy``.
+
+    Aggregates all grouped sub-configs that were originally read directly
+    from the flat ``strategy_config`` dict.  See :meth:`from_legacy_dict`
+    for the bridge from the legacy flat format.
     """
 
     loss_streak: LossStreakConfig = field(default_factory=LossStreakConfig)
@@ -240,6 +275,8 @@ class MMConfig:
     imbalance: ImbalanceConfig = field(default_factory=ImbalanceConfig)
     close: CloseConfig = field(default_factory=CloseConfig)
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
+    dynamic_offset: DynamicOffsetConfig = field(default_factory=DynamicOffsetConfig)
+    dynamic_age: DynamicAgeConfig = field(default_factory=DynamicAgeConfig)
 
     @classmethod
     def from_legacy_dict(cls, d: Dict) -> "MMConfig":
@@ -287,5 +324,20 @@ class MMConfig:
                 spread_schedule=parse_spread_schedule(d.get('spread_schedule', '')),
                 quiet_hours_utc=parse_quiet_hours(d.get('quiet_hours_utc', '')),
                 quiet_hours_spread_multiplier=float(d.get('quiet_hours_spread_multiplier', 0.0)),
+            ),
+            dynamic_offset=DynamicOffsetConfig(
+                enabled=bool(d.get('dynamic_offset_enabled', False)),
+                sensitivity=float(d.get('dynamic_offset_sensitivity', 0.5)),
+                tighten_rate=float(d.get('dynamic_offset_tighten_rate', 0.25)),
+                max_addition=float(d.get('dynamic_offset_max_addition', 3.0)),
+                max_reduction=float(d.get('dynamic_offset_max_reduction', 1.0)),
+                floor=float(d.get('dynamic_offset_floor', 0.5)),
+                min_fills=int(d.get('dynamic_offset_min_fills', 5)),
+            ),
+            dynamic_age=DynamicAgeConfig(
+                enabled=bool(d.get('dynamic_age_enabled', False)),
+                baseline_vol_bps=float(d.get('dynamic_age_baseline_vol', 1.0)),
+                min_seconds=float(d.get('dynamic_age_min', 60.0)),
+                max_seconds=float(d.get('dynamic_age_max', 300.0)),
             ),
         )
