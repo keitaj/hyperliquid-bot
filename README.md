@@ -308,6 +308,8 @@ The `market_making` strategy uses **progressive close pricing**: as a position a
 
 **Spread schedule** (`--spread-schedule`): Per-hour spread multiplier for time-of-day spread control. Format: `"HOUR:MULT,..."` or `"START-END:MULT,..."` for ranges (e.g., `"0-3:1.5,14:1.5,20:1.5"`). Ranges wrap around midnight (`"22-2:1.5"` covers hours 22,23,0,1,2). Hours not in the schedule use multiplier 1.0 (no change). Multiplier 0 triggers full-stop mode (same as quiet hours). Coexists with quiet hours — quiet hours full-stop takes priority; otherwise multipliers stack.
 
+**Auto-exclude on adverse selection** (`--auto-exclude`): Automatically pauses a coin when the AdverseSelectionTracker reports moderate adverse selection (`avg_<window>` below `--auto-exclude-threshold-bps`, default `-3.0`) for `--auto-exclude-consecutive` summary windows in a row (default 3, ~15 min with the default 300s log interval). The coin is paused for `--auto-exclude-cooldown` seconds (default 1800) and then automatically resumes. Requires `--enable-adverse-selection-log`. Per-window `min_fills` filtering keeps low-volume noise from triggering. Shares the per-coin cooldown map with `--loss-streak-limit`, so the two features compose naturally.
+
 **WebSocket guards** (require `--enable-ws`):
 - `--bbo-guard-threshold-bps`: Cancel stale entry orders when BBO moves (default: 2.0)
 - `--imbalance-guard-threshold`: Cancel one side when L2 book is skewed (0–1, default: 0)
@@ -568,6 +570,12 @@ strategies:
     dynamic_age_baseline_vol: 1.0      # --dynamic-age-baseline-vol  (bps reference for "normal" volatility)
     dynamic_age_min: 60                # --dynamic-age-min  (minimum position age in seconds)
     dynamic_age_max: 300               # --dynamic-age-max  (maximum position age in seconds)
+    auto_exclude_enabled: false        # --auto-exclude  (auto-pause coin on consecutive adverse-selection windows; requires --enable-adverse-selection-log)
+    auto_exclude_threshold_bps: -3.0   # --auto-exclude-threshold-bps  (avg_<window> at or below this is "bad")
+    auto_exclude_consecutive: 3        # --auto-exclude-consecutive  (consecutive bad windows required to trigger)
+    auto_exclude_min_fills: 5          # --auto-exclude-min-fills  (per-window minimum fill count)
+    auto_exclude_cooldown: 1800        # --auto-exclude-cooldown  (pause seconds after trigger; auto-resume)
+    auto_exclude_window_label: "60s"   # --auto-exclude-window-label  (5s|30s|60s tracker sample window)
     account_cap_pct: 0.05              # --account-cap-pct
     max_positions: 3
     take_profit_percent: 1

@@ -6,6 +6,7 @@ from strategies.mm_config import (
     DYNAMIC_AGE_LOG_INTERVAL,
     FILL_RATE_LOG_INTERVAL,
     INVENTORY_SKEW_CAP,
+    AutoExcludeConfig,
     CloseConfig,
     DynamicAgeConfig,
     DynamicOffsetConfig,
@@ -199,6 +200,33 @@ class TestDynamicAgeConfig:
         assert cfg.max_seconds == 300.0
 
 
+class TestAutoExcludeConfig:
+    def test_defaults_are_disabled(self) -> None:
+        cfg = AutoExcludeConfig()
+        assert cfg.enabled is False
+        assert cfg.threshold_bps == -3.0
+        assert cfg.consecutive == 3
+        assert cfg.min_fills == 5
+        assert cfg.cooldown_seconds == 1800
+        assert cfg.window_label == '60s'
+
+    def test_invalid_consecutive_rejected(self) -> None:
+        with pytest.raises(ValueError, match='auto_exclude_consecutive must be >= 1'):
+            AutoExcludeConfig(consecutive=0)
+
+    def test_invalid_min_fills_rejected(self) -> None:
+        with pytest.raises(ValueError, match='auto_exclude_min_fills must be >= 1'):
+            AutoExcludeConfig(min_fills=0)
+
+    def test_invalid_cooldown_rejected(self) -> None:
+        with pytest.raises(ValueError, match='auto_exclude_cooldown must be > 0'):
+            AutoExcludeConfig(cooldown_seconds=0)
+
+    def test_invalid_window_label_rejected(self) -> None:
+        with pytest.raises(ValueError, match="auto_exclude_window_label must be one of"):
+            AutoExcludeConfig(window_label='90s')
+
+
 class TestMMConfigFromLegacyDict:
     def test_empty_dict_yields_defaults(self) -> None:
         cfg = MMConfig.from_legacy_dict({})
@@ -245,6 +273,12 @@ class TestMMConfigFromLegacyDict:
             'dynamic_age_baseline_vol': 1.5,
             'dynamic_age_min': 90.0,
             'dynamic_age_max': 240.0,
+            'auto_exclude_enabled': True,
+            'auto_exclude_threshold_bps': -2.5,
+            'auto_exclude_consecutive': 4,
+            'auto_exclude_min_fills': 8,
+            'auto_exclude_cooldown': 900,
+            'auto_exclude_window_label': '30s',
         }
         cfg = MMConfig.from_legacy_dict(d)
         assert cfg.loss_streak.limit == 3
@@ -281,6 +315,12 @@ class TestMMConfigFromLegacyDict:
         assert cfg.dynamic_age.baseline_vol_bps == 1.5
         assert cfg.dynamic_age.min_seconds == 90.0
         assert cfg.dynamic_age.max_seconds == 240.0
+        assert cfg.auto_exclude.enabled is True
+        assert cfg.auto_exclude.threshold_bps == -2.5
+        assert cfg.auto_exclude.consecutive == 4
+        assert cfg.auto_exclude.min_fills == 8
+        assert cfg.auto_exclude.cooldown_seconds == 900
+        assert cfg.auto_exclude.window_label == '30s'
 
     def test_close_spread_bps_none_when_omitted(self) -> None:
         # Distinguish "not provided" from "0.0" — closer needs Optional[float]

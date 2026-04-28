@@ -114,6 +114,16 @@ class MarketMakingStrategy(BaseStrategy):
                 f"floor={self._dynamic_offset_floor}, max_add={self._dynamic_offset_max_addition}"
             )
 
+        # ---- Auto-exclude on consecutive adverse-selection windows ---- #
+        if self.cfg.auto_exclude.enabled:
+            logger.info(
+                f"[mm] Auto-exclude armed: threshold={self.cfg.auto_exclude.threshold_bps}bps, "
+                f"consecutive={self.cfg.auto_exclude.consecutive}, "
+                f"min_fills={self.cfg.auto_exclude.min_fills}, "
+                f"window={self.cfg.auto_exclude.window_label}, "
+                f"cooldown={self.cfg.auto_exclude.cooldown_seconds}s"
+            )
+
         # ---- Per-coin offset/spread/size overrides (aliases of self.cfg.per_coin) ---- #
         self._coin_offset_overrides: Dict[str, float] = self.cfg.per_coin.offset
         self._coin_spread_overrides: Dict[str, float] = self.cfg.per_coin.spread
@@ -379,19 +389,24 @@ class MarketMakingStrategy(BaseStrategy):
                     )
                     continue
 
-                # Per-coin loss streak cooldown
-                if self.loss_streak_limit > 0:
-                    cooldown_deadline = self._coin_cooldown_until.get(coin)
-                    now = time.monotonic()
-                    if cooldown_deadline and now < cooldown_deadline:
-                        remaining = cooldown_deadline - now
-                        logger.debug(f"[mm] {coin} in cooldown ({remaining:.0f}s left)")
-                        continue
-                    elif cooldown_deadline:
-                        # Cooldown expired — reset
-                        del self._coin_cooldown_until[coin]
+                # Auto-exclude: may set _coin_cooldown_until[coin] when adverse
+                # selection has been moderate for ``consecutive`` summary
+                # windows in a row.
+                self._check_auto_exclude(coin)
+
+                # Per-coin cooldown (shared by loss_streak and auto_exclude)
+                cooldown_deadline = self._coin_cooldown_until.get(coin)
+                now = time.monotonic()
+                if cooldown_deadline and now < cooldown_deadline:
+                    remaining = cooldown_deadline - now
+                    logger.debug(f"[mm] {coin} in cooldown ({remaining:.0f}s left)")
+                    continue
+                elif cooldown_deadline:
+                    # Cooldown expired — reset
+                    del self._coin_cooldown_until[coin]
+                    if self.loss_streak_limit > 0:
                         self._loss_streaks[coin] = 0
-                        logger.info(f"[mm] {coin} cooldown expired, resuming")
+                    logger.info(f"[mm] {coin} cooldown expired, resuming")
 
                 if self._tracker.get_order_count(coin) < self.max_open_orders:
                     self._place_orders(coin)
@@ -910,6 +925,49 @@ class MarketMakingStrategy(BaseStrategy):
             return os.path.exists(self._drain_flag_file)
         except OSError:
             return False
+
+    def _check_auto_exclude(self, coin: str) -> None:
+        """Set ``_coin_cooldown_until[coin]`` when adverse selection has been
+        moderate for ``cfg.auto_exclude.consecutive`` summary windows in a row.
+
+        No-op when the feature is disabled, the AdverseSelectionTracker is
+        unavailable, the coin is already in cooldown, or there isn't enough
+        history yet. Sharing the ``_coin_cooldown_until`` map with
+        ``loss_streak`` means the existing cooldown skip in ``run()`` handles
+        the actual quote suppression.
+        """
+        # Defensive: tests that bypass __init__ (e.g. MarketMakingStrategy.__new__)
+        # may not have ``cfg`` set. The feature is opt-in, so silently no-op.
+        cfg_root = getattr(self, 'cfg', None)
+        if cfg_root is None:
+            return
+        cfg = cfg_root.auto_exclude
+        if not cfg.enabled or self._adverse_tracker is None:
+            return
+        # Already cooling down — nothing to do.
+        existing_deadline = self._coin_cooldown_until.get(coin)
+        if existing_deadline and existing_deadline > time.monotonic():
+            return
+
+        history = self._adverse_tracker.get_recent_windows(coin, n=cfg.consecutive)
+        if len(history) < cfg.consecutive:
+            return
+
+        avg_key = f"avg_{cfg.window_label}"
+        for win in history:
+            if win.get("fills", 0) < cfg.min_fills:
+                return
+            avg = win.get(avg_key)
+            if avg is None or avg > cfg.threshold_bps:
+                return
+
+        deadline = time.monotonic() + cfg.cooldown_seconds
+        self._coin_cooldown_until[coin] = deadline
+        logger.warning(
+            f"[mm] {coin} auto-excluded: {cfg.consecutive} consecutive "
+            f"{avg_key} <= {cfg.threshold_bps} bps "
+            f"(min_fills={cfg.min_fills}) → cooldown {cfg.cooldown_seconds}s"
+        )
 
     def _get_hourly_spread_multiplier(self) -> float:
         """Get spread multiplier for current UTC hour. Returns 1.0 if no schedule."""
