@@ -22,6 +22,7 @@ from strategies.mm_config import (
     INVENTORY_SKEW_CAP,
     MMConfig,
     parse_coin_overrides,
+    parse_spread_schedule,
 )
 from strategies.mm_order_tracker import OrderTracker
 from strategies.mm_position_closer import PositionCloser
@@ -65,10 +66,8 @@ class MarketMakingStrategy(BaseStrategy):
         self.inventory_skew_bps: float = config.get('inventory_skew_bps', 0)
         self.inventory_skew_cap: float = config.get('inventory_skew_cap', INVENTORY_SKEW_CAP)
 
-        # ---- L2 book imbalance guard ---- #
-        self.imbalance_threshold: float = config.get('imbalance_threshold', 0.0)
-        if not (0 <= self.imbalance_threshold <= 1):
-            raise ValueError(f"imbalance_threshold must be in [0, 1], got {self.imbalance_threshold}")
+        # ---- L2 book imbalance (alias of self.cfg.imbalance.placement_threshold) ---- #
+        self.imbalance_threshold: float = self.cfg.imbalance.placement_threshold
 
         # ---- Per-coin loss streak cooldown (alias of self.cfg.loss_streak) ---- #
         self.loss_streak_limit: int = self.cfg.loss_streak.limit
@@ -76,21 +75,12 @@ class MarketMakingStrategy(BaseStrategy):
         self._loss_streaks: Dict[str, int] = defaultdict(int)  # coin -> consecutive losses
         self._coin_cooldown_until: Dict[str, float] = {}  # coin -> monotonic deadline
 
-        # ---- Quiet hours ---- #
-        quiet_hours_str = config.get('quiet_hours_utc', '')
-        self._quiet_hours: Set[int] = set()
-        if quiet_hours_str:
-            for h in str(quiet_hours_str).split(','):
-                h = h.strip()
-                if h:
-                    try:
-                        self._quiet_hours.add(int(h))
-                    except ValueError:
-                        logger.warning(f"[mm] Invalid quiet hour value: '{h}', skipping")
-        self._quiet_spread_multiplier: float = config.get('quiet_hours_spread_multiplier', 0.0)
+        # ---- Quiet hours (aliases of self.cfg.schedule) ---- #
+        self._quiet_hours: Set[int] = self.cfg.schedule.quiet_hours_utc
+        self._quiet_spread_multiplier: float = self.cfg.schedule.quiet_hours_spread_multiplier
         self._was_quiet: bool = False
         if self._quiet_hours:
-            mode = "spread×%.1f" % self._quiet_spread_multiplier if self._quiet_spread_multiplier > 0 else "stop"
+            mode = f"spread×{self._quiet_spread_multiplier:.1f}" if self._quiet_spread_multiplier > 0 else "stop"
             logger.info(f"[mm] Quiet hours enabled: UTC {sorted(self._quiet_hours)} mode={mode}")
 
         # ---- Drain mode (graceful pre-shutdown) ---- #
@@ -104,10 +94,8 @@ class MarketMakingStrategy(BaseStrategy):
         if self._drain_flag_file:
             logger.info(f"[mm] Drain mode armed: flag_file={self._drain_flag_file}")
 
-        # ---- Hourly spread schedule ---- #
-        self._spread_schedule: Dict[int, float] = self._parse_spread_schedule(
-            config.get('spread_schedule', '')
-        )
+        # ---- Hourly spread schedule (alias of self.cfg.schedule.spread_schedule) ---- #
+        self._spread_schedule: Dict[int, float] = self.cfg.schedule.spread_schedule
         if self._spread_schedule:
             logger.info(f"[mm] Spread schedule: {dict(sorted(self._spread_schedule.items()))}")
 
@@ -198,12 +186,12 @@ class MarketMakingStrategy(BaseStrategy):
             maker_only=self.maker_only,
             taker_fallback_age_seconds=config.get('taker_fallback_age_seconds', None),
             aggressive_loss_bps=config.get('aggressive_loss_bps', 1.0),
-            force_close_max_loss_bps=config.get('force_close_max_loss_bps', 0.0),
+            force_close_max_loss_bps=self.cfg.close.force_close_max_loss_bps,
             coin_spread_overrides=self._coin_spread_overrides,
-            close_spread_bps=config.get('close_spread_bps', None),
-            close_breakeven_pct=config.get('close_breakeven_pct', 0.50),
-            close_aggressive_pct=config.get('close_aggressive_pct', 0.75),
-            unrealized_loss_close_bps=config.get('unrealized_loss_close_bps', 0.0),
+            close_spread_bps=self.cfg.close.spread_bps,
+            close_breakeven_pct=self.cfg.close.breakeven_pct,
+            close_aggressive_pct=self.cfg.close.aggressive_pct,
+            unrealized_loss_close_bps=self.cfg.close.unrealized_loss_close_bps,
         )
 
     @property
@@ -802,53 +790,13 @@ class MarketMakingStrategy(BaseStrategy):
 
     @staticmethod
     def _parse_spread_schedule(raw: str) -> Dict[int, float]:
-        """Parse spread schedule into ``{hour: multiplier}`` dict.
+        """Backward-compat shim — delegates to ``mm_config.parse_spread_schedule``.
 
-        Supports single hours (``'14:1.5'``) and ranges (``'0-3:1.5'``).
-        Ranges wrap around midnight (``'22-2:1.5'`` → hours 22,23,0,1,2).
+        New code should import the helper directly. Kept here so existing
+        external callers (and tests that exercised this static method) keep
+        working until they migrate.
         """
-        result: Dict[int, float] = {}
-        if not raw or not str(raw).strip():
-            return result
-        for entry in str(raw).split(','):
-            entry = entry.strip()
-            if not entry:
-                continue
-            try:
-                # Split on the last ':' to separate hour(s) from multiplier
-                parts = entry.rsplit(':', 1)
-                if len(parts) != 2:
-                    raise ValueError(f"expected 'HOUR:MULT' or 'START-END:MULT', got '{entry}'")
-                hour_part, mult_str = parts
-                mult = float(mult_str)
-                if mult < 0:
-                    raise ValueError(f"multiplier must be >= 0, got {mult}")
-
-                if '-' in hour_part:
-                    # Range format: START-END
-                    start_str, end_str = hour_part.split('-', 1)
-                    start_hour = int(start_str.strip())
-                    end_hour = int(end_str.strip())
-                    if not (0 <= start_hour <= 23):
-                        raise ValueError(f"start hour must be 0-23, got {start_hour}")
-                    if not (0 <= end_hour <= 23):
-                        raise ValueError(f"end hour must be 0-23, got {end_hour}")
-                    # Expand range (supports wrap-around: 22-2 → 22,23,0,1,2)
-                    h = start_hour
-                    while True:
-                        result[h] = mult
-                        if h == end_hour:
-                            break
-                        h = (h + 1) % 24
-                else:
-                    # Single hour format
-                    hour = int(hour_part.strip())
-                    if not (0 <= hour <= 23):
-                        raise ValueError(f"hour must be 0-23, got {hour}")
-                    result[hour] = mult
-            except (ValueError, IndexError) as e:
-                logger.warning(f"[mm] Invalid spread_schedule entry: '{entry}', skipping ({e})")
-        return result
+        return parse_spread_schedule(raw)
 
     def _get_coin_offset(self, coin: str) -> float:
         """Get BBO offset for a specific coin, with optional dynamic adjustment.
