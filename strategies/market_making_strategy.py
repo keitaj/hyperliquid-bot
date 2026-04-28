@@ -99,14 +99,14 @@ class MarketMakingStrategy(BaseStrategy):
         if self._spread_schedule:
             logger.info(f"[mm] Spread schedule: {dict(sorted(self._spread_schedule.items()))}")
 
-        # ---- Dynamic offset auto-adjustment ---- #
-        self._dynamic_offset_enabled: bool = config.get('dynamic_offset_enabled', False)
-        self._dynamic_offset_sensitivity: float = config.get('dynamic_offset_sensitivity', 0.5)
-        self._dynamic_offset_tighten_rate: float = config.get('dynamic_offset_tighten_rate', 0.25)
-        self._dynamic_offset_max_addition: float = config.get('dynamic_offset_max_addition', 3.0)
-        self._dynamic_offset_max_reduction: float = config.get('dynamic_offset_max_reduction', 1.0)
-        self._dynamic_offset_floor: float = config.get('dynamic_offset_floor', 0.5)
-        self._dynamic_offset_min_fills: int = config.get('dynamic_offset_min_fills', 5)
+        # ---- Dynamic offset auto-adjustment (aliases of self.cfg.dynamic_offset) ---- #
+        self._dynamic_offset_enabled: bool = self.cfg.dynamic_offset.enabled
+        self._dynamic_offset_sensitivity: float = self.cfg.dynamic_offset.sensitivity
+        self._dynamic_offset_tighten_rate: float = self.cfg.dynamic_offset.tighten_rate
+        self._dynamic_offset_max_addition: float = self.cfg.dynamic_offset.max_addition
+        self._dynamic_offset_max_reduction: float = self.cfg.dynamic_offset.max_reduction
+        self._dynamic_offset_floor: float = self.cfg.dynamic_offset.floor
+        self._dynamic_offset_min_fills: int = self.cfg.dynamic_offset.min_fills
         self._adverse_tracker = None  # set by bot.py after WS init
         if self._dynamic_offset_enabled:
             logger.info(
@@ -142,11 +142,11 @@ class MarketMakingStrategy(BaseStrategy):
         self.vol_adjust_max_offset: float = config.get('vol_adjust_max_offset', 50.0)
         self._recent_mids: Dict[str, deque] = {}  # coin -> deque of recent mid prices
 
-        # ---- Dynamic position age (volatility-adjusted MAX_POSITION_AGE) ---- #
-        self._dynamic_age_enabled: bool = config.get('dynamic_age_enabled', False)
-        self._dynamic_age_baseline_vol: float = config.get('dynamic_age_baseline_vol', 1.0)
-        self._dynamic_age_min: float = config.get('dynamic_age_min', 60.0)
-        self._dynamic_age_max: float = config.get('dynamic_age_max', 300.0)
+        # ---- Dynamic position age (aliases of self.cfg.dynamic_age) ---- #
+        self._dynamic_age_enabled: bool = self.cfg.dynamic_age.enabled
+        self._dynamic_age_baseline_vol: float = self.cfg.dynamic_age.baseline_vol_bps
+        self._dynamic_age_min: float = self.cfg.dynamic_age.min_seconds
+        self._dynamic_age_max: float = self.cfg.dynamic_age.max_seconds
         self._base_max_position_age: float = config.get('max_position_age_seconds', 120.0)
         # coin -> (avg_move_bps, computed_age_seconds) for periodic logging
         self._dynamic_age_recent: Dict[str, Tuple[float, float]] = {}
