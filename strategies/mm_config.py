@@ -12,7 +12,7 @@ are kept here as a single source of truth.
 
 import logging
 from dataclasses import dataclass, field
-from typing import Dict
+from typing import Dict, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,73 @@ DYNAMIC_AGE_LOG_INTERVAL: float = 300.0
 
 
 # ---- Helpers ---- #
+
+def parse_quiet_hours(value: object) -> Set[int]:
+    """Parse a ``"17,18,22"`` style hour list into a ``Set[int]``.
+
+    Empty / falsy input returns an empty set. Non-integer entries are
+    skipped after a warning log.
+    """
+    result: Set[int] = set()
+    if not value:
+        return result
+    for h in str(value).split(','):
+        h = h.strip()
+        if not h:
+            continue
+        try:
+            result.add(int(h))
+        except ValueError:
+            logger.warning(f"[mm] Invalid quiet hour value: '{h}', skipping")
+    return result
+
+
+def parse_spread_schedule(value: object) -> Dict[int, float]:
+    """Parse spread schedule into ``{hour: multiplier}`` dict.
+
+    Supports single hours (``"14:1.5"``) and inclusive ranges
+    (``"0-3:1.5"``).  Ranges wrap around midnight (``"22-2:1.5"`` →
+    hours 22, 23, 0, 1, 2).  Invalid entries are skipped after a warning.
+    """
+    result: Dict[int, float] = {}
+    if not value or not str(value).strip():
+        return result
+    for entry in str(value).split(','):
+        entry = entry.strip()
+        if not entry:
+            continue
+        try:
+            parts = entry.rsplit(':', 1)
+            if len(parts) != 2:
+                raise ValueError(f"expected 'HOUR:MULT' or 'START-END:MULT', got '{entry}'")
+            hour_part, mult_str = parts
+            mult = float(mult_str)
+            if mult < 0:
+                raise ValueError(f"multiplier must be >= 0, got {mult}")
+
+            if '-' in hour_part:
+                start_str, end_str = hour_part.split('-', 1)
+                start_hour = int(start_str.strip())
+                end_hour = int(end_str.strip())
+                if not (0 <= start_hour <= 23):
+                    raise ValueError(f"start hour must be 0-23, got {start_hour}")
+                if not (0 <= end_hour <= 23):
+                    raise ValueError(f"end hour must be 0-23, got {end_hour}")
+                h = start_hour
+                while True:
+                    result[h] = mult
+                    if h == end_hour:
+                        break
+                    h = (h + 1) % 24
+            else:
+                hour = int(hour_part.strip())
+                if not (0 <= hour <= 23):
+                    raise ValueError(f"hour must be 0-23, got {hour}")
+                result[hour] = mult
+        except (ValueError, IndexError) as e:
+            logger.warning(f"[mm] Invalid spread_schedule entry: '{entry}', skipping ({e})")
+    return result
+
 
 def parse_coin_overrides(value: object) -> Dict[str, float]:
     """Parse a ``"COIN:BPS,COIN:BPS,..."`` string into ``{coin: bps}``.
@@ -113,6 +180,52 @@ class PerCoinOverrides:
 
 
 @dataclass
+class ImbalanceConfig:
+    """L2 book imbalance thresholds.
+
+    ``placement_threshold`` is read by the MM strategy at order-placement
+    time (skip the side that's adversely-imbalanced).  ``reactive_threshold``
+    and ``reactive_depth`` are read by ``bot.py`` to wire up the WS
+    ``ImbalanceGuard`` (cancel orders when the book skews after placement).
+    """
+
+    placement_threshold: float = 0.0
+    reactive_threshold: float = 0.0
+    reactive_depth: int = 5
+
+    def __post_init__(self) -> None:
+        if not (0 <= self.placement_threshold <= 1):
+            raise ValueError(
+                f"imbalance_threshold must be in [0, 1], got {self.placement_threshold}"
+            )
+
+
+@dataclass
+class CloseConfig:
+    """Position-close behaviour parameters.
+
+    Most fields default to disabled (``0.0`` / ``None``) so the legacy
+    behaviour is preserved when no value is provided.
+    """
+
+    breakeven_pct: float = 0.50
+    aggressive_pct: float = 0.75
+    spread_bps: Optional[float] = None
+    refresh_threshold_bps: float = 0.0
+    unrealized_loss_close_bps: float = 0.0
+    force_close_max_loss_bps: float = 0.0
+
+
+@dataclass
+class ScheduleConfig:
+    """Hourly spread schedule and quiet-hours behaviour."""
+
+    spread_schedule: Dict[int, float] = field(default_factory=dict)
+    quiet_hours_utc: Set[int] = field(default_factory=set)
+    quiet_hours_spread_multiplier: float = 0.0
+
+
+@dataclass
 class MMConfig:
     """Root config for ``MarketMakingStrategy`` (Phase 1 subset).
 
@@ -124,6 +237,9 @@ class MMConfig:
     microprice: MicropriceConfig = field(default_factory=MicropriceConfig)
     velocity: VelocityGuardConfig = field(default_factory=VelocityGuardConfig)
     per_coin: PerCoinOverrides = field(default_factory=PerCoinOverrides)
+    imbalance: ImbalanceConfig = field(default_factory=ImbalanceConfig)
+    close: CloseConfig = field(default_factory=CloseConfig)
+    schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
 
     @classmethod
     def from_legacy_dict(cls, d: Dict) -> "MMConfig":
@@ -132,6 +248,8 @@ class MMConfig:
         Unknown keys are ignored — this method is a one-way bridge used while
         the rest of the bot still populates a flat dict.
         """
+        close_spread_bps_raw = d.get('close_spread_bps', None)
+        close_spread_bps = float(close_spread_bps_raw) if close_spread_bps_raw is not None else None
         return cls(
             loss_streak=LossStreakConfig(
                 limit=int(d.get('loss_streak_limit', 0)),
@@ -151,5 +269,23 @@ class MMConfig:
                 offset=parse_coin_overrides(d.get('coin_offset_overrides', '')),
                 spread=parse_coin_overrides(d.get('coin_spread_overrides', '')),
                 size=parse_coin_overrides(d.get('coin_size_overrides', '')),
+            ),
+            imbalance=ImbalanceConfig(
+                placement_threshold=float(d.get('imbalance_threshold', 0.0)),
+                reactive_threshold=float(d.get('imbalance_guard_threshold', 0.0)),
+                reactive_depth=int(d.get('imbalance_guard_depth', 5)),
+            ),
+            close=CloseConfig(
+                breakeven_pct=float(d.get('close_breakeven_pct', 0.50)),
+                aggressive_pct=float(d.get('close_aggressive_pct', 0.75)),
+                spread_bps=close_spread_bps,
+                refresh_threshold_bps=float(d.get('close_refresh_threshold_bps', 0.0)),
+                unrealized_loss_close_bps=float(d.get('unrealized_loss_close_bps', 0.0)),
+                force_close_max_loss_bps=float(d.get('force_close_max_loss_bps', 0.0)),
+            ),
+            schedule=ScheduleConfig(
+                spread_schedule=parse_spread_schedule(d.get('spread_schedule', '')),
+                quiet_hours_utc=parse_quiet_hours(d.get('quiet_hours_utc', '')),
+                quiet_hours_spread_multiplier=float(d.get('quiet_hours_spread_multiplier', 0.0)),
             ),
         )

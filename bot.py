@@ -413,13 +413,23 @@ class HyperliquidBot:
                     self.ws_feed.add_listener(self.bbo_guard.on_l2_update)
                     logger.info("[ws] BboGuard enabled (threshold=%.1f bps)", threshold)
 
+                # MM-strategy grouped config (None for non-MM strategies); each
+                # WS guard below reads from it when available, with a fallback
+                # to the flat strategy_config dict.
+                strategy_cfg = getattr(self.strategy, 'cfg', None)
+
                 # Phase 4: L2 imbalance detection → one-sided cancel
-                imb_threshold = self.strategy_config.get('imbalance_guard_threshold', 0)
+                if strategy_cfg is not None:
+                    imb_threshold = strategy_cfg.imbalance.reactive_threshold
+                    imb_depth = strategy_cfg.imbalance.reactive_depth
+                else:
+                    imb_threshold = float(self.strategy_config.get('imbalance_guard_threshold', 0))
+                    imb_depth = int(self.strategy_config.get('imbalance_guard_depth', 5))
                 if imb_threshold > 0:
                     self.imbalance_guard = ImbalanceGuard(
                         tracker,
                         threshold=imb_threshold,
-                        depth=int(self.strategy_config.get('imbalance_guard_depth', 5)),
+                        depth=imb_depth,
                     )
                     self.ws_feed.add_listener(self.imbalance_guard.on_l2_update)
                     logger.info(
@@ -428,9 +438,6 @@ class HyperliquidBot:
                     )
 
                 # Phase 4b: BBO velocity → directional cancel
-                # Read from strategy.cfg.velocity when available (MM strategy);
-                # fall back to flat config dict for non-MM strategies.
-                strategy_cfg = getattr(self.strategy, 'cfg', None)
                 if strategy_cfg is not None:
                     velocity_enabled = strategy_cfg.velocity.enabled
                     velocity_consecutive = strategy_cfg.velocity.consecutive
@@ -454,7 +461,12 @@ class HyperliquidBot:
 
                 # Phase 5: Close order refresh on BBO change
                 closer = getattr(self.strategy, '_closer', None)
-                close_refresh_threshold = self.strategy_config.get('close_refresh_threshold_bps', 0.0)
+                if strategy_cfg is not None:
+                    close_refresh_threshold = strategy_cfg.close.refresh_threshold_bps
+                else:
+                    close_refresh_threshold = float(
+                        self.strategy_config.get('close_refresh_threshold_bps', 0.0)
+                    )
                 if closer is not None and close_refresh_threshold > 0:
                     self.close_refresh_guard = CloseRefreshGuard(
                         closer,

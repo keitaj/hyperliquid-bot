@@ -6,12 +6,17 @@ from strategies.mm_config import (
     DYNAMIC_AGE_LOG_INTERVAL,
     FILL_RATE_LOG_INTERVAL,
     INVENTORY_SKEW_CAP,
+    CloseConfig,
+    ImbalanceConfig,
     LossStreakConfig,
     MicropriceConfig,
     MMConfig,
     PerCoinOverrides,
+    ScheduleConfig,
     VelocityGuardConfig,
     parse_coin_overrides,
+    parse_quiet_hours,
+    parse_spread_schedule,
 )
 
 
@@ -96,6 +101,81 @@ class TestPerCoinOverrides:
         assert 'BTC' not in b.offset
 
 
+class TestParseQuietHours:
+    def test_empty(self) -> None:
+        assert parse_quiet_hours('') == set()
+        assert parse_quiet_hours(None) == set()
+
+    def test_single(self) -> None:
+        assert parse_quiet_hours('17') == {17}
+
+    def test_multiple_with_whitespace(self) -> None:
+        assert parse_quiet_hours(' 17 , 18 ') == {17, 18}
+
+    def test_invalid_skipped(self) -> None:
+        assert parse_quiet_hours('17,abc,18') == {17, 18}
+
+
+class TestParseSpreadSchedule:
+    def test_empty(self) -> None:
+        assert parse_spread_schedule('') == {}
+        assert parse_spread_schedule(None) == {}
+
+    def test_single_hour(self) -> None:
+        assert parse_spread_schedule('14:1.5') == {14: 1.5}
+
+    def test_multiple(self) -> None:
+        assert parse_spread_schedule('0:1.5,3:2.0,14:1.5') == {0: 1.5, 3: 2.0, 14: 1.5}
+
+    def test_range(self) -> None:
+        assert parse_spread_schedule('0-3:1.5') == {0: 1.5, 1: 1.5, 2: 1.5, 3: 1.5}
+
+    def test_range_wrap_around(self) -> None:
+        assert parse_spread_schedule('22-2:1.5') == {22: 1.5, 23: 1.5, 0: 1.5, 1: 1.5, 2: 1.5}
+
+    def test_invalid_hour_skipped(self) -> None:
+        # 25 is out of range — that entry is skipped, others survive
+        assert parse_spread_schedule('25:1.5,14:2.0') == {14: 2.0}
+
+    def test_negative_multiplier_skipped(self) -> None:
+        assert parse_spread_schedule('14:-1.5') == {}
+
+
+class TestImbalanceConfig:
+    def test_defaults(self) -> None:
+        cfg = ImbalanceConfig()
+        assert cfg.placement_threshold == 0.0
+        assert cfg.reactive_threshold == 0.0
+        assert cfg.reactive_depth == 5
+
+    def test_placement_threshold_range(self) -> None:
+        ImbalanceConfig(placement_threshold=0.0)  # ok (boundary)
+        ImbalanceConfig(placement_threshold=1.0)  # ok (boundary)
+        with pytest.raises(ValueError, match='imbalance_threshold must be in'):
+            ImbalanceConfig(placement_threshold=-0.1)
+        with pytest.raises(ValueError, match='imbalance_threshold must be in'):
+            ImbalanceConfig(placement_threshold=1.1)
+
+
+class TestCloseConfig:
+    def test_defaults(self) -> None:
+        cfg = CloseConfig()
+        assert cfg.breakeven_pct == 0.50
+        assert cfg.aggressive_pct == 0.75
+        assert cfg.spread_bps is None
+        assert cfg.refresh_threshold_bps == 0.0
+        assert cfg.unrealized_loss_close_bps == 0.0
+        assert cfg.force_close_max_loss_bps == 0.0
+
+
+class TestScheduleConfig:
+    def test_defaults_are_empty(self) -> None:
+        cfg = ScheduleConfig()
+        assert cfg.spread_schedule == {}
+        assert cfg.quiet_hours_utc == set()
+        assert cfg.quiet_hours_spread_multiplier == 0.0
+
+
 class TestMMConfigFromLegacyDict:
     def test_empty_dict_yields_defaults(self) -> None:
         cfg = MMConfig.from_legacy_dict({})
@@ -117,6 +197,18 @@ class TestMMConfigFromLegacyDict:
             'coin_offset_overrides': 'SP500:0.5,MSFT:3',
             'coin_spread_overrides': 'TSLA:2',
             'coin_size_overrides': 'NVDA:150',
+            'imbalance_threshold': 0.5,
+            'imbalance_guard_threshold': 0.4,
+            'imbalance_guard_depth': 7,
+            'close_breakeven_pct': 0.6,
+            'close_aggressive_pct': 0.8,
+            'close_spread_bps': 5.0,
+            'close_refresh_threshold_bps': 0.5,
+            'unrealized_loss_close_bps': 15.0,
+            'force_close_max_loss_bps': 5.0,
+            'spread_schedule': '0:1.5,12:1.3',
+            'quiet_hours_utc': '17,18',
+            'quiet_hours_spread_multiplier': 1.5,
         }
         cfg = MMConfig.from_legacy_dict(d)
         assert cfg.loss_streak.limit == 3
@@ -130,6 +222,27 @@ class TestMMConfigFromLegacyDict:
         assert cfg.per_coin.offset == {'SP500': 0.5, 'MSFT': 3.0}
         assert cfg.per_coin.spread == {'TSLA': 2.0}
         assert cfg.per_coin.size == {'NVDA': 150.0}
+        assert cfg.imbalance.placement_threshold == 0.5
+        assert cfg.imbalance.reactive_threshold == 0.4
+        assert cfg.imbalance.reactive_depth == 7
+        assert cfg.close.breakeven_pct == 0.6
+        assert cfg.close.aggressive_pct == 0.8
+        assert cfg.close.spread_bps == 5.0
+        assert cfg.close.refresh_threshold_bps == 0.5
+        assert cfg.close.unrealized_loss_close_bps == 15.0
+        assert cfg.close.force_close_max_loss_bps == 5.0
+        assert cfg.schedule.spread_schedule == {0: 1.5, 12: 1.3}
+        assert cfg.schedule.quiet_hours_utc == {17, 18}
+        assert cfg.schedule.quiet_hours_spread_multiplier == 1.5
+
+    def test_close_spread_bps_none_when_omitted(self) -> None:
+        # Distinguish "not provided" from "0.0" — closer needs Optional[float]
+        cfg = MMConfig.from_legacy_dict({})
+        assert cfg.close.spread_bps is None
+
+    def test_imbalance_validation_propagates(self) -> None:
+        with pytest.raises(ValueError, match='imbalance_threshold'):
+            MMConfig.from_legacy_dict({'imbalance_threshold': 1.5})
 
     def test_unknown_keys_ignored(self) -> None:
         cfg = MMConfig.from_legacy_dict({'unknown_key': 'foo', 'loss_streak_limit': 2})
