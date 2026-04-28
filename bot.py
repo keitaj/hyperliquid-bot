@@ -985,7 +985,7 @@ if __name__ == "__main__":
                         help='Spread from mid price in basis points (market_making, default: 5)')
     parser.add_argument('--order-size-usd', type=float, help='Size per order in USD (market_making, default: 50)')
     parser.add_argument('--max-open-orders', type=int, help='Max concurrent open orders (market_making, default: 4)')
-    parser.add_argument('--refresh-interval', type=float,
+    parser.add_argument('--refresh-interval', dest='refresh_interval_seconds', type=float,
                         help='Seconds before cancelling stale orders (market_making, default: 30)')
     parser.add_argument('--no-close-immediately', action='store_true', default=False,
                         help='Disable immediate position closing (market_making)')
@@ -994,11 +994,11 @@ if __name__ == "__main__":
                              'drain mode: stops placing new entry orders and only manages '
                              'existing positions until the file is removed. Used to gracefully '
                              'unwind before a session switch. Empty/unset = disabled. (market_making)')
-    parser.add_argument('--max-position-age', type=float,
+    parser.add_argument('--max-position-age', dest='max_position_age_seconds', type=float,
                         help='Max seconds to hold a position before force-closing (market_making, default: 120)')
     parser.add_argument('--maker-only', action='store_true', default=False,
                         help='Use post-only (maker) orders for all trades including closes (market_making)')
-    parser.add_argument('--taker-fallback-age', type=float,
+    parser.add_argument('--taker-fallback-age', dest='taker_fallback_age_seconds', type=float,
                         help='Seconds after max-position-age to fall back to taker for force-close. '
                              'Not set = never use taker. 0 = taker at max-position-age. (market_making)')
     parser.add_argument('--aggressive-loss-bps', type=float,
@@ -1057,27 +1057,30 @@ if __name__ == "__main__":
                         help='UTC hours to reduce/stop quoting, comma-separated (e.g. "17" or "17,18")')
     parser.add_argument('--quiet-hours-spread-multiplier', type=float, default=0.0,
                         help='Spread multiplier during quiet hours (0=stop quoting, >0=widen spread)')
-    parser.add_argument('--microprice-skew', action='store_true', default=False,
+    parser.add_argument('--microprice-skew', dest='microprice_skew_enabled',
+                        action='store_true', default=False,
                         help='Enable micro-price asymmetric offset for taker fill prevention (market_making)')
     parser.add_argument('--microprice-skew-multiplier', type=float,
                         help='Micro-price skew scaling factor (default: 1.0, market_making)')
     parser.add_argument('--microprice-max-skew-bps', type=float,
                         help='Max offset adjustment from micro-price skew in bps (default: 2.0)')
-    parser.add_argument('--velocity-guard', action='store_true', default=False,
+    parser.add_argument('--velocity-guard', dest='velocity_guard_enabled',
+                        action='store_true', default=False,
                         help='Enable BBO velocity guard — cancel orders on sustained directional BBO moves')
     parser.add_argument('--velocity-consecutive', type=int,
                         help='Number of consecutive same-direction BBO moves to trigger cancel (default: 3)')
     parser.add_argument('--velocity-min-move-bps', type=float,
                         help='Minimum cumulative BBO move in bps to trigger cancel (default: 1.0)')
-    parser.add_argument('--dynamic-offset', action='store_true', default=False,
+    parser.add_argument('--dynamic-offset', dest='dynamic_offset_enabled',
+                        action='store_true', default=False,
                         help='Enable dynamic offset auto-adjustment based on adverse selection (requires --enable-ws)')
     parser.add_argument('--dynamic-offset-sensitivity', type=float,
                         help='Offset widening per 1bps of adverse selection (default: 0.5)')
     parser.add_argument('--dynamic-offset-tighten-rate', type=float,
                         help='Offset tightening rate for favorable fills (default: 0.25)')
-    parser.add_argument('--dynamic-offset-max-add', type=float,
+    parser.add_argument('--dynamic-offset-max-add', dest='dynamic_offset_max_addition', type=float,
                         help='Max offset addition in bps (default: 3.0)')
-    parser.add_argument('--dynamic-offset-max-reduce', type=float,
+    parser.add_argument('--dynamic-offset-max-reduce', dest='dynamic_offset_max_reduction', type=float,
                         help='Max offset reduction in bps (default: 1.0)')
     parser.add_argument('--dynamic-offset-floor', type=float,
                         help='Minimum offset floor in bps (default: 0.5)')
@@ -1086,7 +1089,8 @@ if __name__ == "__main__":
     parser.add_argument('--unrealized-loss-close-bps', type=float,
                         help='Close position early via taker when unrealized loss exceeds this bps threshold; '
                              '0 = disabled (default: 0, market_making)')
-    parser.add_argument('--vol-adjust', action='store_true', default=False,
+    parser.add_argument('--vol-adjust', dest='vol_adjust_enabled',
+                        action='store_true', default=False,
                         help='Enable volatility-adjusted BBO offset (market_making)')
     parser.add_argument('--vol-adjust-multiplier', type=float,
                         help='Volatility multiplier for offset adjustment (default: 2.0, market_making)')
@@ -1094,7 +1098,8 @@ if __name__ == "__main__":
                         help='Number of recent mid prices for volatility calc (default: 30, market_making)')
     parser.add_argument('--vol-adjust-max-offset', type=float,
                         help='Max BBO offset in bps after vol adjustment (default: 50, market_making)')
-    parser.add_argument('--dynamic-age', action='store_true', default=False,
+    parser.add_argument('--dynamic-age', dest='dynamic_age_enabled',
+                        action='store_true', default=False,
                         help='Enable volatility-adjusted MAX_POSITION_AGE (market_making)')
     parser.add_argument('--dynamic-age-baseline-vol', type=float,
                         help='Baseline volatility in bps for dynamic age scaling (default: 1.0, market_making)')
@@ -1168,9 +1173,9 @@ if __name__ == "__main__":
         ],
         'market_making': [
             'spread_bps', 'order_size_usd', 'max_open_orders',
-            ('refresh_interval', 'refresh_interval_seconds'),
-            ('max_position_age', 'max_position_age_seconds'),
-            ('taker_fallback_age', 'taker_fallback_age_seconds'),
+            'refresh_interval_seconds',
+            'max_position_age_seconds',
+            'taker_fallback_age_seconds',
             'aggressive_loss_bps',
             'force_close_max_loss_bps',
             'close_spread_bps',
@@ -1186,7 +1191,7 @@ if __name__ == "__main__":
             'bbo_guard_threshold_bps',
             'imbalance_guard_threshold',
             'imbalance_guard_depth',
-            ('vol_adjust', 'vol_adjust_enabled'),
+            'vol_adjust_enabled',
             'vol_adjust_multiplier',
             'vol_lookback',
             'vol_adjust_max_offset',
@@ -1198,20 +1203,20 @@ if __name__ == "__main__":
             'spread_schedule',
             'quiet_hours_utc',
             'quiet_hours_spread_multiplier',
-            ('microprice_skew', 'microprice_skew_enabled'),
+            'microprice_skew_enabled',
             'microprice_skew_multiplier',
             'microprice_max_skew_bps',
-            ('velocity_guard', 'velocity_guard_enabled'),
+            'velocity_guard_enabled',
             'velocity_consecutive',
             'velocity_min_move_bps',
-            ('dynamic_offset', 'dynamic_offset_enabled'),
+            'dynamic_offset_enabled',
             'dynamic_offset_sensitivity',
             'dynamic_offset_tighten_rate',
-            ('dynamic_offset_max_add', 'dynamic_offset_max_addition'),
-            ('dynamic_offset_max_reduce', 'dynamic_offset_max_reduction'),
+            'dynamic_offset_max_addition',
+            'dynamic_offset_max_reduction',
             'dynamic_offset_floor',
             'dynamic_offset_min_fills',
-            ('dynamic_age', 'dynamic_age_enabled'),
+            'dynamic_age_enabled',
             'dynamic_age_baseline_vol',
             'dynamic_age_min',
             'dynamic_age_max',
