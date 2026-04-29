@@ -276,6 +276,27 @@ class TestApproveConfiguredBuilders:
         msg = caplog.text
         assert "exceeds pre-approved max_fee_rate" in msg
         assert "cash" in msg
+        # The reported per-order percent must reflect the real fee
+        # (tenths_bps=50 → 5 bp → 0.05%).  The previously buggy divisor
+        # would print "0.0050%" and silently drift back if reintroduced.
+        assert "0.0500%" in msg
+
+    def test_warns_at_default_f_with_tight_cap(self, monkeypatch, caplog):
+        """The boundary case the divisor bug would silently miss:
+        tenths_bps=10 (1 bp) with max_fee_rate=0.001% (0.1 bp).  The
+        exchange rejects every such order; the validator must warn."""
+        monkeypatch.setattr(Config, "BUILDER_FEES", {
+            "cash": {
+                "address": "0xc0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0",
+                "tenths_bps": 10,
+                "max_fee_rate": "0.001%",
+            },
+        })
+        mgr = _make_order_manager()
+        mgr.exchange.approve_builder_fee.return_value = {"status": "ok"}
+        with caplog.at_level("WARNING"):
+            mgr.approve_configured_builders()
+        assert "exceeds pre-approved max_fee_rate" in caplog.text
 
     def test_no_warning_when_config_is_consistent(self, two_builders, caplog):
         """tenths_bps=10 (1 bp) with max_fee_rate=0.05% (5 bp) leaves

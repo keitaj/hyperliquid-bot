@@ -150,14 +150,16 @@ class OrderManager:
     def _validate_builder_fee_config(dex: str, cfg: Dict[str, object]) -> None:
         """Warn if the per-order builder fee exceeds ``max_fee_rate``.
 
-        The Hyperliquid exchange rejects any order whose builder fee
-        is greater than the pre-approved ``maxFeeRate`` for that builder.
-        ``f`` is in tenths of a basis point (10 = 1 bp = 0.01%).  We parse
-        ``max_fee_rate`` as a percent string and compare in decimal.
+        The Hyperliquid exchange rejects any order whose builder fee is
+        greater than the pre-approved ``maxFeeRate`` for that builder.
+        ``f`` is in tenths of a basis point: one tenth-of-bp is 0.001%
+        (1e-5 in decimal), so f tenths-of-bp = ``tenths / 100_000`` in
+        decimal.  ``max_fee_rate`` is parsed as a percent string and
+        compared in decimal.
         """
         try:
             tenths = int(cfg["tenths_bps"])
-            per_order_decimal = tenths / 1_000_000  # tenths-of-bp → decimal
+            per_order_decimal = tenths / 100_000  # tenths-of-bp → decimal
             max_str = str(cfg["max_fee_rate"]).strip().rstrip("%")
             max_decimal = float(max_str) / 100  # percent string → decimal
         except (KeyError, TypeError, ValueError) as e:
