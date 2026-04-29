@@ -1,5 +1,6 @@
 """Tests for RiskManager: check_risk_limits, per-trade stop loss, cooldown, risk levels."""
 
+import logging
 import os
 from datetime import datetime, timedelta
 from unittest.mock import patch, MagicMock
@@ -164,6 +165,144 @@ class TestCheckRiskLimits:
         rm.daily_starting_balance = 10000.0
         result = rm.check_risk_limits()
         assert result['drawdown_ok'] is False
+
+
+# ------------------------------------------------------------------ #
+#  Deposit vs API failure detection in daily balance check
+# ------------------------------------------------------------------ #
+
+class TestSuspiciousBalanceDirection:
+    """Balance changes >50% are direction-aware:
+
+    * Increase  -> treat as deposit, reset daily baseline (info log).
+    * Decrease  -> treat as API failure, preserve baseline, skip daily loss
+                    check (warning log).
+    Smaller changes keep the existing behaviour.
+    """
+
+    def test_deposit_resets_daily_baseline(self):
+        rm = _make_rm(
+            config_overrides={'daily_loss_limit': 200},
+            metrics=_make_metrics(total_balance=2000.0),
+        )
+        rm.starting_balance = 1000.0
+        rm.daily_starting_balance = 1000.0
+
+        result = rm.check_risk_limits()
+
+        assert rm.daily_starting_balance == 2000.0
+        # Deposit detection must not trigger any stop / force close.
+        assert result['stop_bot'] is False
+        assert result['force_close_all'] is False
+
+    def test_deposit_logs_info_with_treating_as_deposit(self, caplog):
+        rm = _make_rm(
+            config_overrides={'daily_loss_limit': 200},
+            metrics=_make_metrics(total_balance=2000.0),
+        )
+        rm.starting_balance = 1000.0
+        rm.daily_starting_balance = 1000.0
+
+        with caplog.at_level(logging.INFO, logger='risk_manager'):
+            rm.check_risk_limits()
+
+        deposit_records = [
+            r for r in caplog.records
+            if r.name == 'risk_manager' and 'Treating as deposit' in r.getMessage()
+        ]
+        assert len(deposit_records) == 1
+        assert deposit_records[0].levelno == logging.INFO
+
+    def test_api_failure_preserves_baseline(self):
+        rm = _make_rm(
+            config_overrides={'daily_loss_limit': 200},
+            metrics=_make_metrics(total_balance=400.0),
+        )
+        rm.starting_balance = 1000.0
+        rm.daily_starting_balance = 1000.0
+
+        rm.check_risk_limits()
+
+        # Baseline must NOT shift on a suspicious decrease.
+        assert rm.daily_starting_balance == 1000.0
+
+    def test_api_failure_logs_warning_with_likely_api_failure(self, caplog):
+        rm = _make_rm(
+            config_overrides={'daily_loss_limit': 200},
+            metrics=_make_metrics(total_balance=400.0),
+        )
+        rm.starting_balance = 1000.0
+        rm.daily_starting_balance = 1000.0
+
+        with caplog.at_level(logging.WARNING, logger='risk_manager'):
+            rm.check_risk_limits()
+
+        failure_records = [
+            r for r in caplog.records
+            if r.name == 'risk_manager' and 'Likely API failure' in r.getMessage()
+        ]
+        assert len(failure_records) == 1
+        assert failure_records[0].levelno == logging.WARNING
+
+    def test_api_failure_skips_daily_loss_limit(self):
+        rm = _make_rm(
+            config_overrides={'daily_loss_limit': 200},
+            metrics=_make_metrics(total_balance=400.0),
+        )
+        rm.starting_balance = 1000.0
+        rm.daily_starting_balance = 1000.0
+
+        result = rm.check_risk_limits()
+
+        # 60% drop should NOT trigger the daily loss stop even though the
+        # absolute loss far exceeds the configured $200 limit.
+        assert result['stop_bot'] is False
+
+    def test_small_increase_keeps_baseline(self):
+        rm = _make_rm(
+            config_overrides={'daily_loss_limit': 200},
+            metrics=_make_metrics(total_balance=1200.0),
+        )
+        rm.starting_balance = 1000.0
+        rm.daily_starting_balance = 1000.0
+
+        result = rm.check_risk_limits()
+
+        # A 20% rise is below the 50% threshold; baseline must not change.
+        assert rm.daily_starting_balance == 1000.0
+        assert result['stop_bot'] is False
+
+    def test_small_loss_within_threshold_triggers_stop(self):
+        rm = _make_rm(
+            config_overrides={'daily_loss_limit': 200},
+            metrics=_make_metrics(total_balance=750.0),
+        )
+        rm.starting_balance = 1000.0
+        rm.daily_starting_balance = 1000.0
+
+        result = rm.check_risk_limits()
+
+        # 25% drop ($250 loss) is under the 50% suspicious-change cutoff and
+        # exceeds the $200 daily loss limit, so it must still trigger.
+        assert result['stop_bot'] is True
+        assert result['action'] == 'stop_bot'
+        assert 'Daily loss' in result['reason']
+
+    def test_deposit_does_not_mask_other_risk_checks(self):
+        """A deposit-triggered baseline reset must not skip other checks."""
+        rm = _make_rm(
+            config_overrides={'daily_loss_limit': 200, 'max_leverage': 3.0},
+            metrics=_make_metrics(total_balance=2000.0, leverage=10.0),
+        )
+        rm.starting_balance = 1000.0
+        rm.daily_starting_balance = 1000.0
+
+        result = rm.check_risk_limits()
+
+        # Deposit detected, baseline reset, but the leverage check still fires.
+        assert rm.daily_starting_balance == 2000.0
+        assert result['leverage_ok'] is False
+        assert 'Leverage too high' in result['reason']
 
 
 # ------------------------------------------------------------------ #
