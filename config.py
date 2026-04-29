@@ -50,15 +50,21 @@ class Config:
     # Some HIP-3 deployers require attaching a builder code to every order
     # in order for the wallet to be eligible for their rewards program
     # (e.g. Dreamcash USDT rewards).  Set BUILDER_FEES_<DEX>_ADDRESS to
-    # enable per-DEX builder attachment; the builder fee in tenths of a
-    # basis point (f=10 sends 1 bp / 0.01% of order notional) defaults to
-    # 10 unless BUILDER_FEES_<DEX>_TENTHS_BPS is set.  The pre-approval
-    # max fee rate guards against runaway builder fees.
+    # enable per-DEX builder attachment.
+    #
+    # Two values must stay consistent or every order is rejected:
+    #
+    #   tenths_bps  per-order builder fee, in tenths of a basis point.
+    #               f=10 sends 1 bp (0.01% of notional).  Default 10.
+    #   max_fee_rate the pre-approved cap used by approveBuilderFee.
+    #               It must be >= the actual per-order fee or the
+    #               exchange rejects the order.  Default "0.05%" leaves
+    #               headroom for f up to 50 (5 bp) without re-approving.
     #
     # Example for Dreamcash:
     #   BUILDER_FEES_CASH_ADDRESS=0xabc...
-    #   BUILDER_FEES_CASH_TENTHS_BPS=10
-    #   BUILDER_FEES_CASH_MAX_FEE_RATE=0.001%
+    #   BUILDER_FEES_CASH_TENTHS_BPS=10        # 1 bp per order
+    #   BUILDER_FEES_CASH_MAX_FEE_RATE=0.05%   # cap at 5 bp
     BUILDER_FEES: dict = {}
     for _dex in TRADING_DEXES:
         _addr = os.getenv(f"BUILDER_FEES_{_dex.upper()}_ADDRESS")
@@ -69,7 +75,7 @@ class Config:
                     f"BUILDER_FEES_{_dex.upper()}_TENTHS_BPS", "10"
                 )),
                 "max_fee_rate": os.getenv(
-                    f"BUILDER_FEES_{_dex.upper()}_MAX_FEE_RATE", "0.001%"
+                    f"BUILDER_FEES_{_dex.upper()}_MAX_FEE_RATE", "0.05%"
                 ),
             }
 

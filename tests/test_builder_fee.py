@@ -34,7 +34,7 @@ def cash_builder(monkeypatch):
         "cash": {
             "address": "0x4950994884602d1b6c6d96e4fe30f58205c39395",
             "tenths_bps": 10,
-            "max_fee_rate": "0.001%",
+            "max_fee_rate": "0.05%",
         },
     })
     return Config.BUILDER_FEES["cash"]
@@ -46,12 +46,12 @@ def two_builders(monkeypatch):
         "cash": {
             "address": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "tenths_bps": 10,
-            "max_fee_rate": "0.001%",
+            "max_fee_rate": "0.05%",
         },
         "vntl": {
             "address": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             "tenths_bps": 5,
-            "max_fee_rate": "0.0005%",
+            "max_fee_rate": "0.05%",
         },
     })
 
@@ -194,27 +194,36 @@ class TestBulkGrouping:
         assert all(r is not None for r in results)
 
     def test_result_order_preserved(self, two_builders):
+        """Each input slot must receive the oid that came back for *its* coin.
+
+        This is the regression we'd lose if the grouping/stitching code
+        ever stopped tracking original indices.  We assign a deterministic
+        oid per coin and assert positions in ``results`` line up with the
+        positions in ``orders``, regardless of DEX iteration order.
+        """
         mgr = _make_order_manager()
-        # cash group gets [10, 30] (positions 0 and 2), vntl gets [20] (position 1)
-        # The order of bulk calls is dict-iteration order; we just check
-        # that each input index maps to the correct returned oid.
-        mgr.exchange.bulk_orders.side_effect = [
-            self._make_bulk_response([10, 30]),
-            self._make_bulk_response([20]),
-        ]
+        coin_to_oid = {"cash:HOOD": 10, "cash:INTC": 30, "vntl:MAG7": 20}
+
+        def fake_bulk(order_requests, builder=None):
+            statuses = [
+                {"resting": {"oid": coin_to_oid[r["coin"]]}}
+                for r in order_requests
+            ]
+            return {"status": "ok", "response": {"data": {"statuses": statuses}}}
+
+        mgr.exchange.bulk_orders.side_effect = fake_bulk
+
         orders = [
-            _make_order(coin="cash:HOOD"),
-            _make_order(coin="vntl:MAG7"),
-            _make_order(coin="cash:INTC"),
+            _make_order(coin="cash:HOOD"),  # position 0
+            _make_order(coin="vntl:MAG7"),  # position 1
+            _make_order(coin="cash:INTC"),  # position 2
         ]
         results = mgr.bulk_place_orders(orders)
-        # Whichever DEX is processed first, the indices should still align.
-        ids_by_coin = {orders[i].coin: results[i].id for i in range(len(orders))
-                       if results[i] is not None}
-        assert ids_by_coin["cash:HOOD"] in (10, 30, 20)
-        assert ids_by_coin["cash:INTC"] in (10, 30, 20)
-        assert ids_by_coin["vntl:MAG7"] in (10, 30, 20)
-        assert len({ids_by_coin[c] for c in ids_by_coin}) == 3
+
+        # Each result is in its original input slot, with the matching oid.
+        assert results[0] is not None and results[0].id == 10
+        assert results[1] is not None and results[1].id == 20
+        assert results[2] is not None and results[2].id == 30
 
 
 class TestApproveConfiguredBuilders:
@@ -248,3 +257,31 @@ class TestApproveConfiguredBuilders:
         ]
         mgr.approve_configured_builders()
         assert mgr.exchange.approve_builder_fee.call_count == 2
+
+    def test_warns_when_per_order_fee_exceeds_max_rate(self, monkeypatch, caplog):
+        """tenths_bps=50 (5 bp) with max_fee_rate=0.001% (0.1 bp) is a
+        misconfiguration where every order would be rejected.  The startup
+        validator must warn so operators see the cause in the bot log."""
+        monkeypatch.setattr(Config, "BUILDER_FEES", {
+            "cash": {
+                "address": "0xc0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0",
+                "tenths_bps": 50,
+                "max_fee_rate": "0.001%",
+            },
+        })
+        mgr = _make_order_manager()
+        mgr.exchange.approve_builder_fee.return_value = {"status": "ok"}
+        with caplog.at_level("WARNING"):
+            mgr.approve_configured_builders()
+        msg = caplog.text
+        assert "exceeds pre-approved max_fee_rate" in msg
+        assert "cash" in msg
+
+    def test_no_warning_when_config_is_consistent(self, two_builders, caplog):
+        """tenths_bps=10 (1 bp) with max_fee_rate=0.05% (5 bp) leaves
+        plenty of headroom — no validator warning expected."""
+        mgr = _make_order_manager()
+        mgr.exchange.approve_builder_fee.return_value = {"status": "ok"}
+        with caplog.at_level("WARNING"):
+            mgr.approve_configured_builders()
+        assert "exceeds pre-approved max_fee_rate" not in caplog.text

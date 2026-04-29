@@ -238,12 +238,13 @@ FLX_COINS=NVDA,AAPL,WTI
 # bot startup.  Leave unset to keep the previous no-builder behaviour.
 # BUILDER_FEES_<DEX>_TENTHS_BPS sets the per-order builder fee in tenths
 # of a basis point (10 = 1 bp = 0.01% of order notional, default 10).
-# BUILDER_FEES_<DEX>_MAX_FEE_RATE caps the pre-approved fee rate (default
-# 0.001%).
+# BUILDER_FEES_<DEX>_MAX_FEE_RATE is the pre-approval cap and must be
+# >= the per-order fee (otherwise the exchange rejects every order).
+# Default is 0.05%, which leaves headroom up to f=50.
 # Example for a DEX whose deployer publishes a builder code:
 # BUILDER_FEES_CASH_ADDRESS=0xabc...
-# BUILDER_FEES_CASH_TENTHS_BPS=10
-# BUILDER_FEES_CASH_MAX_FEE_RATE=0.001%
+# BUILDER_FEES_CASH_TENTHS_BPS=10        # 1 bp per order
+# BUILDER_FEES_CASH_MAX_FEE_RATE=0.05%   # cap at 5 bp
 ```
 
 ### HIP-3 Command-Line Options

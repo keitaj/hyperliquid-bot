@@ -117,10 +117,18 @@ class OrderManager:
         Errors are logged but do not abort startup; the bot will fall back
         to placing orders without a builder for any DEX whose approval
         failed (rewards eligibility may be lost for that DEX only).
+
+        Also sanity-checks that the per-order fee implied by ``tenths_bps``
+        does not exceed the pre-approved ``max_fee_rate`` — otherwise every
+        order on that DEX would be rejected by the exchange.  A mismatch
+        only triggers a warning so operators can still ship a hot-fix env
+        var without restarting; the actual rejection from the exchange
+        will surface clearly in order logs.
         """
         if not Config.BUILDER_FEES:
             return
         for dex, cfg in Config.BUILDER_FEES.items():
+            self._validate_builder_fee_config(dex, cfg)
             try:
                 result = api_wrapper.call(
                     self.exchange.approve_builder_fee,
@@ -137,6 +145,34 @@ class OrderManager:
                     f"[builder] Failed to approve {dex} builder "
                     f"{cfg['address']}: {e}"
                 )
+
+    @staticmethod
+    def _validate_builder_fee_config(dex: str, cfg: Dict[str, object]) -> None:
+        """Warn if the per-order builder fee exceeds ``max_fee_rate``.
+
+        The Hyperliquid exchange rejects any order whose builder fee
+        is greater than the pre-approved ``maxFeeRate`` for that builder.
+        ``f`` is in tenths of a basis point (10 = 1 bp = 0.01%).  We parse
+        ``max_fee_rate`` as a percent string and compare in decimal.
+        """
+        try:
+            tenths = int(cfg["tenths_bps"])
+            per_order_decimal = tenths / 1_000_000  # tenths-of-bp → decimal
+            max_str = str(cfg["max_fee_rate"]).strip().rstrip("%")
+            max_decimal = float(max_str) / 100  # percent string → decimal
+        except (KeyError, TypeError, ValueError) as e:
+            logger.warning(
+                f"[builder] Could not validate {dex} builder fee config: {e}"
+            )
+            return
+        if per_order_decimal > max_decimal:
+            logger.warning(
+                f"[builder] {dex} per-order fee "
+                f"(tenths_bps={tenths} ≈ {per_order_decimal * 100:.4f}%) "
+                f"exceeds pre-approved max_fee_rate={cfg['max_fee_rate']}; "
+                f"orders on this DEX will be rejected by the exchange. "
+                f"Raise max_fee_rate or lower tenths_bps to match."
+            )
 
     def _get_sz_decimals(self, coin: str) -> int:
         """Return sz_decimals for *coin* from exchange metadata.
@@ -335,6 +371,10 @@ class OrderManager:
             for i, sub_res in zip(indices, sub_results):
                 results[i] = sub_res
 
+        # Invalidate the cache once after every DEX group has been placed,
+        # not inside ``_bulk_place_orders_with_builder``.  Pushing this
+        # back into the inner helper would cause N redundant invalidations
+        # when the bulk spans N DEXes — keep it here.
         self._invalidate_open_orders_cache()
         return results
 
