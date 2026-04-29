@@ -80,6 +80,7 @@ Run lint before committing. CI enforces both lint and tests.
 | `exceptions.py` | Custom exception hierarchy |
 | `strategies/base_strategy.py` | Abstract base — `generate_signals()`, `calculate_position_size()` |
 | `strategies/market_making_strategy.py` | Market making with BBO tracking |
+| `strategies/mm_config.py` | MM strategy config dataclasses (grouped sub-configs) |
 | `strategies/mm_position_closer.py` | MM-specific position closer |
 | `strategies/mm_order_tracker.py` | MM order fill tracking |
 | `strategies/*_strategy.py` | RSI, MACD, Bollinger, Breakout, Grid, Simple MA |
