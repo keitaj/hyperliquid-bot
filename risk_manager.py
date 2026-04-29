@@ -339,18 +339,35 @@ class RiskManager:
         if self.daily_loss_limit is not None and self.daily_starting_balance is not None:
             daily_pnl = metrics.total_balance - self.daily_starting_balance
 
-            # Guard against false triggers from spot API failures:
-            # If balance drops by more than 50% in one cycle, it's likely
-            # a data issue (e.g. spot API returned 429) not a real loss.
+            # Guard against false triggers from large balance swings: if the
+            # change exceeds 50% in a single cycle we treat it as exceptional
+            # rather than as ordinary trading PnL. The action depends on the
+            # direction of the change.
             if self.daily_starting_balance > 0:
                 change_pct = abs(daily_pnl) / self.daily_starting_balance
                 if change_pct > 0.5:
-                    logger.warning(
-                        "Ignoring suspicious balance change: $%.2f -> $%.2f (%.0f%%). "
-                        "Likely spot API failure.",
-                        self.daily_starting_balance, metrics.total_balance,
-                        change_pct * 100,
-                    )
+                    if daily_pnl > 0:
+                        # Legitimate deposit: reset baseline so subsequent
+                        # daily PnL accounting uses the new starting point.
+                        # We deliberately do NOT touch metrics.total_balance —
+                        # only the reference point for daily PnL changes.
+                        logger.info(
+                            "Detected balance increase: $%.2f -> $%.2f (+%.0f%%). "
+                            "Treating as deposit, resetting daily baseline.",
+                            self.daily_starting_balance, metrics.total_balance,
+                            change_pct * 100,
+                        )
+                        self.daily_starting_balance = metrics.total_balance
+                    else:
+                        # Likely API failure (e.g. spot endpoint returned 429
+                        # or partial data). Preserve the baseline and skip the
+                        # daily loss check this cycle.
+                        logger.warning(
+                            "Suspicious balance decrease: $%.2f -> $%.2f (-%.0f%%). "
+                            "Likely API failure; daily loss check skipped this cycle.",
+                            self.daily_starting_balance, metrics.total_balance,
+                            change_pct * 100,
+                        )
                 elif daily_pnl < 0 and abs(daily_pnl) >= self.daily_loss_limit:
                     stop_bot = True
                     _escalate("stop_bot")
