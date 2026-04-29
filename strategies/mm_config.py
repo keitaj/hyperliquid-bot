@@ -1,9 +1,10 @@
 """Configuration dataclasses for ``MarketMakingStrategy``.
 
-Phase 1 of the MM config refactor: groups four sets of related parameters
-(loss-streak cooldown, micro-price skew, BBO velocity guard, per-coin
-overrides) into dataclasses and exposes a :meth:`MMConfig.from_legacy_dict`
-constructor for the existing flat ``strategy_config`` dict.
+Groups related MM parameters into sub-config dataclasses (loss-streak,
+micro-price, velocity guard, per-coin overrides, imbalance, close,
+schedule, dynamic offset, dynamic age, auto-exclude) under :class:`MMConfig`,
+and exposes :meth:`MMConfig.from_legacy_dict` to build it from the existing
+flat ``strategy_config`` dict.
 
 This module also defines a handful of constants for values that were
 historically read via ``config.get`` but never exposed via CLI/env. They
