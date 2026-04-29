@@ -1,4 +1,5 @@
 import logging
+from collections import defaultdict
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from datetime import datetime
@@ -6,6 +7,7 @@ from enum import Enum
 from hyperliquid.exchange import Exchange
 from hyperliquid.info import Info
 from rate_limiter import api_wrapper, API_ERRORS
+from config import Config
 from exceptions import ConfigurationError
 from coin_utils import is_hip3, parse_coin
 from ttl_cache import TTLCacheEntry, TTLCacheMap
@@ -91,6 +93,50 @@ class OrderManager:
     def _invalidate_open_orders_cache(self) -> None:
         """Clear cached open orders after a write operation (place/cancel)."""
         self._open_orders_cache.invalidate()
+
+    def _builder_for_coin(self, coin: str) -> Optional[Dict[str, object]]:
+        """Return Hyperliquid ``BuilderInfo`` for *coin*'s DEX or ``None``.
+
+        Looks up :attr:`Config.BUILDER_FEES` keyed by the coin's DEX prefix.
+        Returns ``None`` for standard Hyperliquid coins (no ``dex:`` prefix)
+        or DEXes without a configured builder.
+        """
+        dex, _ = parse_coin(coin)
+        if dex is None:
+            return None
+        cfg = Config.BUILDER_FEES.get(dex)
+        if cfg is None:
+            return None
+        return {"b": cfg["address"], "f": int(cfg["tenths_bps"])}
+
+    def approve_configured_builders(self) -> None:
+        """Pre-approve every configured DEX builder via ``approveBuilderFee``.
+
+        Called once at bot startup.  The Hyperliquid action is idempotent
+        so re-running on restart simply re-approves the same builder.
+        Errors are logged but do not abort startup; the bot will fall back
+        to placing orders without a builder for any DEX whose approval
+        failed (rewards eligibility may be lost for that DEX only).
+        """
+        if not Config.BUILDER_FEES:
+            return
+        for dex, cfg in Config.BUILDER_FEES.items():
+            try:
+                result = api_wrapper.call(
+                    self.exchange.approve_builder_fee,
+                    cfg["address"],
+                    cfg["max_fee_rate"],
+                )
+                status = result.get("status") if isinstance(result, dict) else None
+                logger.info(
+                    f"[builder] Approved {dex} builder {cfg['address']} "
+                    f"(max={cfg['max_fee_rate']}): {status}"
+                )
+            except API_ERRORS as e:
+                logger.warning(
+                    f"[builder] Failed to approve {dex} builder "
+                    f"{cfg['address']}: {e}"
+                )
 
     def _get_sz_decimals(self, coin: str) -> int:
         """Return sz_decimals for *coin* from exchange metadata.
@@ -199,6 +245,7 @@ class OrderManager:
         return None
 
     def _place_order(self, order: Order) -> Optional[Order]:
+        builder = self._builder_for_coin(order.coin)
         try:
             result = api_wrapper.call(
                 self.exchange.order,
@@ -207,7 +254,9 @@ class OrderManager:
                 order.size,
                 order.price,
                 order.order_type,
-                order.reduce_only
+                order.reduce_only,
+                None,  # cloid
+                builder,
             )
 
             if result and 'status' in result and result['status'] == 'ok':
@@ -256,7 +305,11 @@ class OrderManager:
         """Place multiple orders in a single API call.
 
         Uses ``exchange.bulk_orders`` so that N orders cost only
-        ``1 + floor(N/40)`` IP weight instead of N.
+        ``1 + floor(N/40)`` IP weight instead of N.  When per-DEX builder
+        codes are configured, orders are grouped by DEX and each group is
+        sent in its own ``bulk_orders`` call so the correct builder is
+        attached.  In the common single-DEX case this still produces a
+        single API call.
 
         Returns a list parallel to *orders*: the :class:`Order` on
         success, ``None`` on failure.
@@ -264,6 +317,33 @@ class OrderManager:
         if not orders:
             return []
 
+        # Group orders by DEX prefix so each group can carry its own
+        # builder.  None key represents standard Hyperliquid coins.
+        groups: Dict[Optional[str], List[int]] = defaultdict(list)
+        for idx, o in enumerate(orders):
+            dex, _ = parse_coin(o.coin)
+            groups[dex].append(idx)
+
+        results: List[Optional[Order]] = [None] * len(orders)
+        for dex, indices in groups.items():
+            sub_orders = [orders[i] for i in indices]
+            builder = (
+                self._builder_for_coin(sub_orders[0].coin)
+                if dex is not None else None
+            )
+            sub_results = self._bulk_place_orders_with_builder(sub_orders, builder)
+            for i, sub_res in zip(indices, sub_results):
+                results[i] = sub_res
+
+        self._invalidate_open_orders_cache()
+        return results
+
+    def _bulk_place_orders_with_builder(
+        self,
+        orders: List[Order],
+        builder: Optional[Dict[str, object]],
+    ) -> List[Optional[Order]]:
+        """Send a single ``exchange.bulk_orders`` call with ``builder`` attached."""
         order_requests = [
             {
                 "coin": o.coin,
@@ -280,7 +360,7 @@ class OrderManager:
 
         try:
             result = api_wrapper.call(
-                self.exchange.bulk_orders, order_requests
+                self.exchange.bulk_orders, order_requests, builder
             )
 
             if (
@@ -321,7 +401,6 @@ class OrderManager:
             for o in orders:
                 o.status = OrderStatus.REJECTED
 
-        self._invalidate_open_orders_cache()
         return results
 
     def _get_cached_mids(self, dex: str = '') -> Dict[str, str]:

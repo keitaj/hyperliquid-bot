@@ -45,6 +45,35 @@ class Config:
             DEX_COINS[_dex] = _parse_list(_val)
 
     # ------------------------------------------------------------------ #
+    # Builder fee configuration (per-DEX)
+    # ------------------------------------------------------------------ #
+    # Some HIP-3 deployers require attaching a builder code to every order
+    # in order for the wallet to be eligible for their rewards program
+    # (e.g. Dreamcash USDT rewards).  Set BUILDER_FEES_<DEX>_ADDRESS to
+    # enable per-DEX builder attachment; the builder fee in tenths of a
+    # basis point (f=10 sends 1 bp / 0.01% of order notional) defaults to
+    # 10 unless BUILDER_FEES_<DEX>_TENTHS_BPS is set.  The pre-approval
+    # max fee rate guards against runaway builder fees.
+    #
+    # Example for Dreamcash:
+    #   BUILDER_FEES_CASH_ADDRESS=0xabc...
+    #   BUILDER_FEES_CASH_TENTHS_BPS=10
+    #   BUILDER_FEES_CASH_MAX_FEE_RATE=0.001%
+    BUILDER_FEES: dict = {}
+    for _dex in TRADING_DEXES:
+        _addr = os.getenv(f"BUILDER_FEES_{_dex.upper()}_ADDRESS")
+        if _addr:
+            BUILDER_FEES[_dex] = {
+                "address": _addr.lower(),
+                "tenths_bps": int(os.getenv(
+                    f"BUILDER_FEES_{_dex.upper()}_TENTHS_BPS", "10"
+                )),
+                "max_fee_rate": os.getenv(
+                    f"BUILDER_FEES_{_dex.upper()}_MAX_FEE_RATE", "0.001%"
+                ),
+            }
+
+    # ------------------------------------------------------------------ #
     # Risk guardrail configuration
     # ------------------------------------------------------------------ #
 

@@ -317,6 +317,11 @@ class HyperliquidBot:
                 mids_cache_ttl=Config.MIDS_CACHE_TTL,
             )
 
+        # Pre-approve any per-DEX builder codes (e.g. for HIP-3 deployers
+        # whose rewards programs require attaching a builder to each
+        # order).  Idempotent — safe to re-run on every startup.
+        self.order_manager.approve_configured_builders()
+
     @staticmethod
     def _build_risk_config() -> Dict:
         """Build a risk-manager config dict from :class:`Config` class attrs."""
