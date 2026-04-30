@@ -227,26 +227,38 @@ class TestBulkGrouping:
 
 
 class TestApproveConfiguredBuilders:
+    @staticmethod
+    def _stub_verify(mgr, approved_addresses):
+        """Make ``info.post('/info', ...)`` return the given approved list."""
+        mgr.info.post.return_value = list(approved_addresses)
+
     def test_no_builders_makes_no_call(self, monkeypatch):
         monkeypatch.setattr(Config, "BUILDER_FEES", {})
         mgr = _make_order_manager()
         mgr.approve_configured_builders()
         mgr.exchange.approve_builder_fee.assert_not_called()
+        mgr.info.post.assert_not_called()
 
     def test_calls_per_configured_dex(self, two_builders):
         mgr = _make_order_manager()
         mgr.exchange.approve_builder_fee.return_value = {"status": "ok"}
+        # Verify returns both addresses → both retained.
+        self._stub_verify(mgr, [
+            Config.BUILDER_FEES["cash"]["address"],
+            Config.BUILDER_FEES["vntl"]["address"],
+        ])
 
+        cash_addr = Config.BUILDER_FEES["cash"]["address"]
+        vntl_addr = Config.BUILDER_FEES["vntl"]["address"]
         mgr.approve_configured_builders()
 
         assert mgr.exchange.approve_builder_fee.call_count == 2
         called_addresses = {
             call.args[0] for call in mgr.exchange.approve_builder_fee.call_args_list
         }
-        assert called_addresses == {
-            Config.BUILDER_FEES["cash"]["address"],
-            Config.BUILDER_FEES["vntl"]["address"],
-        }
+        assert called_addresses == {cash_addr, vntl_addr}
+        # Both DEXes still configured after verification.
+        assert set(Config.BUILDER_FEES.keys()) == {"cash", "vntl"}
 
     def test_failure_does_not_abort_remaining(self, two_builders):
         mgr = _make_order_manager()
@@ -255,8 +267,161 @@ class TestApproveConfiguredBuilders:
             API_ERRORS[0]("network fail"),
             {"status": "ok"},
         ]
+        # Second DEX's address must show up as approved on verify.
+        self._stub_verify(mgr, [Config.BUILDER_FEES["vntl"]["address"]])
         mgr.approve_configured_builders()
         assert mgr.exchange.approve_builder_fee.call_count == 2
+
+    def test_warns_when_per_order_fee_exceeds_max_rate(self, monkeypatch, caplog):
+        """tenths_bps=50 (5 bp) with max_fee_rate=0.001% (0.1 bp) is a
+        misconfiguration where every order would be rejected.  The startup
+        validator must warn so operators see the cause in the bot log."""
+        monkeypatch.setattr(Config, "BUILDER_FEES", {
+            "cash": {
+                "address": "0xc0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0",
+                "tenths_bps": 50,
+                "max_fee_rate": "0.001%",
+            },
+        })
+        mgr = _make_order_manager()
+        mgr.exchange.approve_builder_fee.return_value = {"status": "ok"}
+        self._stub_verify(mgr, [Config.BUILDER_FEES["cash"]["address"]])
+        with caplog.at_level("WARNING"):
+            mgr.approve_configured_builders()
+        msg = caplog.text
+        assert "exceeds pre-approved max_fee_rate" in msg
+        assert "cash" in msg
+        # The reported per-order percent must reflect the real fee
+        # (tenths_bps=50 → 5 bp → 0.05%).  The previously buggy divisor
+        # would print "0.0050%" and silently drift back if reintroduced.
+        assert "0.0500%" in msg
+
+    def test_warns_at_default_f_with_tight_cap(self, monkeypatch, caplog):
+        """The boundary case the divisor bug would silently miss:
+        tenths_bps=10 (1 bp) with max_fee_rate=0.001% (0.1 bp).  The
+        exchange rejects every such order; the validator must warn."""
+        monkeypatch.setattr(Config, "BUILDER_FEES", {
+            "cash": {
+                "address": "0xc0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0",
+                "tenths_bps": 10,
+                "max_fee_rate": "0.001%",
+            },
+        })
+        mgr = _make_order_manager()
+        mgr.exchange.approve_builder_fee.return_value = {"status": "ok"}
+        self._stub_verify(mgr, [Config.BUILDER_FEES["cash"]["address"]])
+        with caplog.at_level("WARNING"):
+            mgr.approve_configured_builders()
+        assert "exceeds pre-approved max_fee_rate" in caplog.text
+
+    def test_no_warning_when_config_is_consistent(self, two_builders, caplog):
+        """tenths_bps=10 (1 bp) with max_fee_rate=0.05% (5 bp) leaves
+        plenty of headroom — no validator warning expected."""
+        mgr = _make_order_manager()
+        mgr.exchange.approve_builder_fee.return_value = {"status": "ok"}
+        self._stub_verify(mgr, [
+            Config.BUILDER_FEES["cash"]["address"],
+            Config.BUILDER_FEES["vntl"]["address"],
+        ])
+        with caplog.at_level("WARNING"):
+            mgr.approve_configured_builders()
+        assert "exceeds pre-approved max_fee_rate" not in caplog.text
+
+
+class TestApprovalVerification:
+    """Behaviour added by builder fee approval verification.
+
+    The exchange may accept ``approveBuilderFee`` and return ``ok`` even
+    though the builder address never appears in the wallet's
+    ``approvedBuilders`` list (observed for at least one HIP-3 deployer).
+    Without verification the operator only sees the rejected orders much
+    later.  These tests pin the expected behaviour: explicit "not approved"
+    drops the builder; network errors keep it (benefit-of-doubt).
+    """
+
+    @staticmethod
+    def _stub_verify(mgr, approved_addresses):
+        mgr.info.post.return_value = list(approved_addresses)
+
+    def test_silent_failure_disables_dex(self, cash_builder, caplog):
+        """Approve returns ok but address is missing from approvedBuilders.
+        The DEX must be removed and an error logged."""
+        mgr = _make_order_manager()
+        mgr.exchange.approve_builder_fee.return_value = {"status": "ok"}
+        # approvedBuilders does NOT include the cash builder address.
+        self._stub_verify(mgr, ["0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"])
+        with caplog.at_level("ERROR"):
+            mgr.approve_configured_builders()
+        assert "cash" not in Config.BUILDER_FEES
+        assert "NOT in approvedBuilders" in caplog.text
+        # The ERROR log should mention the actual address so operators can
+        # cross-reference docs / deployer support.
+        assert cash_builder["address"] in caplog.text
+
+    def test_verified_keeps_dex(self, cash_builder):
+        """Approve OK + address present → DEX retained, no fallback."""
+        mgr = _make_order_manager()
+        mgr.exchange.approve_builder_fee.return_value = {"status": "ok"}
+        self._stub_verify(mgr, [cash_builder["address"]])
+        mgr.approve_configured_builders()
+        assert "cash" in Config.BUILDER_FEES
+
+    def test_verify_address_match_is_case_insensitive(self, cash_builder):
+        """approvedBuilders may return addresses in a different case from
+        what the operator configured."""
+        mgr = _make_order_manager()
+        mgr.exchange.approve_builder_fee.return_value = {"status": "ok"}
+        self._stub_verify(mgr, [cash_builder["address"].upper()])
+        mgr.approve_configured_builders()
+        assert "cash" in Config.BUILDER_FEES
+
+    def test_verify_network_error_keeps_dex(self, cash_builder):
+        """Verify endpoint network error → benefit-of-doubt (DEX kept)."""
+        mgr = _make_order_manager()
+        mgr.exchange.approve_builder_fee.return_value = {"status": "ok"}
+        mgr.info.post.side_effect = API_ERRORS[0]("verify network fail")
+        mgr.approve_configured_builders()
+        assert "cash" in Config.BUILDER_FEES
+
+    def test_verify_unexpected_response_keeps_dex(self, cash_builder):
+        """A response that is not a list also keeps the DEX (treated as
+        unknown).  We don't have enough information to safely fall back."""
+        mgr = _make_order_manager()
+        mgr.exchange.approve_builder_fee.return_value = {"status": "ok"}
+        mgr.info.post.return_value = {"unexpected": "shape"}
+        mgr.approve_configured_builders()
+        assert "cash" in Config.BUILDER_FEES
+
+    def test_partial_failure_drops_only_failed_dex(self, two_builders):
+        """Two DEXes configured; only one verifies.  The verified DEX
+        must remain, the unverified one must be removed."""
+        mgr = _make_order_manager()
+        mgr.exchange.approve_builder_fee.return_value = {"status": "ok"}
+        # Only cash's address is in the approved list.
+        self._stub_verify(mgr, [Config.BUILDER_FEES["cash"]["address"]])
+        mgr.approve_configured_builders()
+        assert "cash" in Config.BUILDER_FEES
+        assert "vntl" not in Config.BUILDER_FEES
+
+    def test_approve_action_failure_drops_dex(self, cash_builder):
+        """approve_builder_fee raising → DEX dropped, no verify call."""
+        mgr = _make_order_manager()
+        mgr.exchange.approve_builder_fee.side_effect = API_ERRORS[0]("rpc")
+        mgr.approve_configured_builders()
+        assert "cash" not in Config.BUILDER_FEES
+        # Verify must not have been called when approve already failed.
+        mgr.info.post.assert_not_called()
+
+    def test_approve_returns_non_ok_status_drops_dex(self, cash_builder):
+        """approve_builder_fee returning err status → DEX dropped, no
+        verify call."""
+        mgr = _make_order_manager()
+        mgr.exchange.approve_builder_fee.return_value = {
+            "status": "err", "response": "Percentage is invalid.",
+        }
+        mgr.approve_configured_builders()
+        assert "cash" not in Config.BUILDER_FEES
+        mgr.info.post.assert_not_called()
 
     def test_warns_when_per_order_fee_exceeds_max_rate(self, monkeypatch, caplog):
         """tenths_bps=50 (5 bp) with max_fee_rate=0.001% (0.1 bp) is a
