@@ -114,19 +114,29 @@ class OrderManager:
 
         Called once at bot startup.  The Hyperliquid action is idempotent
         so re-running on restart simply re-approves the same builder.
-        Errors are logged but do not abort startup; the bot will fall back
-        to placing orders without a builder for any DEX whose approval
-        failed (rewards eligibility may be lost for that DEX only).
+
+        After each approval is sent, the wallet's ``approvedBuilders`` list
+        is queried to verify the action actually took effect.  Some
+        deployer-published builder addresses return ``{"status": "ok"}``
+        from ``approveBuilderFee`` but never appear in the wallet's
+        approved list — every subsequent order that attaches the builder
+        is then silently rejected by the exchange.  When verification
+        fails explicitly (the address is not in the returned list), the
+        DEX entry is removed from :attr:`Config.BUILDER_FEES` so future
+        orders go through *without* the builder field; the bot keeps
+        running, but rewards eligibility for that DEX is forfeited.
+
+        Network errors during verification leave the builder in place
+        (benefit-of-doubt — the next order rejection will still surface
+        clearly).  All other errors are logged but do not abort startup.
 
         Also sanity-checks that the per-order fee implied by ``tenths_bps``
         does not exceed the pre-approved ``max_fee_rate`` — otherwise every
-        order on that DEX would be rejected by the exchange.  A mismatch
-        only triggers a warning so operators can still ship a hot-fix env
-        var without restarting; the actual rejection from the exchange
-        will surface clearly in order logs.
+        order on that DEX would be rejected by the exchange.
         """
         if not Config.BUILDER_FEES:
             return
+        failed_dexes: List[str] = []
         for dex, cfg in Config.BUILDER_FEES.items():
             self._validate_builder_fee_config(dex, cfg)
             try:
@@ -135,16 +145,84 @@ class OrderManager:
                     cfg["address"],
                     cfg["max_fee_rate"],
                 )
-                status = result.get("status") if isinstance(result, dict) else None
-                logger.info(
-                    f"[builder] Approved {dex} builder {cfg['address']} "
-                    f"(max={cfg['max_fee_rate']}): {status}"
-                )
             except API_ERRORS as e:
                 logger.warning(
                     f"[builder] Failed to approve {dex} builder "
                     f"{cfg['address']}: {e}"
                 )
+                failed_dexes.append(dex)
+                continue
+
+            status = result.get("status") if isinstance(result, dict) else None
+            if status != "ok":
+                logger.warning(
+                    f"[builder] {dex} approval action returned non-ok: {result}"
+                )
+                failed_dexes.append(dex)
+                continue
+
+            verified = self._verify_builder_approved(cfg["address"])
+            if verified is False:
+                logger.error(
+                    f"[builder] {dex} approval returned 'ok' but address "
+                    f"{cfg['address']} is NOT in approvedBuilders. "
+                    f"Disabling builder attachment for this DEX; orders will "
+                    f"go through without the builder code (rewards "
+                    f"eligibility may be lost). Common causes: stale builder "
+                    f"address in deployer docs, or deployer-side frontend "
+                    f"sign-up required first. Investigate via the deployer's "
+                    f"Discord/support."
+                )
+                failed_dexes.append(dex)
+            else:
+                logger.info(
+                    f"[builder] Approved {dex} builder {cfg['address']} "
+                    f"(max={cfg['max_fee_rate']}): verified={verified}"
+                )
+
+        if failed_dexes:
+            for dex in failed_dexes:
+                Config.BUILDER_FEES.pop(dex, None)
+            logger.warning(
+                f"[builder] {len(failed_dexes)} DEX builder(s) disabled due "
+                f"to approval/verify failure: {failed_dexes}. Bot will run "
+                f"without builder attachment for these DEXes."
+            )
+
+    def _verify_builder_approved(self, builder_address: str) -> Optional[bool]:
+        """Return whether *builder_address* is in the wallet's approved list.
+
+        Issues an ``info{type:"approvedBuilders"}`` request and matches
+        case-insensitively against the returned list.
+
+        Returns:
+            * ``True`` — the address is present in the approved list
+            * ``False`` — the response is a list and the address is absent
+              (caller should treat this as a confirmed approval failure)
+            * ``None`` — verification could not complete (network error or
+              unexpected response shape).  Caller should leave the builder
+              enabled and rely on later order rejections to surface issues.
+        """
+        try:
+            approved = api_wrapper.call(
+                self.info.post,
+                "/info",
+                {"type": "approvedBuilders", "user": self.account_address},
+            )
+        except API_ERRORS as e:
+            logger.warning(
+                f"[builder] Could not verify builder approval for "
+                f"{builder_address} (network error): {e}"
+            )
+            return None
+        if not isinstance(approved, list):
+            logger.warning(
+                f"[builder] Unexpected approvedBuilders response shape "
+                f"({type(approved).__name__}); skipping verification"
+            )
+            return None
+        target = builder_address.lower()
+        return any(str(a).lower() == target for a in approved)
 
     @staticmethod
     def _validate_builder_fee_config(dex: str, cfg: Dict[str, object]) -> None:
