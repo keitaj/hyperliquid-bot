@@ -15,7 +15,7 @@ warnings.filterwarnings("ignore")
 
 logger = logging.getLogger(__name__)
 
-DISPLAY_COINS = {"USDC", "USDH"}
+DISPLAY_COINS = {"USDC", "USDH", "USDT0"}
 KNOWN_HIP3_DEXES = ["xyz", "flx", "cash", "km", "vntl", "hyna"]
 
 
@@ -87,7 +87,7 @@ def main():
         print("=" * 50)
         print("🏦 HYPERLIQUID ACCOUNT BALANCE")
         print("=" * 50)
-        print("📦 Spot (USDC/USDH):")
+        print("📦 Spot (USDC/USDH/USDT0):")
         if spot_balances:
             for b in spot_balances:
                 print(f"   {b['coin']:6}  ${float(b['total']):,.2f}")
