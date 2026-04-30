@@ -26,6 +26,7 @@ from strategies.mm_config import (
 )
 from strategies.mm_order_tracker import OrderTracker
 from strategies.mm_position_closer import PositionCloser
+from coin_utils import parse_coin
 from order_manager import BBO_OFFSET, OrderSide, round_price
 from rate_limiter import API_ERRORS
 
@@ -499,6 +500,21 @@ class MarketMakingStrategy(BaseStrategy):
             self._recent_mids[coin] = deque(maxlen=self.vol_lookback)
         self._recent_mids[coin].append(mid_price)
 
+    def _compute_realized_volatility(self, coin: str) -> Optional[float]:
+        """Average absolute mid-price return (bps) over the recent window.
+
+        Returns None when fewer than 5 mids are recorded for *coin* — callers
+        should fall back to their default behaviour in that case.
+        """
+        mids = self._recent_mids.get(coin)
+        if not mids or len(mids) < 5:
+            return None
+        returns_bps = [
+            abs(mids[i] - mids[i - 1]) / mids[i - 1] * 10_000
+            for i in range(1, len(mids))
+        ]
+        return sum(returns_bps) / len(returns_bps)
+
     def _get_volatility_adjusted_offset(self, coin: str, base_offset: Optional[float] = None) -> float:
         """Return BBO offset adjusted for recent volatility.
 
@@ -516,17 +532,9 @@ class MarketMakingStrategy(BaseStrategy):
         if not self.vol_adjust_enabled or not self.bbo_mode:
             return base_offset
 
-        mids = self._recent_mids.get(coin)
-        if not mids or len(mids) < 5:
+        avg_move_bps = self._compute_realized_volatility(coin)
+        if avg_move_bps is None:
             return base_offset
-
-        # Calculate realized volatility (average absolute return in bps)
-        returns_bps = []
-        for i in range(1, len(mids)):
-            ret = abs(mids[i] - mids[i - 1]) / mids[i - 1] * 10_000
-            returns_bps.append(ret)
-
-        avg_move_bps = sum(returns_bps) / len(returns_bps)
 
         # Scale offset with cap to prevent extreme values during flash crashes
         adjusted = base_offset + self.vol_adjust_multiplier * avg_move_bps
@@ -540,16 +548,9 @@ class MarketMakingStrategy(BaseStrategy):
         if not getattr(self, '_dynamic_age_enabled', False):
             return None
 
-        mids = self._recent_mids.get(coin)
-        if not mids or len(mids) < 5:
+        avg_move_bps = self._compute_realized_volatility(coin)
+        if avg_move_bps is None:
             return None
-
-        # Calculate realized volatility (avg absolute return in bps)
-        returns_bps = []
-        for i in range(1, len(mids)):
-            ret = abs(mids[i] - mids[i - 1]) / mids[i - 1] * 10_000
-            returns_bps.append(ret)
-        avg_move_bps = sum(returns_bps) / len(returns_bps)
 
         # Scale: high vol -> short age, low vol -> long age
         # baseline_vol (bps) = typical move per cycle (calibrated)
@@ -813,19 +814,29 @@ class MarketMakingStrategy(BaseStrategy):
         """
         return parse_spread_schedule(raw)
 
+    @staticmethod
+    def _lookup_coin_override(
+        coin: str, overrides: Dict[str, float], default: float,
+    ) -> float:
+        """Resolve a per-coin override.
+
+        Lookup order: full ``"dex:coin"`` name → bare coin name → ``default``.
+        """
+        if coin in overrides:
+            return overrides[coin]
+        _, bare = parse_coin(coin)
+        if bare in overrides:
+            return overrides[bare]
+        return default
+
     def _get_coin_offset(self, coin: str) -> float:
         """Get BBO offset for a specific coin, with optional dynamic adjustment.
 
         Lookup: full name → bare name → global default → dynamic adjust.
         """
-        if coin in self._coin_offset_overrides:
-            base = self._coin_offset_overrides[coin]
-        else:
-            bare = coin.split(':', 1)[-1] if ':' in coin else coin
-            if bare in self._coin_offset_overrides:
-                base = self._coin_offset_overrides[bare]
-            else:
-                base = self.bbo_offset_bps
+        base = self._lookup_coin_override(
+            coin, self._coin_offset_overrides, self.bbo_offset_bps
+        )
         return self._apply_dynamic_offset(coin, base)
 
     def _apply_dynamic_offset(self, coin: str, base_offset: float) -> float:
@@ -858,21 +869,15 @@ class MarketMakingStrategy(BaseStrategy):
 
     def _get_coin_spread(self, coin: str) -> float:
         """Get spread_bps for a specific coin, checking overrides first."""
-        if coin in self._coin_spread_overrides:
-            return self._coin_spread_overrides[coin]
-        bare = coin.split(':', 1)[-1] if ':' in coin else coin
-        if bare in self._coin_spread_overrides:
-            return self._coin_spread_overrides[bare]
-        return self.spread_bps
+        return self._lookup_coin_override(
+            coin, self._coin_spread_overrides, self.spread_bps
+        )
 
     def _get_coin_size(self, coin: str) -> float:
         """Get ORDER_SIZE_USD for a specific coin, checking overrides first."""
-        if coin in self._coin_size_overrides:
-            return self._coin_size_overrides[coin]
-        bare = coin.split(':', 1)[-1] if ':' in coin else coin
-        if bare in self._coin_size_overrides:
-            return self._coin_size_overrides[bare]
-        return self.order_size_usd
+        return self._lookup_coin_override(
+            coin, self._coin_size_overrides, self.order_size_usd
+        )
 
     def _calculate_microprice_offsets(
         self, coin: str, base_offset_bps: float

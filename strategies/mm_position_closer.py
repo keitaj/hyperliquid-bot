@@ -14,6 +14,7 @@ import time
 from collections import defaultdict
 from typing import Dict, Optional, Tuple
 
+from coin_utils import parse_coin
 from order_manager import BBO_OFFSET, OrderSide, round_price
 from rate_limiter import API_ERRORS
 
@@ -456,7 +457,7 @@ class PositionCloser:
         """Get spread_bps for a specific coin, checking overrides first."""
         if coin in self._coin_spread_overrides:
             return self._coin_spread_overrides[coin]
-        bare = coin.split(':', 1)[-1] if ':' in coin else coin
+        _, bare = parse_coin(coin)
         if bare in self._coin_spread_overrides:
             return self._coin_spread_overrides[bare]
         return self.spread_bps
