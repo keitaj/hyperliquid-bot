@@ -1125,7 +1125,7 @@ if __name__ == "__main__":
                              '(default: 3, market_making)')
     parser.add_argument('--auto-exclude-min-fills', type=int,
                         help='Minimum fills per summary window for auto-exclude to consider it '
-                             '(default: 5, market_making)')
+                             '(default: 3, market_making)')
     parser.add_argument('--auto-exclude-cooldown', type=int,
                         help='Cooldown seconds after auto-exclude triggers (default: 1800, market_making)')
     parser.add_argument('--auto-exclude-window-label', type=str,

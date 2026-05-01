@@ -275,7 +275,7 @@ class AutoExcludeConfig:
     enabled: bool = False
     threshold_bps: float = -3.0
     consecutive: int = 3
-    min_fills: int = 5
+    min_fills: int = 3
     cooldown_seconds: int = 1800
     window_label: str = "60s"
 
@@ -385,7 +385,7 @@ class MMConfig:
                 enabled=bool(d.get('auto_exclude_enabled', False)),
                 threshold_bps=float(d.get('auto_exclude_threshold_bps', -3.0)),
                 consecutive=int(d.get('auto_exclude_consecutive', 3)),
-                min_fills=int(d.get('auto_exclude_min_fills', 5)),
+                min_fills=int(d.get('auto_exclude_min_fills', 3)),
                 cooldown_seconds=int(d.get('auto_exclude_cooldown', 1800)),
                 window_label=str(d.get('auto_exclude_window_label', '60s')),
             ),

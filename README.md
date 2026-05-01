@@ -587,7 +587,7 @@ strategies:
     auto_exclude_enabled: false        # --auto-exclude  (auto-pause coin on consecutive adverse-selection windows; requires --enable-adverse-selection-log)
     auto_exclude_threshold_bps: -3.0   # --auto-exclude-threshold-bps  (avg_<window> at or below this is "bad")
     auto_exclude_consecutive: 3        # --auto-exclude-consecutive  (consecutive bad windows required to trigger)
-    auto_exclude_min_fills: 5          # --auto-exclude-min-fills  (per-window minimum fill count)
+    auto_exclude_min_fills: 3          # --auto-exclude-min-fills  (per-window minimum fill count)
     auto_exclude_cooldown: 1800        # --auto-exclude-cooldown  (pause seconds after trigger; auto-resume)
     auto_exclude_window_label: "60s"   # --auto-exclude-window-label  (5s|30s|60s tracker sample window)
     account_cap_pct: 0.05              # --account-cap-pct
