@@ -28,8 +28,9 @@ def _make_strategy(**extra):
         'maker_only': True,
         'bbo_mode': True,
         'bbo_offset_bps': 1.0,
-        # auto_exclude defaults: enabled, threshold=-3.0, consecutive=3,
-        # min_fills=5, cooldown=1800, window=60s
+        # Test fixture: explicit values for reproducibility; the explicit
+        # min_fills=5 here lets test_min_fills_blocks_trigger keep its
+        # below-threshold sample at fills=2 regardless of production default.
         'auto_exclude_enabled': True,
         'auto_exclude_threshold_bps': -3.0,
         'auto_exclude_consecutive': 3,

@@ -206,7 +206,7 @@ class TestAutoExcludeConfig:
         assert cfg.enabled is False
         assert cfg.threshold_bps == -3.0
         assert cfg.consecutive == 3
-        assert cfg.min_fills == 5
+        assert cfg.min_fills == 3
         assert cfg.cooldown_seconds == 1800
         assert cfg.window_label == '60s'
 
