@@ -411,13 +411,20 @@ class MarketMakingStrategy(BaseStrategy):
                 # No position — normal MM flow
                 close_oid = self._closer.get_close_oid(coin)
 
+                # Compute ideal prices once per cycle and reuse for both the
+                # tolerance refresh decision and order placement. This also
+                # ensures the volatility rolling buffer is updated exactly
+                # once per cycle (inside ``_compute_ideal_prices``), so the
+                # tolerance check and the placed order are evaluated against
+                # the same buffer state.
+                ideal = self._compute_ideal_prices(coin)
+
                 if getattr(self, 'refresh_tolerance_bp', 0) > 0:
-                    ideal = self._compute_ideal_prices(coin)
                     if ideal is None:
                         # Fall back to age-only when ideal price is unavailable
                         self._tracker.cancel_stale_orders(coin, close_oid=close_oid)
                     else:
-                        ideal_buy, ideal_sell = ideal
+                        ideal_buy, ideal_sell, _ = ideal
                         self._tracker.refresh_orders_with_tolerance(
                             coin,
                             ideal_prices={
@@ -461,7 +468,7 @@ class MarketMakingStrategy(BaseStrategy):
                     logger.info(f"[mm] {coin} cooldown expired, resuming")
 
                 if self._tracker.get_order_count(coin) < self.max_open_orders:
-                    self._place_orders(coin)
+                    self._place_orders(coin, ideal_prices=ideal)
 
             except API_ERRORS as e:
                 logger.error(f"[mm] Error processing {coin}: {e}")
@@ -644,14 +651,18 @@ class MarketMakingStrategy(BaseStrategy):
 
         return age
 
-    def _compute_ideal_prices(self, coin: str) -> Optional[Tuple[float, float]]:
-        """Compute current ideal ``(buy_price, sell_price)`` for ``coin``.
+    def _compute_ideal_prices(self, coin: str) -> Optional[Tuple[float, float, float]]:
+        """Compute current ideal ``(buy_price, sell_price, skew_bps)`` for ``coin``.
 
-        Mirrors the price computation in :meth:`_place_orders` but is a
-        pure helper (no side effects on rolling buffers, no order placement).
-        Used by the run loop to evaluate refresh-tolerance drift before
-        deciding whether to keep existing orders. Returns ``None`` when the
-        ideal price cannot be determined (no market data, mid <= 0).
+        Mirrors the price computation that was previously inlined in
+        :meth:`_place_orders`. Updates the volatility rolling buffer via
+        :meth:`_record_mid_price` so callers can rely on this method as the
+        single source of truth for both order placement and refresh-tolerance
+        drift evaluation. Returns ``None`` when the ideal price cannot be
+        determined (no market data, mid <= 0).
+
+        The ``skew_bps`` value is returned alongside the prices so callers can
+        log it without recomputing :meth:`_calculate_inventory_skew`.
         """
         market_data = self.market_data.get_market_data(coin)
         if not market_data:
@@ -664,6 +675,10 @@ class MarketMakingStrategy(BaseStrategy):
         rp = self.market_data.price_rounding_params(coin)
 
         if self.bbo_mode and market_data.bid > 0 and market_data.ask > 0:
+            # Update the rolling vol buffer here so the volatility-adjusted
+            # offset below sees the freshest sample in both call paths
+            # (run-loop tolerance check and order placement).
+            self._record_mid_price(coin, mid_price)
             base_offset = self._get_coin_offset(coin)
             if self.vol_adjust_enabled:
                 effective_offset_bps = self._get_volatility_adjusted_offset(coin, base_offset)
@@ -708,41 +723,43 @@ class MarketMakingStrategy(BaseStrategy):
             buy_price = round_price(buy_price * (1 - skew_mult), *rp)
             sell_price = round_price(sell_price * (1 - skew_mult), *rp)
 
-        return buy_price, sell_price
+        return buy_price, sell_price, skew
 
-    def _place_orders(self, coin: str) -> None:
+    def _place_orders(
+        self,
+        coin: str,
+        ideal_prices: Optional[Tuple[float, float, float]] = None,
+    ) -> None:
         """Place a buy and a sell limit order.
 
         In BBO mode, orders are placed at or near the best bid/ask.
         Otherwise, orders are placed symmetrically around mid price at
         ``spread_bps``.  Uses ``bulk_place_orders`` for a single API call.
+
+        ``ideal_prices`` is the pre-computed ``(buy, sell, skew_bps)`` tuple
+        produced by :meth:`_compute_ideal_prices` earlier in the same cycle.
+        When ``None`` (legacy callers / tests that bypass the run loop), the
+        prices are computed inline. Threading the cached tuple in from the
+        run loop avoids a redundant compute and double-update of the
+        volatility buffer.
         """
         from order_manager import Order
 
         if coin in self._closer.tracked_coins:
             return
 
-        market_data = self.market_data.get_market_data(coin)
-        if not market_data:
-            logger.warning(f"[mm] No market data for {coin}, skipping")
-            return
+        if ideal_prices is None:
+            prices = self._compute_ideal_prices(coin)
+            if prices is None:
+                # Distinguish "no market data" so the warning matches the
+                # pre-refactor log shape used by tests/operators.
+                if not self.market_data.get_market_data(coin):
+                    logger.warning(f"[mm] No market data for {coin}, skipping")
+                return
+        else:
+            prices = ideal_prices
 
-        mid_price = market_data.mid_price
-        if mid_price <= 0:
-            return
-
-        # Volatility buffer is updated here so it occurs once per placement
-        # cycle even when ``_compute_ideal_prices`` is also called from the
-        # run loop (which is a pure helper).
-        if self.bbo_mode and market_data.bid > 0 and market_data.ask > 0:
-            self._record_mid_price(coin, mid_price)
-
-        prices = self._compute_ideal_prices(coin)
-        if prices is None:
-            return
-        buy_price, sell_price = prices
-
-        skew = self._calculate_inventory_skew(coin, mid_price)
+        buy_price, sell_price, skew = prices
         if skew != 0.0:
             logger.debug(f"[mm] Inventory skew {coin}: {skew:.1f}bps")
 
@@ -771,13 +788,15 @@ class MarketMakingStrategy(BaseStrategy):
         skip_buy = False
         skip_sell = False
         if self.imbalance_threshold > 0:
-            imb = market_data.book_imbalance
-            if imb < -self.imbalance_threshold:
-                skip_buy = True
-                logger.debug(f"[mm] {coin} skipping BUY (book imbalance {imb:.2f})")
-            elif imb > self.imbalance_threshold:
-                skip_sell = True
-                logger.debug(f"[mm] {coin} skipping SELL (book imbalance {imb:.2f})")
+            market_data = self.market_data.get_market_data(coin)
+            if market_data is not None:
+                imb = market_data.book_imbalance
+                if imb < -self.imbalance_threshold:
+                    skip_buy = True
+                    logger.debug(f"[mm] {coin} skipping BUY (book imbalance {imb:.2f})")
+                elif imb > self.imbalance_threshold:
+                    skip_sell = True
+                    logger.debug(f"[mm] {coin} skipping SELL (book imbalance {imb:.2f})")
 
         if (
             current_count < self.max_open_orders
