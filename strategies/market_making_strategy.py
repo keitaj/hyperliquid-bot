@@ -129,12 +129,17 @@ class MarketMakingStrategy(BaseStrategy):
         self._coin_offset_overrides: Dict[str, float] = self.cfg.per_coin.offset
         self._coin_spread_overrides: Dict[str, float] = self.cfg.per_coin.spread
         self._coin_size_overrides: Dict[str, float] = self.cfg.per_coin.size
+        self._coin_unrealized_loss_overrides: Dict[str, float] = self.cfg.per_coin.unrealized_loss
         if self._coin_offset_overrides:
             logger.info(f"[mm] Per-coin offset overrides: {self._coin_offset_overrides}")
         if self._coin_spread_overrides:
             logger.info(f"[mm] Per-coin spread overrides: {self._coin_spread_overrides}")
         if self._coin_size_overrides:
             logger.info(f"[mm] Per-coin size overrides: {self._coin_size_overrides}")
+        if self._coin_unrealized_loss_overrides:
+            logger.info(
+                f"[mm] Per-coin unrealized-loss overrides: {self._coin_unrealized_loss_overrides}"
+            )
 
         # ---- Micro-price asymmetric offset (aliases of self.cfg.microprice) ---- #
         self._microprice_enabled: bool = self.cfg.microprice.enabled
@@ -207,6 +212,7 @@ class MarketMakingStrategy(BaseStrategy):
             close_breakeven_pct=self.cfg.close.breakeven_pct,
             close_aggressive_pct=self.cfg.close.aggressive_pct,
             unrealized_loss_close_bps=self.cfg.close.unrealized_loss_close_bps,
+            coin_unrealized_loss_overrides=self._coin_unrealized_loss_overrides,
         )
 
     @property
