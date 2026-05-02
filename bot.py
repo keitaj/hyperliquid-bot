@@ -1054,6 +1054,10 @@ if __name__ == "__main__":
                         help='Per-coin spread overrides in bps (e.g. "SP500:8,XYZ100:15")')
     parser.add_argument('--coin-size-overrides', type=str, default='',
                         help='Per-coin order size overrides in USD (e.g. "TSLA:150,NVDA:150")')
+    parser.add_argument('--coin-unrealized-loss-overrides', type=str, default='',
+                        help='Per-coin unrealized-loss early-close threshold in bps '
+                             '(e.g. "INTC:25,OIL:10"). Falls back to --unrealized-loss-close-bps. '
+                             'Setting an override to 0 disables the feature for that coin.')
     parser.add_argument('--close-refresh-threshold-bps', type=float,
                         help='Refresh close orders when BBO changes by this many bps; 0 to disable (default: 0)')
     parser.add_argument('--spread-schedule', type=str, default='',
@@ -1223,6 +1227,7 @@ if __name__ == "__main__":
             'coin_offset_overrides',
             'coin_spread_overrides',
             'coin_size_overrides',
+            'coin_unrealized_loss_overrides',
             'close_refresh_threshold_bps',
             'spread_schedule',
             'quiet_hours_utc',

@@ -57,6 +57,7 @@ class PositionCloser:
         close_breakeven_pct: float = 0.50,
         close_aggressive_pct: float = 0.75,
         unrealized_loss_close_bps: float = 0.0,
+        coin_unrealized_loss_overrides: Optional[Dict[str, float]] = None,
     ) -> None:
         self.order_manager = order_manager
         self.market_data = market_data
@@ -76,6 +77,11 @@ class PositionCloser:
         self.close_aggressive_pct = close_aggressive_pct
         # Unrealized loss early close (0 = disabled)
         self.unrealized_loss_close_bps = unrealized_loss_close_bps
+        # Per-coin overrides for unrealized_loss_close_bps. Empty dict = no
+        # overrides (every coin uses the global threshold). Lookup falls back
+        # to bare coin name (e.g. "NVDA") if the DEX-prefixed key
+        # ("xyz:NVDA") is not found.
+        self._coin_unrealized_loss_overrides: Dict[str, float] = coin_unrealized_loss_overrides or {}
 
         # coin -> (entry_time, close_oid or None, close_tier)
         self._open_positions: Dict[str, Tuple[float, Optional[int], int]] = {}
@@ -262,8 +268,10 @@ class PositionCloser:
         # on_position_closed paths that don't otherwise know it.
         self._last_effective_max_age[coin] = effective_max_age
 
-        # Unrealized loss early close: taker close when loss exceeds threshold
-        if self.unrealized_loss_close_bps > 0 and entry_price > 0:
+        # Unrealized loss early close: taker close when loss exceeds threshold.
+        # Uses the per-coin override if present, else the global threshold.
+        unrealized_loss_threshold = self._get_unrealized_loss_bps_for_coin(coin)
+        if unrealized_loss_threshold > 0 and entry_price > 0:
             md = self.market_data.get_market_data(coin)
             if md and md.mid_price > 0:
                 if size > 0:  # long
@@ -271,7 +279,7 @@ class PositionCloser:
                 else:  # short
                     unrealized_bps = (md.mid_price - entry_price) / entry_price * 10_000
 
-                if unrealized_bps >= self.unrealized_loss_close_bps:
+                if unrealized_bps >= unrealized_loss_threshold:
                     # Cancel existing close order
                     if close_oid is not None:
                         try:
@@ -285,7 +293,7 @@ class PositionCloser:
 
                     logger.warning(
                         f"[mm] Position {coin} unrealized loss {unrealized_bps:.1f}bps "
-                        f"exceeds threshold {self.unrealized_loss_close_bps}bps -- "
+                        f"exceeds threshold {unrealized_loss_threshold}bps -- "
                         f"early taker close (age={age:.0f}s)"
                     )
                     self._record_close(coin, CLOSE_REASON_UNREALIZED_LOSS, age, current_tier,
@@ -497,6 +505,21 @@ class PositionCloser:
         if bare in self._coin_spread_overrides:
             return self._coin_spread_overrides[bare]
         return self.spread_bps
+
+    def _get_unrealized_loss_bps_for_coin(self, coin: str) -> float:
+        """Return the unrealized-loss early-close threshold (bps) for a coin.
+
+        Falls back to the global ``unrealized_loss_close_bps`` when no
+        override is set. Same DEX-prefix-or-bare lookup as
+        ``_get_spread_for_coin``. Returning 0 from an override disables
+        the feature for that coin (the caller gates on ``> 0``).
+        """
+        if coin in self._coin_unrealized_loss_overrides:
+            return self._coin_unrealized_loss_overrides[coin]
+        _, bare = parse_coin(coin)
+        if bare in self._coin_unrealized_loss_overrides:
+            return self._coin_unrealized_loss_overrides[bare]
+        return self.unrealized_loss_close_bps
 
     def _get_tier(self, age: float, max_age: Optional[float] = None) -> int:
         """Return the close price tier for the given position age."""

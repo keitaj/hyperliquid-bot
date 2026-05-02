@@ -173,11 +173,13 @@ class VelocityGuardConfig:
 
 @dataclass
 class PerCoinOverrides:
-    """Per-coin overrides for offset, spread, and order size."""
+    """Per-coin overrides for offset, spread, order size, and unrealized-loss
+    early-close threshold."""
 
     offset: Dict[str, float] = field(default_factory=dict)
     spread: Dict[str, float] = field(default_factory=dict)
     size: Dict[str, float] = field(default_factory=dict)
+    unrealized_loss: Dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -347,6 +349,7 @@ class MMConfig:
                 offset=parse_coin_overrides(d.get('coin_offset_overrides', '')),
                 spread=parse_coin_overrides(d.get('coin_spread_overrides', '')),
                 size=parse_coin_overrides(d.get('coin_size_overrides', '')),
+                unrealized_loss=parse_coin_overrides(d.get('coin_unrealized_loss_overrides', '')),
             ),
             imbalance=ImbalanceConfig(
                 placement_threshold=float(d.get('imbalance_threshold', 0.0)),

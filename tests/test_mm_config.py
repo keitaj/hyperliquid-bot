@@ -95,13 +95,16 @@ class TestPerCoinOverrides:
         assert cfg.offset == {}
         assert cfg.spread == {}
         assert cfg.size == {}
+        assert cfg.unrealized_loss == {}
 
     def test_independent_dicts(self) -> None:
         # Default factory must produce a fresh dict per instance
         a = PerCoinOverrides()
         b = PerCoinOverrides()
         a.offset['BTC'] = 1.0
+        a.unrealized_loss['BTC'] = 25.0
         assert 'BTC' not in b.offset
+        assert 'BTC' not in b.unrealized_loss
 
 
 class TestParseQuietHours:
@@ -250,6 +253,7 @@ class TestMMConfigFromLegacyDict:
             'coin_offset_overrides': 'SP500:0.5,MSFT:3',
             'coin_spread_overrides': 'TSLA:2',
             'coin_size_overrides': 'NVDA:150',
+            'coin_unrealized_loss_overrides': 'INTC:25,OIL:10',
             'imbalance_threshold': 0.5,
             'imbalance_guard_threshold': 0.4,
             'imbalance_guard_depth': 7,
@@ -292,6 +296,7 @@ class TestMMConfigFromLegacyDict:
         assert cfg.per_coin.offset == {'SP500': 0.5, 'MSFT': 3.0}
         assert cfg.per_coin.spread == {'TSLA': 2.0}
         assert cfg.per_coin.size == {'NVDA': 150.0}
+        assert cfg.per_coin.unrealized_loss == {'INTC': 25.0, 'OIL': 10.0}
         assert cfg.imbalance.placement_threshold == 0.5
         assert cfg.imbalance.reactive_threshold == 0.4
         assert cfg.imbalance.reactive_depth == 7
