@@ -81,6 +81,11 @@ class PositionCloser:
         self._open_positions: Dict[str, Tuple[float, Optional[int], int]] = {}
         # coin -> consecutive cycles where manage() failed to place a close order
         self._consecutive_close_failures: Dict[str, int] = {}
+        # coin -> last effective_max_age seen by manage(); used so close-event
+        # records driven from outside manage() (cleanup_closed,
+        # on_position_closed) can still report the dynamic max_age the bot
+        # was using at the moment the position was alive.
+        self._last_effective_max_age: Dict[str, float] = {}
 
         # Close reason statistics: reason -> count, coin-level: (coin, reason) -> count
         self._close_stats: Dict[str, int] = defaultdict(int)
@@ -97,14 +102,31 @@ class PositionCloser:
         """Read-only access to close reason counters."""
         return dict(self._close_stats)
 
-    def _record_close(self, coin: str, reason: str, age: float, tier: int) -> None:
-        """Record a position close event with reason and context."""
+    def _record_close(
+        self,
+        coin: str,
+        reason: str,
+        age: float,
+        tier: int,
+        effective_max_age: Optional[float] = None,
+    ) -> None:
+        """Record a position close event with reason and context.
+
+        ``effective_max_age`` is the max-age the bot was using when the
+        close fired (post-DYNAMIC_AGE). Appended as ``max_age=Ns`` to
+        the log line so post-hoc analysis can tell whether a long
+        ``age`` was driven by a small ``effective_max_age`` (DYNAMIC_AGE
+        clamped low) or by the full grace window. Optional and
+        backward-compatible — the existing log regex
+        ``last_tier=(\\S+)`` still matches the same group.
+        """
         self._close_stats[reason] += 1
         self._close_stats_by_coin[coin][reason] += 1
         tier_name = _TIER_NAMES.get(tier, f"tier{tier}")
+        suffix = f" max_age={effective_max_age:.0f}s" if effective_max_age is not None else ""
         logger.info(
             f"[close-reason] {coin} reason={reason} age={age:.0f}s "
-            f"last_tier={tier_name}"
+            f"last_tier={tier_name}{suffix}"
         )
 
     def log_close_stats(self) -> None:
@@ -148,18 +170,22 @@ class PositionCloser:
             return
         entry_time, close_oid, tier = self._open_positions[coin]
         age = time.monotonic() - entry_time
+        effective_max_age = self._last_effective_max_age.get(coin)
         # Position was closed while we had a close order → likely maker fill
         if close_oid is not None:
-            self._record_close(coin, CLOSE_REASON_MAKER, age, tier)
+            self._record_close(coin, CLOSE_REASON_MAKER, age, tier,
+                               effective_max_age=effective_max_age)
             try:
                 self.order_manager.cancel_order(close_oid, coin)
             except API_ERRORS as e:
                 logger.debug(f"[mm] Could not cancel leftover close order for {coin}: {e}")
         else:
             # No close order was pending → external close (risk manager, etc.)
-            self._record_close(coin, CLOSE_REASON_EXTERNAL, age, tier)
+            self._record_close(coin, CLOSE_REASON_EXTERNAL, age, tier,
+                               effective_max_age=effective_max_age)
         self._open_positions.pop(coin, None)
         self._consecutive_close_failures.pop(coin, None)
+        self._last_effective_max_age.pop(coin, None)
 
     def invalidate_close_order(self, coin: str) -> bool:
         """Cancel and clear the current close order so manage() re-places it.
@@ -196,9 +222,12 @@ class PositionCloser:
             entry_time, close_oid, tier = entry
             age = time.monotonic() - entry_time
             reason = CLOSE_REASON_MAKER if close_oid is not None else CLOSE_REASON_EXTERNAL
-            self._record_close(coin, reason, age, tier)
+            effective_max_age = self._last_effective_max_age.get(coin)
+            self._record_close(coin, reason, age, tier,
+                               effective_max_age=effective_max_age)
         self._open_positions.pop(coin, None)
         self._consecutive_close_failures.pop(coin, None)
+        self._last_effective_max_age.pop(coin, None)
 
     def manage(self, coin: str, position: Dict, close_position_fn,
                max_age_override: Optional[float] = None) -> None:
@@ -229,6 +258,9 @@ class PositionCloser:
         entry_time, close_oid, current_tier = self._open_positions[coin]
         age = now - entry_time
         effective_max_age = max_age_override if max_age_override is not None else self.max_position_age_seconds
+        # Snapshot for close-event logging from cleanup_closed /
+        # on_position_closed paths that don't otherwise know it.
+        self._last_effective_max_age[coin] = effective_max_age
 
         # Unrealized loss early close: taker close when loss exceeds threshold
         if self.unrealized_loss_close_bps > 0 and entry_price > 0:
@@ -256,9 +288,11 @@ class PositionCloser:
                         f"exceeds threshold {self.unrealized_loss_close_bps}bps -- "
                         f"early taker close (age={age:.0f}s)"
                     )
-                    self._record_close(coin, CLOSE_REASON_UNREALIZED_LOSS, age, current_tier)
+                    self._record_close(coin, CLOSE_REASON_UNREALIZED_LOSS, age, current_tier,
+                                       effective_max_age=effective_max_age)
                     close_position_fn(coin)
                     self._open_positions.pop(coin, None)
+                    self._last_effective_max_age.pop(coin, None)
                     return
 
         # Check if max age exceeded -- force close
@@ -376,9 +410,11 @@ class PositionCloser:
                 f"[mm] Position {coin} held {age:.0f}s -- force closing with taker order "
                 f"(last_tier={tier_name}, had_close_order={close_oid is not None})"
             )
-            self._record_close(coin, CLOSE_REASON_TAKER_AGE, age, current_tier)
+            self._record_close(coin, CLOSE_REASON_TAKER_AGE, age, current_tier,
+                               effective_max_age=effective_max_age)
             close_position_fn(coin)
             self._open_positions.pop(coin, None)
+            self._last_effective_max_age.pop(coin, None)
             return
 
         # Maker-only close with progressive loss acceptance
