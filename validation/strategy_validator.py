@@ -227,6 +227,16 @@ def _validate_market_making(config: Dict) -> List[str]:
         errors += _positive_int('max_open_orders', config['max_open_orders'])
     if 'refresh_interval_seconds' in config:
         errors += _positive('refresh_interval_seconds', config['refresh_interval_seconds'])
+    if 'refresh_tolerance_bp' in config:
+        val = config['refresh_tolerance_bp']
+        if not isinstance(val, (int, float)):
+            errors.append(f"refresh_tolerance_bp: expected number, got {type(val).__name__}")
+        elif val < 0:
+            errors.append(f"refresh_tolerance_bp: must be >= 0, got {val}")
+    if 'refresh_max_age_seconds' in config:
+        val = config['refresh_max_age_seconds']
+        if val is not None:
+            errors += _positive('refresh_max_age_seconds', val)
     if 'max_position_age_seconds' in config:
         errors += _positive('max_position_age_seconds', config['max_position_age_seconds'])
     if 'taker_fallback_age_seconds' in config:
