@@ -56,6 +56,111 @@ class TestCloseReasonRecording:
         assert closer._close_stats_by_coin["ETH"][CLOSE_REASON_TAKER_AGE] == 1
 
 
+class TestRecordCloseEffectiveMaxAge:
+    """_record_close emits the trailing ``max_age=Ns`` field when given an
+    effective_max_age, and omits it otherwise. The existing log regex
+    ``last_tier=(\\S+)`` must still match the same group either way.
+    """
+
+    @staticmethod
+    def _capture_logs(closer, **kwargs) -> str:
+        with patch('strategies.mm_position_closer.logger') as mock_logger:
+            closer._record_close(**kwargs)
+            calls = [str(c) for c in mock_logger.info.call_args_list]
+            close_calls = [c for c in calls if '[close-reason]' in c]
+            return close_calls[0] if close_calls else ""
+
+    def test_max_age_appended_when_provided(self):
+        closer, _, _ = _make_closer()
+        msg = self._capture_logs(
+            closer, coin="BTC", reason=CLOSE_REASON_TAKER_AGE,
+            age=235.0, tier=_TIER_AGGRESSIVE, effective_max_age=120.0,
+        )
+        assert 'reason=taker_age' in msg
+        assert 'age=235s' in msg
+        assert 'last_tier=aggressive' in msg
+        assert 'max_age=120s' in msg
+
+    def test_max_age_omitted_when_none(self):
+        closer, _, _ = _make_closer()
+        msg = self._capture_logs(
+            closer, coin="BTC", reason=CLOSE_REASON_MAKER,
+            age=45.0, tier=_TIER_NORMAL, effective_max_age=None,
+        )
+        assert 'last_tier=normal' in msg
+        assert 'max_age=' not in msg
+
+    def test_existing_close_reason_regex_still_matches(self):
+        # The /review skill greps with this regex; the trailing max_age=
+        # field must NOT break the existing capture groups.
+        import re
+        closer, _, _ = _make_closer()
+        msg = self._capture_logs(
+            closer, coin="xyz:TSLA", reason=CLOSE_REASON_TAKER_AGE,
+            age=235.0, tier=_TIER_AGGRESSIVE, effective_max_age=90.0,
+        )
+        m = re.search(
+            r"\[close-reason\]\s+(\S+)\s+reason=(\S+)\s+age=(\d+)s\s+last_tier=(\S+)",
+            msg,
+        )
+        assert m is not None
+        assert m.group(1) == 'xyz:TSLA'
+        assert m.group(2) == 'taker_age'
+        assert m.group(3) == '235'
+        # group(4) is "aggressive" — \S+ stops at the space before max_age
+        assert m.group(4) == 'aggressive'
+
+    def test_dynamic_max_age_visible_when_clamped_low(self):
+        # The headline use case: distinguish an age=235s close that
+        # happened with effective_max_age=90s (DYNAMIC_AGE_MIN biting)
+        # from one with effective_max_age=120s (default).
+        closer, _, _ = _make_closer()
+        clamped = self._capture_logs(
+            closer, coin="xyz:TSLA", reason=CLOSE_REASON_TAKER_AGE,
+            age=210.0, tier=_TIER_AGGRESSIVE, effective_max_age=90.0,
+        )
+        normal = self._capture_logs(
+            closer, coin="xyz:TSLA", reason=CLOSE_REASON_TAKER_AGE,
+            age=240.0, tier=_TIER_AGGRESSIVE, effective_max_age=120.0,
+        )
+        assert 'max_age=90s' in clamped
+        assert 'max_age=120s' in normal
+
+
+class TestEffectiveMaxAgePropagation:
+    """The effective_max_age recorded in the log line should match what
+    ``manage()`` actually used, and propagate to externally-driven close
+    paths (cleanup_closed, on_position_closed) via _last_effective_max_age.
+    """
+
+    def test_manage_records_last_effective_max_age(self):
+        # max_age_override=90 should be remembered for subsequent
+        # cleanup_closed / on_position_closed that don't see it directly.
+        closer, om, _ = _make_closer(max_age=120, taker_fallback=120)
+        position = {'size': 1.0, 'entry_price': 100.0}
+
+        # The position must already be tracked, so simulate a prior call
+        # by registering it manually.
+        closer._open_positions['BTC'] = (time.monotonic() - 5, None, _TIER_NORMAL)
+
+        # This call sets _last_effective_max_age and then proceeds to
+        # try placing a close order; the tracked value is what we check.
+        closer.manage('BTC', position, lambda c: None, max_age_override=90.0)
+        assert closer._last_effective_max_age.get('BTC') == 90.0
+
+    def test_cleanup_closed_uses_last_effective_max_age(self):
+        closer, _, _ = _make_closer()
+        closer._open_positions['BTC'] = (time.monotonic() - 30, 42, _TIER_BREAKEVEN)
+        closer._last_effective_max_age['BTC'] = 90.0
+
+        with patch('strategies.mm_position_closer.logger') as mock_logger:
+            closer.cleanup_closed('BTC')
+            calls = [str(c) for c in mock_logger.info.call_args_list]
+            assert any('max_age=90s' in c for c in calls)
+        # Cleanup also evicts the snapshot so a re-opened position starts fresh.
+        assert 'BTC' not in closer._last_effective_max_age
+
+
 class TestCleanupClosedReason:
     """cleanup_closed records maker or external close reason."""
 

@@ -161,6 +161,10 @@ class MarketMakingStrategy(BaseStrategy):
         self._base_max_position_age: float = config.get('max_position_age_seconds', 120.0)
         # coin -> (avg_move_bps, computed_age_seconds) for periodic logging
         self._dynamic_age_recent: Dict[str, Tuple[float, float]] = {}
+        # coin -> {min_clamp, max_clamp, mid, raw_sum, raw_min, raw_max, samples}
+        # Populated by _get_dynamic_position_age and reset on each summary log
+        # so per-coin clamp distribution can be observed over the log interval.
+        self._dynamic_age_clamp_stats: Dict[str, Dict[str, float]] = {}
         self._dynamic_age_log_interval: float = config.get(
             'dynamic_age_log_interval', DYNAMIC_AGE_LOG_INTERVAL
         )
@@ -555,13 +559,41 @@ class MarketMakingStrategy(BaseStrategy):
         # Scale: high vol -> short age, low vol -> long age
         # baseline_vol (bps) = typical move per cycle (calibrated)
         ratio = self._dynamic_age_baseline_vol / max(avg_move_bps, self._dynamic_age_baseline_vol * 0.1)
-        age = self._base_max_position_age * ratio
+        raw_age = self._base_max_position_age * ratio
 
         # Clamp to [min_age, max_age]
-        age = max(self._dynamic_age_min, min(age, self._dynamic_age_max))
+        age = max(self._dynamic_age_min, min(raw_age, self._dynamic_age_max))
 
         # Record latest computation for periodic summary log
         self._dynamic_age_recent[coin] = (avg_move_bps, age)
+
+        # Aggregate clamp distribution per coin so the periodic summary can
+        # show "min_clamp=85% mid=15%" — directly tells operators whether
+        # DYNAMIC_AGE_MIN is biting or the value is moving freely.
+        stats = self._dynamic_age_clamp_stats.setdefault(
+            coin,
+            {
+                "min_clamp": 0,
+                "max_clamp": 0,
+                "mid": 0,
+                "raw_sum": 0.0,
+                "raw_min": float("inf"),
+                "raw_max": 0.0,
+                "samples": 0,
+            },
+        )
+        if raw_age <= self._dynamic_age_min:
+            stats["min_clamp"] += 1
+        elif raw_age >= self._dynamic_age_max:
+            stats["max_clamp"] += 1
+        else:
+            stats["mid"] += 1
+        stats["raw_sum"] += raw_age
+        if raw_age < stats["raw_min"]:
+            stats["raw_min"] = raw_age
+        if raw_age > stats["raw_max"]:
+            stats["raw_max"] = raw_age
+        stats["samples"] += 1
 
         return age
 
@@ -770,25 +802,61 @@ class MarketMakingStrategy(BaseStrategy):
         self._fills_per_coin.clear()
 
     def _log_dynamic_age(self) -> None:
-        """Log a periodic summary of per-coin dynamic position age."""
+        """Log a periodic summary of per-coin dynamic position age.
+
+        Emits two kinds of lines:
+
+        1. ``[mm] Dynamic age: ...`` — last-seen ``(vol, age)`` per coin,
+           preserved for backward compatibility with existing dashboards.
+        2. ``[mm] dyn-age <coin> samples=N min=X% mid=X% max=X%
+           raw_avg=Ns raw_range=[Ms-Ks]`` — per-coin clamp distribution
+           over the interval.  ``min`` near 100% on a coin is the direct
+           signal that ``DYNAMIC_AGE_MIN`` is biting.
+        """
         if not getattr(self, '_dynamic_age_enabled', False):
             return
         now = time.monotonic()
         if now - self._last_dynamic_age_log < self._dynamic_age_log_interval:
             return
-        self._last_dynamic_age_log = now
 
-        if not self._dynamic_age_recent:
+        if not self._dynamic_age_recent and not self._dynamic_age_clamp_stats:
             return
 
-        parts = [
-            f"{coin}: vol={vol:.2f}bps age={age:.0f}s"
-            for coin, (vol, age) in sorted(self._dynamic_age_recent.items())
-        ]
-        logger.info(f"[mm] Dynamic age: {' | '.join(parts)}")
+        # Snapshot line (existing behavior)
+        if self._dynamic_age_recent:
+            parts = [
+                f"{coin}: vol={vol:.2f}bps age={age:.0f}s"
+                for coin, (vol, age) in sorted(self._dynamic_age_recent.items())
+            ]
+            logger.info(f"[mm] Dynamic age: {' | '.join(parts)}")
 
+        # Clamp stats: one line per coin, sorted by min_clamp pct desc so
+        # the most clamped coin appears first.
+        clamp_rows = []
+        for coin, stats in self._dynamic_age_clamp_stats.items():
+            samples = int(stats.get("samples", 0))
+            if samples <= 0:
+                continue
+            min_pct = 100.0 * stats["min_clamp"] / samples
+            mid_pct = 100.0 * stats["mid"] / samples
+            max_pct = 100.0 * stats["max_clamp"] / samples
+            raw_avg = stats["raw_sum"] / samples
+            raw_min = stats["raw_min"] if stats["raw_min"] != float("inf") else raw_avg
+            raw_max = stats["raw_max"]
+            clamp_rows.append((coin, samples, min_pct, mid_pct, max_pct, raw_avg, raw_min, raw_max))
+
+        clamp_rows.sort(key=lambda r: -r[2])  # min_clamp pct desc
+        for coin, samples, min_pct, mid_pct, max_pct, raw_avg, raw_min, raw_max in clamp_rows:
+            logger.info(
+                f"[mm] dyn-age {coin} samples={samples} "
+                f"min={min_pct:.0f}% mid={mid_pct:.0f}% max={max_pct:.0f}% "
+                f"raw_avg={raw_avg:.0f}s raw_range=[{raw_min:.0f}s-{raw_max:.0f}s]"
+            )
+
+        self._last_dynamic_age_log = now
         # Reset so next log reflects the latest window only
         self._dynamic_age_recent.clear()
+        self._dynamic_age_clamp_stats.clear()
 
     # ------------------------------------------------------------------ #
     #  Helpers
