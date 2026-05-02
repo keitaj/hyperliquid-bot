@@ -314,6 +314,8 @@ The `market_making` strategy uses **progressive close pricing**: as a position a
 
 **BBO mode** (`--bbo-mode`): Places orders at the best bid/ask instead of `mid ± spread_bps`. On Hyperliquid, market spreads are typically 0.1–2 bps, so even `SPREAD_BPS=5` places orders 4–5 bps away from BBO, resulting in low fill rates. BBO mode improves fill rates by tracking the current best prices. Use `--bbo-offset-bps N` to place orders N bps behind BBO (default: 0 = at BBO). Falls back to `mid ± spread_bps` when BBO is unavailable.
 
+**Refresh tolerance** (`--refresh-tolerance-bp`): Keep an existing order across cycles when its recorded price drifted no more than this many basis points from the current ideal price. Reduces unnecessary cancel/replace traffic and preserves queue priority on Hyperliquid's price–time matching when the market is quiet. The cancel still fires immediately when the drift exceeds tolerance. A safety-net upper bound on order age applies independently via `--refresh-max-age-seconds` (default: `refresh_interval_seconds * 4`). Default: `0` (disabled, age-only behaviour preserved for full backward compatibility).
+
 **Per-coin overrides** (`--coin-offset-overrides`, `--coin-spread-overrides`, `--coin-size-overrides`, `--coin-unrealized-loss-overrides`): Override BBO offset, spread, order size, or the unrealized-loss early-close threshold per coin. Format: `"SP500:0.5,MSFT:3"`. Supports both bare names and DEX-prefixed names (`xyz:SP500:0.5`). Unspecified coins use the global default. Use `--coin-size-overrides` to set per-coin order size in USD (e.g., `"TSLA:150,NVDA:150"`); setting a coin to `0` skips orders for that coin. Use `--coin-unrealized-loss-overrides` to relax the threshold on low-vol coins (`"INTC:25"`) or tighten it on volatile ones (`"OIL:10"`); setting a coin to `0` disables the unrealized-loss feature for that coin.
 
 **Quiet hours** (`--quiet-hours-utc`): Stop or widen quoting during specific UTC hours (e.g., `"17"` or `"17,18"`). Default: stop quoting entirely. With `--quiet-hours-spread-multiplier N`, widens spread by Nx instead. Positions are still managed during quiet hours.
@@ -547,6 +549,8 @@ strategies:
     order_size_usd: 50                 # --order-size-usd
     max_open_orders: 4                 # --max-open-orders
     refresh_interval_seconds: 30       # --refresh-interval
+    refresh_tolerance_bp: 0            # --refresh-tolerance-bp  (keep an order across cycles when its price drift <= this many bps; 0 = disabled, age-only)
+    refresh_max_age_seconds: null      # --refresh-max-age-seconds  (safety-net upper bound on age of a kept order; null = refresh_interval_seconds * 4)
     close_immediately: true            # --no-close-immediately  (flag inverts this)
     max_position_age_seconds: 120      # --max-position-age
     maker_only: false                  # --maker-only

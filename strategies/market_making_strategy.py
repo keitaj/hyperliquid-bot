@@ -192,10 +192,32 @@ class MarketMakingStrategy(BaseStrategy):
         self._prev_position_coins: set = set()  # coins that had positions last cycle
         self._prev_positions: Dict[str, Dict] = {}  # snapshot for loss streak detection
 
+        # ---- Refresh tolerance (preserve queue priority on small price drift) ---- #
+        # When ``refresh_tolerance_bp > 0``, an order is kept across cycles
+        # as long as both (a) its recorded price drifted no more than
+        # ``refresh_tolerance_bp`` basis points from the current ideal
+        # price, and (b) its age is below ``refresh_max_age_seconds``.
+        # ``refresh_tolerance_bp == 0`` (default) preserves the original
+        # age-only behaviour (full backward compatibility).
+        self.refresh_tolerance_bp: float = max(
+            0.0, float(config.get('refresh_tolerance_bp', 0))
+        )
+        refresh_interval = float(config.get('refresh_interval_seconds', 30))
+        raw_max_age = config.get('refresh_max_age_seconds', None)
+        if raw_max_age is None:
+            self.refresh_max_age_seconds: float = max(refresh_interval * 4.0, refresh_interval)
+        else:
+            self.refresh_max_age_seconds = max(float(raw_max_age), refresh_interval)
+        if getattr(self, 'refresh_tolerance_bp', 0) > 0:
+            logger.info(
+                f"[mm] Refresh tolerance enabled: tolerance={self.refresh_tolerance_bp}bp, "
+                f"max_age={self.refresh_max_age_seconds}s"
+            )
+
         # ---- Delegates ---- #
         self._tracker = OrderTracker(
             order_manager=order_manager,
-            refresh_interval_seconds=config.get('refresh_interval_seconds', 30),
+            refresh_interval_seconds=refresh_interval,
             max_open_orders=self.max_open_orders,
         )
         self._closer = PositionCloser(
@@ -388,7 +410,26 @@ class MarketMakingStrategy(BaseStrategy):
 
                 # No position — normal MM flow
                 close_oid = self._closer.get_close_oid(coin)
-                self._tracker.cancel_stale_orders(coin, close_oid=close_oid)
+
+                if getattr(self, 'refresh_tolerance_bp', 0) > 0:
+                    ideal = self._compute_ideal_prices(coin)
+                    if ideal is None:
+                        # Fall back to age-only when ideal price is unavailable
+                        self._tracker.cancel_stale_orders(coin, close_oid=close_oid)
+                    else:
+                        ideal_buy, ideal_sell = ideal
+                        self._tracker.refresh_orders_with_tolerance(
+                            coin,
+                            ideal_prices={
+                                OrderSide.BUY.value: ideal_buy,
+                                OrderSide.SELL.value: ideal_sell,
+                            },
+                            tolerance_bp=self.refresh_tolerance_bp,
+                            max_age_seconds=self.refresh_max_age_seconds,
+                            close_oid=close_oid,
+                        )
+                else:
+                    self._tracker.cancel_stale_orders(coin, close_oid=close_oid)
 
                 # Check max positions using active coin count
                 active_count = self._tracker.active_coins(
@@ -603,6 +644,72 @@ class MarketMakingStrategy(BaseStrategy):
 
         return age
 
+    def _compute_ideal_prices(self, coin: str) -> Optional[Tuple[float, float]]:
+        """Compute current ideal ``(buy_price, sell_price)`` for ``coin``.
+
+        Mirrors the price computation in :meth:`_place_orders` but is a
+        pure helper (no side effects on rolling buffers, no order placement).
+        Used by the run loop to evaluate refresh-tolerance drift before
+        deciding whether to keep existing orders. Returns ``None`` when the
+        ideal price cannot be determined (no market data, mid <= 0).
+        """
+        market_data = self.market_data.get_market_data(coin)
+        if not market_data:
+            return None
+
+        mid_price = market_data.mid_price
+        if mid_price <= 0:
+            return None
+
+        rp = self.market_data.price_rounding_params(coin)
+
+        if self.bbo_mode and market_data.bid > 0 and market_data.ask > 0:
+            base_offset = self._get_coin_offset(coin)
+            if self.vol_adjust_enabled:
+                effective_offset_bps = self._get_volatility_adjusted_offset(coin, base_offset)
+            else:
+                effective_offset_bps = base_offset
+            if self._quiet_spread_multiplier > 0 and self._is_quiet_hour():
+                effective_offset_bps *= self._quiet_spread_multiplier
+            hourly_mult = self._get_hourly_spread_multiplier()
+            if hourly_mult != 1.0:
+                effective_offset_bps *= hourly_mult
+            buy_offset_bps, sell_offset_bps = self._calculate_microprice_offsets(
+                coin, effective_offset_bps
+            )
+            buy_price = round_price(market_data.bid * (1 - buy_offset_bps / 10_000), *rp)
+            sell_price = round_price(market_data.ask * (1 + sell_offset_bps / 10_000), *rp)
+        else:
+            coin_spread = self._get_coin_spread(coin)
+            spread_offset = mid_price * (coin_spread / 10_000)
+            raw_buy = mid_price - spread_offset
+            raw_sell = mid_price + spread_offset
+            if self._quiet_spread_multiplier > 0 and self._is_quiet_hour():
+                extra = spread_offset * (self._quiet_spread_multiplier - 1)
+                raw_buy -= extra
+                raw_sell += extra
+            hourly_mult = self._get_hourly_spread_multiplier()
+            if hourly_mult != 1.0 and hourly_mult > 0:
+                extra = spread_offset * (hourly_mult - 1)
+                raw_buy -= extra
+                raw_sell += extra
+            buy_price = round_price(raw_buy, *rp)
+            sell_price = round_price(raw_sell, *rp)
+            if self.maker_only and market_data.bid > 0 and market_data.ask > 0:
+                if buy_price >= market_data.bid:
+                    buy_price = round_price(market_data.bid * (1 - BBO_OFFSET), *rp)
+                if sell_price <= market_data.ask:
+                    sell_price = round_price(market_data.ask * (1 + BBO_OFFSET), *rp)
+
+        # Inventory skew (same shift applied to both legs)
+        skew = self._calculate_inventory_skew(coin, mid_price)
+        if skew != 0.0:
+            skew_mult = skew / 10_000
+            buy_price = round_price(buy_price * (1 - skew_mult), *rp)
+            sell_price = round_price(sell_price * (1 - skew_mult), *rp)
+
+        return buy_price, sell_price
+
     def _place_orders(self, coin: str) -> None:
         """Place a buy and a sell limit order.
 
@@ -624,66 +731,19 @@ class MarketMakingStrategy(BaseStrategy):
         if mid_price <= 0:
             return
 
-        rp = self.market_data.price_rounding_params(coin)
-
+        # Volatility buffer is updated here so it occurs once per placement
+        # cycle even when ``_compute_ideal_prices`` is also called from the
+        # run loop (which is a pure helper).
         if self.bbo_mode and market_data.bid > 0 and market_data.ask > 0:
-            # BBO-following mode: place at/near best bid and ask
             self._record_mid_price(coin, mid_price)
-            base_offset = self._get_coin_offset(coin)
-            if self.vol_adjust_enabled:
-                effective_offset_bps = self._get_volatility_adjusted_offset(coin, base_offset)
-            else:
-                effective_offset_bps = base_offset
-            # Widen spread during quiet hours (spread-multiplier mode)
-            if self._quiet_spread_multiplier > 0 and self._is_quiet_hour():
-                effective_offset_bps *= self._quiet_spread_multiplier
-            # Hourly spread schedule
-            hourly_mult = self._get_hourly_spread_multiplier()
-            if hourly_mult != 1.0:
-                effective_offset_bps *= hourly_mult
-            # Micro-price asymmetric offset
-            buy_offset_bps, sell_offset_bps = self._calculate_microprice_offsets(
-                coin, effective_offset_bps
-            )
-            buy_price = round_price(market_data.bid * (1 - buy_offset_bps / 10_000), *rp)
-            sell_price = round_price(market_data.ask * (1 + sell_offset_bps / 10_000), *rp)
-        else:
-            # Fallback: mid ± spread. Also used when BBO is unavailable
-            # (bid/ask=0) even in bbo_mode. Maker-only clamping below
-            # ensures Alo orders don't cross the spread.
-            coin_spread = self._get_coin_spread(coin)
-            spread_offset = mid_price * (coin_spread / 10_000)
-            raw_buy = mid_price - spread_offset
-            raw_sell = mid_price + spread_offset
-            # Widen spread during quiet hours (spread-multiplier mode)
-            if self._quiet_spread_multiplier > 0 and self._is_quiet_hour():
-                extra = spread_offset * (self._quiet_spread_multiplier - 1)
-                raw_buy -= extra
-                raw_sell += extra
-            # Hourly spread schedule
-            hourly_mult = self._get_hourly_spread_multiplier()
-            if hourly_mult != 1.0 and hourly_mult > 0:
-                extra = spread_offset * (hourly_mult - 1)
-                raw_buy -= extra
-                raw_sell += extra
-            buy_price = round_price(raw_buy, *rp)
-            sell_price = round_price(raw_sell, *rp)
-            # Clamp prices to stay outside BBO for maker-only (Alo) orders
-            if self.maker_only and market_data.bid > 0 and market_data.ask > 0:
-                if buy_price >= market_data.bid:
-                    buy_price = round_price(market_data.bid * (1 - BBO_OFFSET), *rp)
-                if sell_price <= market_data.ask:
-                    sell_price = round_price(market_data.ask * (1 + BBO_OFFSET), *rp)
 
-        # Inventory skew: shift both prices to encourage position reduction.
-        # Applied after BBO/spread pricing intentionally — skew may push
-        # prices beyond BBO bounds (e.g. sell below ask) which is desired
-        # to accelerate inventory reduction via more aggressive fills.
+        prices = self._compute_ideal_prices(coin)
+        if prices is None:
+            return
+        buy_price, sell_price = prices
+
         skew = self._calculate_inventory_skew(coin, mid_price)
         if skew != 0.0:
-            skew_mult = skew / 10_000
-            buy_price = round_price(buy_price * (1 - skew_mult), *rp)
-            sell_price = round_price(sell_price * (1 - skew_mult), *rp)
             logger.debug(f"[mm] Inventory skew {coin}: {skew:.1f}bps")
 
         size = self.calculate_position_size(coin, {})
@@ -696,6 +756,13 @@ class MarketMakingStrategy(BaseStrategy):
             return
 
         current_count = self._tracker.get_order_count(coin)
+        # When refresh tolerance is enabled, an order may have been kept
+        # across cycles -- avoid placing a duplicate quote on the same side.
+        open_sides = (
+            self._tracker.get_open_sides(coin)
+            if getattr(self, 'refresh_tolerance_bp', 0) > 0
+            else set()
+        )
         sides_and_prices = []
 
         # L2 book imbalance guard: skip the side that is likely to get adversely selected.
@@ -712,10 +779,18 @@ class MarketMakingStrategy(BaseStrategy):
                 skip_sell = True
                 logger.debug(f"[mm] {coin} skipping SELL (book imbalance {imb:.2f})")
 
-        if current_count < self.max_open_orders and not skip_buy:
+        if (
+            current_count < self.max_open_orders
+            and not skip_buy
+            and OrderSide.BUY.value not in open_sides
+        ):
             sides_and_prices.append((OrderSide.BUY, buy_price))
 
-        if current_count + len(sides_and_prices) < self.max_open_orders and not skip_sell:
+        if (
+            current_count + len(sides_and_prices) < self.max_open_orders
+            and not skip_sell
+            and OrderSide.SELL.value not in open_sides
+        ):
             sides_and_prices.append((OrderSide.SELL, sell_price))
 
         if not sides_and_prices:
@@ -735,7 +810,7 @@ class MarketMakingStrategy(BaseStrategy):
 
         for (side, price), order in zip(sides_and_prices, results):
             if order and order.id is not None:
-                self._tracker.record_order(coin, order.id, side.value)
+                self._tracker.record_order(coin, order.id, side.value, price=price)
                 self._orders_placed += 1
                 self._orders_placed_per_coin[coin] += 1
                 logger.info(

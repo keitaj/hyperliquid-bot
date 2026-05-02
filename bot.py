@@ -182,6 +182,7 @@ class HyperliquidBot:
                 'order_size_usd': 50,
                 'max_open_orders': 4,
                 'refresh_interval_seconds': 30,
+                'refresh_tolerance_bp': 0,
                 'close_immediately': True,
                 'maker_only': False,
                 'max_positions': 3,
@@ -992,6 +993,13 @@ if __name__ == "__main__":
     parser.add_argument('--max-open-orders', type=int, help='Max concurrent open orders (market_making, default: 4)')
     parser.add_argument('--refresh-interval', dest='refresh_interval_seconds', type=float,
                         help='Seconds before cancelling stale orders (market_making, default: 30)')
+    parser.add_argument('--refresh-tolerance-bp', type=float,
+                        help='Keep an order across cycles when its price drifted no more than this many '
+                             'basis points from the current ideal price (market_making, default: 0 = disabled). '
+                             'Preserves queue priority and reduces API churn when the market is quiet.')
+    parser.add_argument('--refresh-max-age-seconds', type=float,
+                        help='Safety-net upper bound on the age of a kept order even when its price is still '
+                             'within tolerance (market_making, default: refresh_interval_seconds * 4).')
     parser.add_argument('--no-close-immediately', action='store_true', default=False,
                         help='Disable immediate position closing (market_making)')
     parser.add_argument('--drain-flag-file', type=str,
@@ -1202,6 +1210,8 @@ if __name__ == "__main__":
         'market_making': [
             'spread_bps', 'order_size_usd', 'max_open_orders',
             'refresh_interval_seconds',
+            'refresh_tolerance_bp',
+            'refresh_max_age_seconds',
             'max_position_age_seconds',
             'taker_fallback_age_seconds',
             'aggressive_loss_bps',
