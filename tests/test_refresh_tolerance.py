@@ -120,10 +120,12 @@ class TestComputeIdealPrices:
 
         result = s._compute_ideal_prices("BTC")
         assert result is not None
-        buy, sell = result
+        buy, sell, skew = result
         # 10bp around 100.0 = 99.9 / 100.1
         assert abs(buy - 99.9) < 1e-6
         assert abs(sell - 100.1) < 1e-6
+        # No position -> no inventory skew.
+        assert skew == 0.0
 
     def test_bbo_mode_at_best_bid_ask(self):
         s, _om, md, _ = _make_strategy()
@@ -136,12 +138,16 @@ class TestComputeIdealPrices:
         s._get_coin_offset = lambda coin: 0.0
         s._calculate_microprice_offsets = lambda coin, off: (off, off)
         s._calculate_inventory_skew = lambda coin, mid: 0.0
+        # Vol buffer is updated inside _compute_ideal_prices in BBO mode;
+        # stub it out to keep this test focused on price math.
+        s._record_mid_price = lambda coin, mid: None
 
         result = s._compute_ideal_prices("BTC")
         assert result is not None
-        buy, sell = result
+        buy, sell, skew = result
         assert abs(buy - 99.95) < 1e-6
         assert abs(sell - 100.05) < 1e-6
+        assert skew == 0.0
 
 
 class TestRunLoopTolerancePath:
@@ -156,8 +162,8 @@ class TestRunLoopTolerancePath:
         # Simulate the run-loop dispatch directly (without the surrounding
         # boilerplate of MarketMakingStrategy.run): tolerance is 0, so the
         # legacy method should be chosen.
+        ideal = s._compute_ideal_prices("BTC")
         if s.refresh_tolerance_bp > 0:
-            ideal = s._compute_ideal_prices("BTC")
             tracker.refresh_orders_with_tolerance(
                 "BTC",
                 ideal_prices={"B": ideal[0], "A": ideal[1]},
@@ -173,15 +179,20 @@ class TestRunLoopTolerancePath:
 
     def test_enabled_uses_refresh_with_tolerance(self):
         """``refresh_tolerance_bp > 0`` -> ``refresh_orders_with_tolerance`` is invoked."""
+        from order_manager import OrderSide
+
         s, _om, md, tracker = _make_strategy(refresh_tolerance_bp=2.0)
         market_data = _market_data(mid=100.0, bid=99.99, ask=100.01)
         md.get_market_data.return_value = market_data
 
+        ideal = s._compute_ideal_prices("BTC")
         if s.refresh_tolerance_bp > 0:
-            ideal = s._compute_ideal_prices("BTC")
             tracker.refresh_orders_with_tolerance(
                 "BTC",
-                ideal_prices={"B": ideal[0], "A": ideal[1]},
+                ideal_prices={
+                    OrderSide.BUY.value: ideal[0],
+                    OrderSide.SELL.value: ideal[1],
+                },
                 tolerance_bp=s.refresh_tolerance_bp,
                 max_age_seconds=s.refresh_max_age_seconds,
                 close_oid=None,
@@ -193,9 +204,120 @@ class TestRunLoopTolerancePath:
         call_kwargs = tracker.refresh_orders_with_tolerance.call_args.kwargs
         assert call_kwargs["tolerance_bp"] == 2.0
         assert call_kwargs["max_age_seconds"] == 120.0
-        assert "B" in call_kwargs["ideal_prices"]
-        assert "A" in call_kwargs["ideal_prices"]
+        assert OrderSide.BUY.value in call_kwargs["ideal_prices"]
+        assert OrderSide.SELL.value in call_kwargs["ideal_prices"]
         tracker.cancel_stale_orders.assert_not_called()
+
+
+class TestSingleComputePerCycle:
+    """The two should-fix items from PR #144 review:
+
+      1. ``_calculate_inventory_skew`` is computed once per cycle.
+      2. ``_record_mid_price`` (vol buffer update) fires once per cycle, so
+         the run-loop tolerance check and the actual placement evaluate
+         against the same buffer state.
+    """
+
+    def _stub_for_place_orders(self, s):
+        s._calculate_microprice_offsets = lambda coin, off: (off, off)
+        s._get_coin_offset = lambda coin: 0.0
+        s._get_coin_spread = lambda coin: s.spread_bps
+        s._get_hourly_spread_multiplier = lambda: 1.0
+        s.calculate_position_size = lambda coin, signal: 1.0
+
+    def test_inventory_skew_called_once_when_threading_ideal_prices(self):
+        """Threading ``ideal_prices`` into ``_place_orders`` skips the
+        redundant inventory-skew computation."""
+        s, _om, md, _tracker = _make_strategy(refresh_tolerance_bp=2.0)
+        self._stub_for_place_orders(s)
+        market_data = _market_data(mid=100.0, bid=99.99, ask=100.01)
+        md.get_market_data.return_value = market_data
+        md.round_size.return_value = 1.0
+        s.order_manager.bulk_place_orders.return_value = []
+
+        skew_calls = {"n": 0}
+
+        def counting_skew(_coin, _mid):
+            skew_calls["n"] += 1
+            return 0.0
+
+        s._calculate_inventory_skew = counting_skew
+        s._record_mid_price = lambda coin, mid: None  # not BBO mode here
+
+        # Cycle simulation: run-loop computes once, then passes to placement.
+        ideal = s._compute_ideal_prices("BTC")
+        assert skew_calls["n"] == 1
+        s._place_orders("BTC", ideal_prices=ideal)
+        # _place_orders must not recompute the skew.
+        assert skew_calls["n"] == 1
+
+    def test_inventory_skew_recomputed_when_ideal_prices_omitted(self):
+        """Legacy callers that omit ``ideal_prices`` still get a working
+        path that computes prices internally (one skew call total)."""
+        s, _om, md, _tracker = _make_strategy(refresh_tolerance_bp=0.0)
+        self._stub_for_place_orders(s)
+        market_data = _market_data(mid=100.0, bid=99.99, ask=100.01)
+        md.get_market_data.return_value = market_data
+        md.round_size.return_value = 1.0
+        s.order_manager.bulk_place_orders.return_value = []
+
+        skew_calls = {"n": 0}
+
+        def counting_skew(_coin, _mid):
+            skew_calls["n"] += 1
+            return 0.0
+
+        s._calculate_inventory_skew = counting_skew
+        s._record_mid_price = lambda coin, mid: None
+
+        # No ``ideal_prices`` kwarg -> internal compute path.
+        s._place_orders("BTC")
+        assert skew_calls["n"] == 1
+
+    def test_record_mid_price_fires_once_per_cycle(self):
+        """In BBO mode, the volatility buffer is updated exactly once per
+        cycle even when ``_compute_ideal_prices`` is invoked from the
+        run-loop tolerance check and the result is threaded into
+        ``_place_orders``."""
+        s, _om, md, _tracker = _make_strategy(refresh_tolerance_bp=2.0)
+        self._stub_for_place_orders(s)
+        s.bbo_mode = True
+        market_data = _market_data(mid=100.0, bid=99.95, ask=100.05)
+        md.get_market_data.return_value = market_data
+        md.round_size.return_value = 1.0
+        s._calculate_inventory_skew = lambda coin, mid: 0.0
+        s.order_manager.bulk_place_orders.return_value = []
+
+        record_calls = []
+        s._record_mid_price = lambda coin, mid: record_calls.append((coin, mid))
+
+        # Cycle simulation.
+        ideal = s._compute_ideal_prices("BTC")
+        s._place_orders("BTC", ideal_prices=ideal)
+
+        # Buffer updated exactly once -- inside _compute_ideal_prices.
+        assert len(record_calls) == 1
+        assert record_calls[0] == ("BTC", 100.0)
+
+    def test_record_mid_price_skipped_when_not_bbo_mode(self):
+        """Non-BBO mode never updates the rolling volatility buffer
+        (preserves pre-PR behaviour)."""
+        s, _om, md, _tracker = _make_strategy(refresh_tolerance_bp=2.0)
+        self._stub_for_place_orders(s)
+        s.bbo_mode = False
+        market_data = _market_data(mid=100.0, bid=99.99, ask=100.01)
+        md.get_market_data.return_value = market_data
+        md.round_size.return_value = 1.0
+        s._calculate_inventory_skew = lambda coin, mid: 0.0
+        s.order_manager.bulk_place_orders.return_value = []
+
+        record_calls = []
+        s._record_mid_price = lambda coin, mid: record_calls.append((coin, mid))
+
+        ideal = s._compute_ideal_prices("BTC")
+        s._place_orders("BTC", ideal_prices=ideal)
+
+        assert record_calls == []
 
 
 class TestPlaceOrdersOpenSidesGating:
