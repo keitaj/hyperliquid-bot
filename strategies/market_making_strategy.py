@@ -24,6 +24,7 @@ from strategies.mm_config import (
     parse_coin_overrides,
     parse_spread_schedule,
 )
+from strategies.coin_health_tracker import CoinHealthTracker
 from strategies.mm_order_tracker import OrderTracker
 from strategies.mm_position_closer import PositionCloser
 from coin_utils import parse_coin
@@ -123,6 +124,25 @@ class MarketMakingStrategy(BaseStrategy):
                 f"min_fills={self.cfg.auto_exclude.min_fills}, "
                 f"window={self.cfg.auto_exclude.window_label}, "
                 f"cooldown={self.cfg.auto_exclude.cooldown_seconds}s"
+            )
+
+        # ---- Forager: composite per-coin health scoring ---- #
+        self._coin_health_tracker: Optional[CoinHealthTracker] = (
+            CoinHealthTracker(self.cfg.forager) if self.cfg.forager.enabled else None
+        )
+        # Per-coin sliding history of recent composite scores (size = consecutive)
+        self._forager_score_history: Dict[str, deque] = defaultdict(deque)
+        # Per-coin throttle for `_check_forager_health` (avoid evaluating every loop)
+        self._forager_last_check: Dict[str, float] = {}
+        if self.cfg.forager.enabled:
+            logger.info(
+                f"[mm] Forager armed: threshold={self.cfg.forager.score_threshold}, "
+                f"consecutive={self.cfg.forager.consecutive}, "
+                f"weights=(act={self.cfg.forager.weight_activity}, "
+                f"qual={self.cfg.forager.weight_quality}, "
+                f"cost={self.cfg.forager.weight_cost}), "
+                f"window={self.cfg.forager.window_seconds}s, "
+                f"cooldown={self.cfg.forager.cooldown_seconds}s"
             )
 
         # ---- Per-coin offset/spread/size overrides (aliases of self.cfg.per_coin) ---- #
@@ -271,6 +291,10 @@ class MarketMakingStrategy(BaseStrategy):
         for coin in new_fills:
             self._fills_detected += 1
             self._fills_per_coin[coin] += 1
+            # Forager: update activity dimension on entry fills.
+            tracker = getattr(self, '_coin_health_tracker', None)
+            if tracker is not None:
+                tracker.record_fill(coin)
             # Cancel opposite-side orders for newly filled coins to prevent
             # double-filling which doubles adverse selection cost.
             # NOTE: Does not fire when close_immediately=True because
@@ -452,6 +476,9 @@ class MarketMakingStrategy(BaseStrategy):
                 # selection has been moderate for ``consecutive`` summary
                 # windows in a row.
                 self._check_auto_exclude(coin)
+                # Forager: composite health score (activity + maker rate + cost)
+                # Independent of auto-exclude; either may set the cooldown.
+                self._check_forager_health(coin)
 
                 # Per-coin cooldown (shared by loss_streak and auto_exclude)
                 cooldown_deadline = self._coin_cooldown_until.get(coin)
@@ -1140,6 +1167,67 @@ class MarketMakingStrategy(BaseStrategy):
             f"[mm] {coin} auto-excluded: {cfg.consecutive} consecutive "
             f"{avg_key} <= {cfg.threshold_bps} bps "
             f"(min_fills={cfg.min_fills}) → cooldown {cfg.cooldown_seconds}s"
+        )
+
+    def _check_forager_health(self, coin: str) -> None:
+        """Forager: composite health-score-based auto-exclude.
+
+        Runs alongside ``_check_auto_exclude`` (markout-based) — both
+        write to the shared ``_coin_cooldown_until`` map. No-op when
+        the feature is disabled, the coin is already in cooldown, or
+        the per-coin throttle hasn't elapsed.
+        """
+        cfg_root = getattr(self, 'cfg', None)
+        if cfg_root is None:
+            return
+        cfg = cfg_root.forager
+        tracker = getattr(self, '_coin_health_tracker', None)
+        if not cfg.enabled or tracker is None:
+            return
+
+        # Already cooling down (auto_exclude or prior forager trigger) — skip.
+        deadline = self._coin_cooldown_until.get(coin)
+        now = time.monotonic()
+        if deadline and deadline > now:
+            return
+
+        # Throttle: skip if checked recently for this coin.
+        last_check = self._forager_last_check.get(coin, 0.0)
+        if now - last_check < cfg.check_interval_seconds:
+            return
+        self._forager_last_check[coin] = now
+
+        health = tracker.get_health(coin)
+        # Append to the consecutive-low history; trim to ``consecutive``.
+        history = self._forager_score_history[coin]
+        history.append(health.composite_score)
+        while len(history) > cfg.consecutive:
+            history.popleft()
+
+        if len(history) < cfg.consecutive:
+            return  # not enough samples yet
+
+        if not all(s < cfg.score_threshold for s in history):
+            return
+
+        # Avoid false positives on coins that are active but lack close
+        # history yet (quality dimension undefined).
+        if (
+            health.n_closes < cfg.min_closes_for_quality
+            and health.activity_score > 50.0
+        ):
+            return
+
+        deadline = now + cfg.cooldown_seconds
+        self._coin_cooldown_until[coin] = deadline
+        history.clear()  # reset; avoid immediate re-trigger after cooldown
+        logger.warning(
+            f"[mm] {coin} forager-excluded: composite_score="
+            f"{health.composite_score:.1f} (activity={health.activity_score:.0f}, "
+            f"quality={health.close_quality_score:.0f}, "
+            f"cost={health.cost_score:.0f}, n_closes={health.n_closes}) "
+            f"< {cfg.score_threshold} for {cfg.consecutive} checks → "
+            f"cooldown {cfg.cooldown_seconds}s"
         )
 
     def _get_hourly_spread_multiplier(self) -> float:

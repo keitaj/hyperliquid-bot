@@ -41,6 +41,7 @@ class FillFeed:
         self._error_count = 0
         self._adverse_tracker: Any = None
         self._position_closer: Any = None
+        self._coin_health_tracker: Any = None
 
     def set_adverse_selection_tracker(self, tracker: Any) -> None:
         """Register an adverse selection tracker to receive fill notifications."""
@@ -54,6 +55,14 @@ class FillFeed:
         from race conditions between the WS thread and main loop.
         """
         self._position_closer = closer
+
+    def set_coin_health_tracker(self, tracker: Any) -> None:
+        """Register a CoinHealthTracker (Forager) to receive fill events.
+
+        Activity is recorded on every fill; closes (``closedPnl != 0``)
+        also feed the quality / cost dimensions.
+        """
+        self._coin_health_tracker = tracker
 
     # ------------------------------------------------------------------ #
     #  Lifecycle
@@ -154,6 +163,39 @@ class FillFeed:
                             self._adverse_tracker.on_fill(coin, px, side, fill_time)
                     except Exception as e:
                         logger.debug("[ws-fill] Error notifying adverse tracker: %s", e)
+
+            # Notify Forager's CoinHealthTracker (observation only).
+            # Every fill updates activity; closes (closedPnl != 0) feed
+            # the quality + cost dimensions.
+            if self._coin_health_tracker is not None:
+                for fill in fills:
+                    try:
+                        coin = fill.get("coin", "")
+                        if not coin:
+                            continue
+                        self._coin_health_tracker.record_fill(coin)
+                        closed_pnl_raw = fill.get("closedPnl")
+                        if closed_pnl_raw is None or float(closed_pnl_raw) == 0.0:
+                            continue
+                        # Treat fills with non-zero closedPnl as position closes.
+                        px = float(fill.get("px", 0))
+                        sz = float(fill.get("sz", 0))
+                        crossed = bool(fill.get("crossed", False))
+                        fee = float(fill.get("fee", 0))
+                        if px <= 0 or sz <= 0:
+                            continue
+                        notional = sz * px
+                        net_pnl = float(closed_pnl_raw) - fee
+                        self._coin_health_tracker.record_close(
+                            coin=coin,
+                            is_maker=(not crossed),
+                            net_pnl=net_pnl,
+                            notional=notional,
+                        )
+                    except Exception as e:
+                        logger.debug(
+                            "[ws-fill] Error notifying coin health tracker: %s", e
+                        )
 
             # Cancel opposite-side orders for each filled coin.
             # OrderTracker.cancel_all_orders_for_coin is thread-safe (has its own lock).
