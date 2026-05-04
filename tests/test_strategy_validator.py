@@ -211,6 +211,50 @@ class TestMarketMakingValidation:
             'taker_fallback_age_seconds': None,
         }) is None
 
+    def test_rejection_log_level_valid_strings(self):
+        for level in ('error', 'warning', 'info', 'debug'):
+            assert validate_strategy_config('market_making', {
+                'rejection_log_level': level,
+            }) is None
+
+    def test_rejection_log_level_uppercase_accepted(self):
+        # Validator normalises case before checking against the allow-list.
+        assert validate_strategy_config('market_making', {
+            'rejection_log_level': 'WARNING',
+        }) is None
+
+    def test_rejection_log_level_invalid_value_rejected(self):
+        err = validate_strategy_config('market_making', {
+            'rejection_log_level': 'critical',
+        })
+        assert err is not None
+        assert 'rejection_log_level' in err
+
+    def test_rejection_log_level_non_string_rejected(self):
+        err = validate_strategy_config('market_making', {
+            'rejection_log_level': 42,
+        })
+        assert err is not None
+        assert 'rejection_log_level' in err
+
+    def test_rejection_summary_interval_zero_accepted(self):
+        # 0 disables the summary; must not be rejected.
+        assert validate_strategy_config('market_making', {
+            'rejection_summary_interval': 0,
+        }) is None
+
+    def test_rejection_summary_interval_positive_accepted(self):
+        assert validate_strategy_config('market_making', {
+            'rejection_summary_interval': 300,
+        }) is None
+
+    def test_rejection_summary_interval_negative_rejected(self):
+        err = validate_strategy_config('market_making', {
+            'rejection_summary_interval': -1,
+        })
+        assert err is not None
+        assert 'rejection_summary_interval' in err
+
 
 class TestMultipleErrors:
     """Validate that multiple errors are reported at once."""

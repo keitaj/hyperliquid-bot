@@ -1,6 +1,6 @@
 import logging
 from collections import defaultdict
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -11,6 +11,9 @@ from config import Config
 from exceptions import ConfigurationError
 from coin_utils import is_hip3, parse_coin
 from ttl_cache import TTLCacheEntry, TTLCacheMap
+
+if TYPE_CHECKING:
+    from order_rejection_tracker import OrderRejectionTracker
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +92,30 @@ class OrderManager:
         # Invalidated after any write operation (place, cancel).
         # Not thread-safe; bot runs single-threaded.
         self._open_orders_cache: TTLCacheEntry[List[Dict]] = TTLCacheEntry(user_state_cache_ttl)
+
+        # Optional rejection tracker: when set, routine post-only rejections
+        # are routed through it for log-level downgrade and aggregation.
+        # When ``None`` the legacy ERROR-level path is used (unchanged).
+        self._rejection_tracker: Optional["OrderRejectionTracker"] = None
+
+    def set_rejection_tracker(self, tracker: "OrderRejectionTracker") -> None:
+        """Wire a tracker so future rejections are classified and aggregated.
+
+        When unset, the legacy ERROR-level path is preserved exactly.
+        """
+        self._rejection_tracker = tracker
+
+    def _record_rejection(self, coin: str, error_msg: str, prefix: str = "Order rejected") -> None:
+        """Route a rejection through the tracker if registered, else log ERROR.
+
+        The tracker handles its own logging at the configured level for
+        routine matches; for unknown patterns it forwards to ERROR. With
+        no tracker we preserve the historical ``logger.error`` line.
+        """
+        if self._rejection_tracker is not None:
+            self._rejection_tracker.record(coin, error_msg)
+        else:
+            logger.error(f"{prefix}: {error_msg}")
 
     def _invalidate_open_orders_cache(self) -> None:
         """Clear cached open orders after a write operation (place/cancel)."""
@@ -392,9 +419,7 @@ class OrderManager:
                             return order
 
                         if 'error' in status_info:
-                            logger.error(
-                                "Order rejected: %s", status_info['error']
-                            )
+                            self._record_rejection(order.coin, status_info['error'])
                             order.status = OrderStatus.REJECTED
                             return None
 
@@ -495,9 +520,10 @@ class OrderManager:
                         break
 
                     if 'error' in status_info:
-                        logger.error(
-                            "Bulk order [%d] rejected: %s",
-                            i, status_info['error'],
+                        self._record_rejection(
+                            orders[i].coin,
+                            status_info['error'],
+                            prefix=f"Bulk order [{i}] rejected",
                         )
                         orders[i].status = OrderStatus.REJECTED
                         continue

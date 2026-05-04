@@ -163,6 +163,8 @@ _STRATEGY_PARAMS = {
         'forager_weight_activity',
         'forager_weight_quality',
         'forager_weight_cost',
+        'rejection_log_level',
+        'rejection_summary_interval',
         'drain_flag_file',
     ],
 }
@@ -1253,6 +1255,15 @@ if __name__ == "__main__":
                         help='Enable post-fill adverse selection measurement logging')
     parser.add_argument('--adverse-selection-log-interval', type=float,
                         help='Adverse selection summary log interval in seconds (default: 300)')
+    parser.add_argument('--rejection-log-level', type=str,
+                        choices=['error', 'warning', 'info', 'debug'],
+                        help='Log level for routine post-only order rejections '
+                             '(default: error — preserves legacy behaviour). '
+                             'Set to "warning" to reduce ERROR noise once the '
+                             '5min summary line is trusted.')
+    parser.add_argument('--rejection-summary-interval', type=float,
+                        help='Order rejection aggregate summary interval in seconds; '
+                             '0 disables the summary (default: 300)')
     parser.add_argument('--coin-offset-overrides', type=str, default='',
                         help='Per-coin BBO offset overrides in bps (e.g. "SP500:0.5,MSFT:3")')
     parser.add_argument('--coin-spread-overrides', type=str, default='',

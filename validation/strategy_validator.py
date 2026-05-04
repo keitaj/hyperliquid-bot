@@ -293,6 +293,28 @@ def _validate_market_making(config: Dict) -> List[str]:
             errors.append(
                 f"forager_activity_idle_min_seconds: must be >= 0, got {val}"
             )
+
+    # Order rejection tracker.
+    if 'rejection_log_level' in config:
+        val = config['rejection_log_level']
+        if not isinstance(val, str):
+            errors.append(
+                f"rejection_log_level: expected string, got {type(val).__name__}"
+            )
+        elif val.lower() not in ('error', 'warning', 'info', 'debug'):
+            errors.append(
+                f"rejection_log_level: must be one of error/warning/info/debug, got {val!r}"
+            )
+    if 'rejection_summary_interval' in config:
+        val = config['rejection_summary_interval']
+        if not isinstance(val, (int, float)):
+            errors.append(
+                f"rejection_summary_interval: expected number, got {type(val).__name__}"
+            )
+        elif val < 0:
+            errors.append(
+                f"rejection_summary_interval: must be >= 0, got {val}"
+            )
     return errors
 
 
