@@ -124,6 +124,48 @@ class TestSingleRejectionWithTracker:
         assert tracker_lines[0].levelno == logging.WARNING
 
 
+class TestSingleRejectionWithTrackerAtDefaultError:
+    """Back-compat: tracker registered at default ERROR level emits the
+    legacy ``Order rejected: ...`` line (no categorised prefix), so log
+    scrapers / templated alerts that key off that exact prefix continue
+    to match. The categorised ``[reject:tag]`` format is reserved for
+    opt-in downgraded levels.
+    """
+
+    def test_default_error_level_emits_legacy_format(self, caplog):
+        mgr = _make_order_manager()
+        tracker = OrderRejectionTracker(
+            routine_log_level='error', summary_interval=0,
+        )
+        mgr.set_rejection_tracker(tracker)
+
+        mgr.exchange.order.return_value = {
+            'status': 'ok',
+            'response': {'data': {'statuses': [{'error': _POST_ONLY}]}},
+        }
+
+        with caplog.at_level(logging.DEBUG):
+            mgr._place_order(_make_order(coin='xyz:NVDA'))
+
+        # Counter still incremented (so summary aggregation works).
+        assert tracker.get_stats_snapshot()['post_only_match']['xyz:NVDA'] == 1
+
+        # Legacy line emitted at ERROR — matches what order_manager would
+        # produce without any tracker registered.
+        legacy = [
+            r for r in caplog.records
+            if r.message == f"Order rejected: {_POST_ONLY}"
+            and r.levelno == logging.ERROR
+        ]
+        assert len(legacy) == 1
+
+        # Categorised format must NOT appear at the default level.
+        categorised = [
+            r for r in caplog.records if "[reject:post_only_match]" in r.message
+        ]
+        assert categorised == []
+
+
 class TestUnknownPatternRouted:
     """Unknown text is still surfaced at ERROR via the tracker path."""
 

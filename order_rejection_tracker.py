@@ -130,6 +130,13 @@ class OrderRejectionTracker:
         Emits the per-rejection log at the configured level for routine
         matches; unknown patterns are forwarded to ERROR so format
         changes / new reject reasons remain visible.
+
+        At the default ERROR level the line is byte-identical to the
+        legacy ``logger.error("Order rejected: …")`` produced by
+        ``order_manager.py`` so existing log scrapers / ERROR-rate alert
+        templates continue to match. The richer
+        ``[reject:tag] coin — …`` format is reserved for the opt-in
+        downgraded levels (warning / info / debug).
         """
         tag = classify_rejection(raw_msg)
         bbo = _extract_bbo(raw_msg)
@@ -138,7 +145,9 @@ class OrderRejectionTracker:
         if tag == UNKNOWN_TAG:
             with self._lock:
                 self._unknown_count += 1
-            logger.error(f"Order rejected ({coin}): {raw_msg}")
+            # Legacy ``Order rejected: <msg>`` format preserved so
+            # back-compat with log scrapers holds for unknowns too.
+            logger.error(f"Order rejected: {raw_msg}")
             return tag
 
         with self._lock:
@@ -151,7 +160,14 @@ class OrderRejectionTracker:
 
         # Logger call deliberately outside the lock: the lock guards
         # only the in-memory counters.
-        logger.log(self._level, f"[reject:{tag}] {coin} — {raw_msg}")
+        if self._level == logging.ERROR:
+            # Default deployment: emit the legacy line verbatim so back-
+            # compat with existing log scrapers / templated alerts holds.
+            logger.error(f"Order rejected: {raw_msg}")
+        else:
+            # Downgraded — operator has opted in, give them the richer
+            # categorised line that carries coin + tag for grep-ability.
+            logger.log(self._level, f"[reject:{tag}] {coin} — {raw_msg}")
         return tag
 
     # ------------------------------------------------------------------ #
@@ -160,8 +176,14 @@ class OrderRejectionTracker:
     def log_summary_if_due(self, now_monotonic: Optional[float] = None) -> bool:
         """Emit a summary line if the configured interval has elapsed.
 
-        Returns ``True`` iff a summary was emitted.
-        ``summary_interval <= 0`` disables the summary entirely.
+        Returns ``True`` iff a summary line was actually emitted, ``False``
+        when:
+
+        * ``summary_interval <= 0`` (feature disabled), or
+        * the interval has not elapsed yet, or
+        * the interval elapsed but no rejections occurred (counters were
+          flushed silently — the strategy main loop discards the return
+          value, but tests / external observers can rely on this signal).
         """
         if self._summary_interval <= 0:
             return False
@@ -176,8 +198,7 @@ class OrderRejectionTracker:
             self._unknown_count = 0
             self._last_summary_ts = now
 
-        self._emit_summary(snapshot, unknown)
-        return True
+        return self._emit_summary(snapshot, unknown)
 
     # ------------------------------------------------------------------ #
     # Internal helpers
@@ -186,7 +207,13 @@ class OrderRejectionTracker:
         self,
         snapshot: Dict[str, Dict[str, _CoinStats]],
         unknown: int,
-    ) -> None:
+    ) -> bool:
+        """Emit summary lines and return ``True`` iff anything was logged.
+
+        Returns ``False`` when both *snapshot* and *unknown* are empty —
+        the helper stays silent during idle periods rather than emitting
+        a meaningless ``total=0`` line every interval.
+        """
         any_emitted = False
         for tag, by_coin in snapshot.items():
             if not by_coin:
@@ -209,10 +236,7 @@ class OrderRejectionTracker:
                 f"count={unknown} (unknown patterns logged at ERROR individually)"
             )
             any_emitted = True
-        # No-op when both snapshot and unknown are empty: keeps the log
-        # quiet during idle periods rather than emitting a meaningless
-        # "total=0" line every interval.
-        return None if any_emitted else None
+        return any_emitted
 
     # ------------------------------------------------------------------ #
     # Operational helpers (read-only)
