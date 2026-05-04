@@ -310,6 +310,32 @@ The bot handles this automatically at startup:
 | 6 | `breakout` | Support/resistance breakout with volume and ATR confirmation |
 | 7 | `market_making` | Symmetric buy/sell limits around mid price for spread capture |
 
+### JSON config layer
+
+Both `--config <path.json>` and `$BOT_CONFIG=<path.json>` (env-var fallback) are accepted. Repeat `--config` to layer multiple files (later files override earlier). Layering precedence is **CLI > env > JSON > dataclass defaults** — JSON simply slots in as a more readable surface format on top of the existing flat key namespace.
+
+JSON files may use either flat or nested form (or mix). Nested form is auto-flattened by underscore-joining the path under known namespaces (`market_making`, `risk`):
+
+```json
+{
+  "market_making": {
+    "spread_bps": 10,
+    "refresh": { "tolerance_bp": 1, "max_age_seconds": 240 },
+    "forager": { "enabled": true, "score_threshold": 30.0 }
+  },
+  "risk": { "daily_loss_limit": 200 }
+}
+```
+
+becomes:
+
+```python
+{"spread_bps": 10, "refresh_tolerance_bp": 1, "refresh_max_age_seconds": 240,
+ "forager_enabled": True, "forager_score_threshold": 30.0, "daily_loss_limit": 200}
+```
+
+Unknown keys produce a warning (typo detection) but are still passed through to the validator, which decides whether to abort. Missing files are warned and skipped (so a typo in `--config /missing.json` does not block startup); malformed JSON aborts with exit code 2. See `examples/config.example.json` for a full template.
+
 The `market_making` strategy uses **progressive close pricing**: as a position ages, the take-profit price is tightened from full spread → breakeven (at 50% of max age) → small loss (at 75%), reducing costly taker force-closes. The loss tolerance is configurable via `--aggressive-loss-bps` (default: 1 bps). During the force-close phase, `--force-close-max-loss-bps` enables progressive loss acceptance that scales from `aggressive-loss-bps` to the configured maximum as the position approaches the taker deadline. **Unrealized loss early close** (`--unrealized-loss-close-bps`): When a position's unrealized loss exceeds this threshold (in bps), it is immediately closed via taker order regardless of position age. This caps large adverse moves before the age-based close triggers. Default: 0 (disabled).
 
 **BBO mode** (`--bbo-mode`): Places orders at the best bid/ask instead of `mid ± spread_bps`. On Hyperliquid, market spreads are typically 0.1–2 bps, so even `SPREAD_BPS=5` places orders 4–5 bps away from BBO, resulting in low fill rates. BBO mode improves fill rates by tracking the current best prices. Use `--bbo-offset-bps N` to place orders N bps behind BBO (default: 0 = at BBO). Falls back to `mid ± spread_bps` when BBO is unavailable.
