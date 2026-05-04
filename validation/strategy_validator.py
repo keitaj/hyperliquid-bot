@@ -307,6 +307,54 @@ _STRATEGY_VALIDATORS = {
 }
 
 
+def known_market_making_keys() -> set:
+    """Return the set of known market_making strategy_config keys.
+
+    Used by :mod:`json_config_loader` to warn on unknown keys (typo
+    detection). Imports ``_STRATEGY_PARAMS`` lazily from ``bot`` to
+    keep the validator module dependency-free at import time.
+
+    The list includes all market-making CLI / env keys plus a small
+    set of common-strategy keys that flow through every strategy
+    (e.g. ``maker_only``, ``close_immediately``, ``max_positions``).
+    """
+    # Defer the import to avoid a cycle (bot.py imports validators).
+    from bot import _STRATEGY_PARAMS, _COMMON_PARAMS
+
+    keys = set()
+    keys.update(_extract_param_names(_STRATEGY_PARAMS.get('market_making', [])))
+    keys.update(_extract_param_names(_COMMON_PARAMS))
+    # A few derived keys not in _STRATEGY_PARAMS but read via config.get
+    # in MarketMakingStrategy:
+    keys.update({
+        'close_immediately',
+        'maker_only',
+        'max_positions',
+        'max_open_positions',
+        'enable_adverse_selection_log',
+        'enable_ws',
+        'main_loop_interval',
+        'risk_level',
+    })
+    return keys
+
+
+def _extract_param_names(params) -> set:
+    """Pull the *config_key* (not arg_name) from a _STRATEGY_PARAMS list.
+
+    Each entry may be either a bare string or an ``(arg_name, config_key)``
+    tuple — see ``bot.py:_collect_params`` for the same convention.
+    """
+    out = set()
+    for entry in params:
+        if isinstance(entry, tuple):
+            _, config_key = entry
+            out.add(config_key)
+        else:
+            out.add(entry)
+    return out
+
+
 def validate_strategy_config(strategy_name: str, config: Dict) -> Optional[str]:
     """Validate strategy configuration and return error message if invalid.
 

@@ -15,6 +15,8 @@ from market_data import MarketDataManager  # noqa: E402
 from order_manager import OrderManager  # noqa: E402
 from risk_manager import RiskManager  # noqa: E402
 from validation import MarginValidator, validate_strategy_config  # noqa: E402
+from validation.strategy_validator import known_market_making_keys  # noqa: E402
+from json_config_loader import ConfigError, load_json_configs  # noqa: E402
 from hip3 import DEXRegistry, MultiDexMarketData, MultiDexOrderManager  # noqa: E402
 from position_closer import close_position_market  # noqa: E402
 from rate_limiter import API_ERRORS  # noqa: E402
@@ -42,6 +44,7 @@ logger = logging.getLogger(__name__)
 class HyperliquidBot:
     def __init__(self, strategy_name: str = "simple_ma", coins: Optional[List[str]] = None,
                  strategy_config: Optional[Dict] = None,
+                 json_overrides: Optional[Dict] = None,
                  main_loop_interval: float = 10, market_order_slippage: float = 0.01,
                  enable_ws: bool = False) -> None:
         Config.validate()
@@ -208,8 +211,15 @@ class HyperliquidBot:
             }
         }
 
-        # Merge: default config as base, CLI overrides on top
-        config = {**default_configs.get(strategy_name, {}), **(strategy_config or {})}
+        # Merge layers (lowest precedence first):
+        #   dataclass defaults < JSON overrides < CLI / env (strategy_config).
+        # JSON is opt-in via --config / $BOT_CONFIG; when both unset,
+        # ``json_overrides`` is None and the layering matches prior releases.
+        config = {
+            **default_configs.get(strategy_name, {}),
+            **(json_overrides or {}),
+            **(strategy_config or {}),
+        }
 
         # Validate strategy parameters early
         validation_error = validate_strategy_config(strategy_name, config)
@@ -931,6 +941,11 @@ if __name__ == "__main__":
     parser.add_argument('--main-loop-interval', type=float, help='Main loop sleep interval in seconds (default: 10)')
     parser.add_argument('--account-cap-pct', type=float,
                         help='Max position as %% of account for sizing (grid_trading/market_making)')
+    parser.add_argument('--config', dest='config_paths', action='append', default=None,
+                        help='Path to a JSON config file. Repeat for layered configs '
+                             '(later files override earlier). Also reads $BOT_CONFIG '
+                             'if no --config flag is supplied. Layering precedence: '
+                             'CLI > env > JSON > dataclass defaults.')
 
     # Simple MA strategy parameters
     parser.add_argument('--fast-ma-period', type=int, help='Fast MA period (simple_ma)')
@@ -1376,10 +1391,41 @@ if __name__ == "__main__":
     if strategy_config:
         logger.info(f"Custom parameters: {json.dumps(strategy_config, indent=2)}")
 
+    # Load JSON config layer (opt-in). Layering precedence is enforced
+    # in HyperliquidBot.__init__:
+    #     CLI / env (strategy_config) > JSON > dataclass defaults.
+    # Sources: --config flag (repeatable, later wins), then $BOT_CONFIG
+    # (only consulted when --config is absent so CLI > env still holds).
+    config_paths: List[str] = list(args.config_paths or [])
+    if not config_paths:
+        bot_config_env = os.environ.get('BOT_CONFIG')
+        if bot_config_env:
+            config_paths.append(bot_config_env)
+    json_overrides: Optional[Dict] = None
+    if config_paths:
+        try:
+            known_keys = (
+                known_market_making_keys()
+                if args.strategy == 'market_making' else None
+            )
+            json_overrides = load_json_configs(
+                config_paths,
+                strategy_name=args.strategy,
+                known_keys=known_keys,
+            )
+            logger.info(
+                f"[config] JSON layer loaded: {len(json_overrides)} key(s) from "
+                f"{len(config_paths)} file(s)"
+            )
+        except ConfigError as e:
+            logger.error(f"{e}")
+            raise SystemExit(2)
+
     bot = HyperliquidBot(
         strategy_name=args.strategy,
         coins=args.coins if Config.ENABLE_STANDARD_HL else [],
         strategy_config=strategy_config if strategy_config else None,
+        json_overrides=json_overrides,
         main_loop_interval=args.main_loop_interval if args.main_loop_interval is not None else 10,
         market_order_slippage=args.market_order_slippage if args.market_order_slippage is not None else 0.01,
         enable_ws=getattr(args, 'enable_ws', False),
