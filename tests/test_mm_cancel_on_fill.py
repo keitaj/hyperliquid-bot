@@ -47,6 +47,8 @@ def _make_strategy():
     strategy._tracker = tracker
     strategy._closer = MagicMock()
     strategy._closer.tracked_coins = set()
+    strategy._rejection_tracker = MagicMock()
+    strategy._rejection_tracker.log_summary_if_due.return_value = False
 
     strategy.update_positions = MagicMock()
     strategy.market_data = MagicMock()

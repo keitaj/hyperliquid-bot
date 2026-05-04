@@ -69,6 +69,9 @@ def _make_strategy(inventory_skew_bps=2, order_size_usd=100):
     closer.get_close_oid.return_value = None
     s._closer = closer
 
+    s._rejection_tracker = MagicMock()
+    s._rejection_tracker.log_summary_if_due.return_value = False
+
     return s, om, md
 
 

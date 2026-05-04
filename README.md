@@ -363,6 +363,8 @@ The `market_making` strategy uses **progressive close pricing**: as a position a
 
 **Adverse selection logging** (`--enable-adverse-selection-log`): Measures mid-price movement 5s/30s/60s after each fill, logging per-coin summaries every 300s. Observation only — no trading impact.
 
+**Order rejection log aggregation** (`--rejection-log-level`, `--rejection-summary-interval`): Routine post-only rejections (`Post only order would have immediately matched`) are an expected retry signal under maker-only quoting, but they were historically logged at ERROR — drowning out genuine errors as MM size grows. The strategy now classifies each rejection by API error text and routes routine matches through a small aggregator that logs a single `[reject-summary]` INFO line every `--rejection-summary-interval` seconds (default 300, set to 0 to disable). The default per-rejection log level stays `error` to preserve historical behaviour; flip `--rejection-log-level warning` (or `info`) once the summary line is trusted. Unknown rejection text always falls through to ERROR so format changes / new reject reasons stay visible.
+
 **Dynamic offset** (`--dynamic-offset`): Auto-adjusts per-coin BBO offset based on adverse selection severity from the tracker. Coins with higher adverse selection get wider offsets; favorable coins get tighter offsets. Requires `--enable-ws` and `--enable-adverse-selection-log`. Manual `--coin-offset-overrides` serve as the baseline; dynamic adjustment adds/subtracts from it.
 
 **Dynamic position age** (`--dynamic-age`): Adjusts `MAX_POSITION_AGE` per coin based on recent volatility. High-volatility coins get shorter holding times (reducing adverse selection risk), while low-volatility coins get longer times (improving maker fill probability). Uses the same mid-price history as `--vol-adjust`. Configure `--dynamic-age-baseline-vol` (bps) as the "normal" volatility reference, and `--dynamic-age-min` / `--dynamic-age-max` (seconds) for clamping bounds. Falls back to the fixed `--max-position-age` when data is insufficient.
@@ -686,6 +688,8 @@ ws_guards:                         # All require --enable-ws
   velocity_min_move_bps: 1.0       # --velocity-min-move-bps  (min cumulative move in bps to trigger)
   enable_adverse_selection_log: false  # --enable-adverse-selection-log  (post-fill mid tracking)
   adverse_selection_log_interval: 300  # --adverse-selection-log-interval  (summary log interval in seconds)
+  rejection_log_level: "error"         # --rejection-log-level  (level for routine post-only rejections: error/warning/info/debug; default error preserves legacy behaviour)
+  rejection_summary_interval: 300      # --rejection-summary-interval  (aggregate rejection summary cadence in seconds; 0 disables)
 
 config_merge_order: "default_configs[strategy] ← CLI overrides (only non-null)"
 priority: "CLI flag > env var > default_configs > strategy constructor fallback"

@@ -29,6 +29,10 @@ from strategies.mm_order_tracker import OrderTracker
 from strategies.mm_position_closer import PositionCloser
 from coin_utils import parse_coin
 from order_manager import BBO_OFFSET, OrderSide, round_price
+from order_rejection_tracker import (
+    ALLOWED_LOG_LEVELS,
+    OrderRejectionTracker,
+)
 from rate_limiter import API_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -143,6 +147,36 @@ class MarketMakingStrategy(BaseStrategy):
                 f"cost={self.cfg.forager.weight_cost}), "
                 f"window={self.cfg.forager.window_seconds}s, "
                 f"cooldown={self.cfg.forager.cooldown_seconds}s"
+            )
+
+        # ---- Order rejection tracker (log downgrade + 5min summary) ---- #
+        # Routes routine post-only rejections through a classifier so the
+        # log level can be tuned per deployment and per-coin counts get
+        # aggregated into a single ``[reject-summary]`` line every
+        # ``rejection_summary_interval`` seconds. With the default
+        # log_level=error this preserves the legacy behaviour exactly,
+        # while the summary itself is purely additive.
+        rejection_log_level: str = str(
+            config.get('rejection_log_level', 'error') or 'error'
+        ).lower()
+        if rejection_log_level not in ALLOWED_LOG_LEVELS:
+            logger.warning(
+                f"[mm] Unknown rejection_log_level={rejection_log_level!r}, "
+                f"falling back to 'error'"
+            )
+            rejection_log_level = 'error'
+        rejection_summary_interval: float = float(
+            config.get('rejection_summary_interval', 300.0)
+        )
+        self._rejection_tracker: OrderRejectionTracker = OrderRejectionTracker(
+            routine_log_level=rejection_log_level,
+            summary_interval=rejection_summary_interval,
+        )
+        self.order_manager.set_rejection_tracker(self._rejection_tracker)
+        if rejection_log_level != 'error' or rejection_summary_interval > 0:
+            logger.info(
+                f"[mm] Rejection tracker armed: log_level={rejection_log_level}, "
+                f"summary_interval={rejection_summary_interval}s"
             )
 
         # ---- Per-coin offset/spread/size overrides (aliases of self.cfg.per_coin) ---- #
@@ -338,6 +372,7 @@ class MarketMakingStrategy(BaseStrategy):
         self._log_fill_rate()
         self._log_dynamic_age()
         self._closer.log_close_stats()
+        self._rejection_tracker.log_summary_if_due()
 
         # ---- Drain mode: pre-shutdown graceful close ---- #
         # Drain takes precedence over quiet hours: when an external
