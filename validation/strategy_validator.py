@@ -319,18 +319,21 @@ def known_market_making_keys() -> set:
     (e.g. ``maker_only``, ``close_immediately``, ``max_positions``).
     """
     # Defer the import to avoid a cycle (bot.py imports validators).
-    from bot import _STRATEGY_PARAMS, _COMMON_PARAMS
+    from bot import _STRATEGY_PARAMS, _COMMON_PARAMS, _RISK_PARAMS
 
     keys = set()
     keys.update(_extract_param_names(_STRATEGY_PARAMS.get('market_making', [])))
     keys.update(_extract_param_names(_COMMON_PARAMS))
+    # Risk-guardrail names — applied via ``Config.{KEY.upper()}`` in
+    # ``_apply_json_risk_overrides``; included so the JSON typo detector
+    # treats them as known.
+    keys.update(_RISK_PARAMS)
     # A few derived keys not in _STRATEGY_PARAMS but read via config.get
     # in MarketMakingStrategy:
     keys.update({
         'close_immediately',
         'maker_only',
         'max_positions',
-        'max_open_positions',
         'enable_adverse_selection_log',
         'enable_ws',
         'main_loop_interval',
