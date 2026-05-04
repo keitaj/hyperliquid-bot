@@ -61,7 +61,7 @@ class TestFillCallback:
             }
         })
 
-        tracker.cancel_all_orders_for_coin.assert_called_once_with("BTC")
+        tracker.cancel_all_orders_for_coin.assert_called_once_with("BTC", reason="ws_fill")
         assert feed.stats["fills"] == 1
         assert feed.stats["cancels"] == 1
 

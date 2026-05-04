@@ -333,7 +333,7 @@ class MarketMakingStrategy(BaseStrategy):
             # double-filling which doubles adverse selection cost.
             # NOTE: Does not fire when close_immediately=True because
             # positions are closed before the next detection pass.
-            self._tracker.cancel_all_orders_for_coin(coin)
+            self._tracker.cancel_all_orders_for_coin(coin, reason="fill")
             logger.info(f"[mm] Cancelled orders for {coin} after fill (prevent double-fill)")
 
         # Track loss streaks: detect coins that just closed (had position last cycle, not now)
@@ -385,7 +385,7 @@ class MarketMakingStrategy(BaseStrategy):
             if not self._was_drain:
                 logger.info("[mm] Entering drain mode, cancelling all orders")
                 for coin in coins:
-                    self._tracker.cancel_all_orders_for_coin(coin)
+                    self._tracker.cancel_all_orders_for_coin(coin, reason="drain")
                 self._was_drain = True
             for coin in coins:
                 try:
@@ -416,7 +416,7 @@ class MarketMakingStrategy(BaseStrategy):
                 utc_hour = datetime.now(timezone.utc).hour
                 logger.info(f"[mm] Entering quiet hours (UTC {utc_hour}), cancelling all orders")
                 for coin in coins:
-                    self._tracker.cancel_all_orders_for_coin(coin)
+                    self._tracker.cancel_all_orders_for_coin(coin, reason="quiet_hour")
                 self._was_quiet = True
             # Still process existing positions but skip new order placement
             for coin in coins:

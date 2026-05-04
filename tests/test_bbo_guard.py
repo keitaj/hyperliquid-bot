@@ -43,7 +43,7 @@ class TestBboGuardBasics:
         # 3 bps change on bid — above threshold
         guard.on_l2_update("BTC", _make_levels(100.03, 100.05))
 
-        tracker.cancel_all_orders_for_coin.assert_called_once_with("BTC")
+        tracker.cancel_all_orders_for_coin.assert_called_once_with("BTC", reason="bbo_guard")
         assert guard.stats["changes_detected"] == 1
         assert guard.stats["cancels_triggered"] == 1
 
@@ -53,7 +53,7 @@ class TestBboGuardBasics:
         # Ask drops by 3 bps
         guard.on_l2_update("BTC", _make_levels(100.00, 99.99))
 
-        tracker.cancel_all_orders_for_coin.assert_called_once_with("BTC")
+        tracker.cancel_all_orders_for_coin.assert_called_once_with("BTC", reason="bbo_guard")
 
     def test_multiple_coins_independent(self):
         guard, tracker = _make_guard(threshold_bps=2.0)
@@ -64,7 +64,7 @@ class TestBboGuardBasics:
         guard.on_l2_update("BTC", _make_levels(100.05, 100.07))
         guard.on_l2_update("ETH", _make_levels(3000.03, 3000.63))
 
-        tracker.cancel_all_orders_for_coin.assert_called_once_with("BTC")
+        tracker.cancel_all_orders_for_coin.assert_called_once_with("BTC", reason="bbo_guard")
 
 
 class TestBboGuardEdgeCases:

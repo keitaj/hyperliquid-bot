@@ -15,11 +15,97 @@ close fill -- exactly the failure mode this contract is meant to
 prevent.
 """
 
+import logging
+import time
 from unittest.mock import MagicMock
 
 import pytest
 
 from strategies.mm_order_tracker import OrderTracker
+
+
+class TestCancelAllOrdersForCoinReason:
+    """``cancel_all_orders_for_coin`` accepts a ``reason`` tag and includes
+    it verbatim in the log so observers can distinguish the call site
+    (real fill / drain / quiet hour / bbo guard / ws fill / manual).
+    Pre-PR the message was hard-coded to "post-fill cleanup", which was
+    actively misleading on the bbo-guard path.
+    """
+
+    def _make_tracker(self):
+        om = MagicMock()
+        om.bulk_cancel_orders.return_value = 1
+        tracker = OrderTracker(
+            om, refresh_interval_seconds=30, max_open_orders=4
+        )
+        tracker._tracked_orders["BTC"] = [(101, "B", time.monotonic())]
+        return tracker, om
+
+    def test_explicit_reason_appears_in_log(self, caplog):
+        tracker, _ = self._make_tracker()
+        with caplog.at_level(logging.INFO, logger="strategies.mm_order_tracker"):
+            tracker.cancel_all_orders_for_coin("BTC", reason="bbo_guard")
+        msgs = [r.message for r in caplog.records if "Cancelled" in r.message]
+        assert len(msgs) == 1
+        assert "(reason=bbo_guard)" in msgs[0]
+        assert "BTC" in msgs[0]
+        # Legacy phrase must be gone.
+        assert "post-fill cleanup" not in msgs[0]
+
+    def test_default_reason_is_manual(self, caplog):
+        """The default keeps backward-compatible call signatures (no kw)
+        from older tests / external callers working."""
+        tracker, _ = self._make_tracker()
+        with caplog.at_level(logging.INFO, logger="strategies.mm_order_tracker"):
+            tracker.cancel_all_orders_for_coin("BTC")  # no reason
+        msgs = [r.message for r in caplog.records if "Cancelled" in r.message]
+        assert len(msgs) == 1
+        assert "(reason=manual)" in msgs[0]
+
+    def test_each_reason_value_round_trips(self, caplog):
+        """Each documented reason string lands in the log unmodified."""
+        for reason in ("fill", "ws_fill", "bbo_guard", "drain", "quiet_hour"):
+            tracker, _ = self._make_tracker()
+            caplog.clear()
+            with caplog.at_level(logging.INFO, logger="strategies.mm_order_tracker"):
+                tracker.cancel_all_orders_for_coin("BTC", reason=reason)
+            msgs = [r.message for r in caplog.records if "Cancelled" in r.message]
+            assert len(msgs) == 1, f"missing log for reason={reason}"
+            assert f"(reason={reason})" in msgs[0]
+
+    def test_no_orders_emits_no_log(self, caplog):
+        """Empty tracked list short-circuits before logging — important
+        because COPPER-style coins on bbo_guard path can fire many calls
+        with nothing to cancel; we don't want a flood of empty cleanup
+        lines in the log."""
+        tracker, _ = self._make_tracker()
+        tracker._tracked_orders["BTC"] = []
+        with caplog.at_level(logging.INFO, logger="strategies.mm_order_tracker"):
+            tracker.cancel_all_orders_for_coin("BTC", reason="bbo_guard")
+        msgs = [r.message for r in caplog.records if "Cancelled" in r.message]
+        assert msgs == []
+
+    def test_reason_appears_in_error_log_on_api_failure(self, caplog):
+        tracker, om = self._make_tracker()
+        om.bulk_cancel_orders.side_effect = Exception("API timeout")
+        with caplog.at_level(logging.ERROR, logger="strategies.mm_order_tracker"):
+            tracker.cancel_all_orders_for_coin("BTC", reason="ws_fill")
+        errs = [
+            r for r in caplog.records
+            if r.levelno == logging.ERROR
+            and "Error cancelling" in r.message
+        ]
+        assert len(errs) == 1
+        assert "(reason=ws_fill)" in errs[0].message
+        # Old "after fill" wording is gone (it was wrong for non-fill paths).
+        assert "after fill" not in errs[0].message
+
+    def test_tracked_state_cleared_regardless_of_reason(self):
+        tracker, _ = self._make_tracker()
+        tracker.cancel_all_orders_for_coin("BTC", reason="drain")
+        # Same post-condition as the legacy code: tracked list is wiped
+        # before bulk_cancel runs, so the API call cost is paid only once.
+        assert tracker._tracked_orders["BTC"] == []
 
 
 class TestCloseOrderInvariant:

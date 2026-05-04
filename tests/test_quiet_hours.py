@@ -89,8 +89,8 @@ class TestQuietHoursFullStop:
 
         # Should cancel all orders for each coin on entry
         assert strategy._tracker.cancel_all_orders_for_coin.call_count == 2
-        strategy._tracker.cancel_all_orders_for_coin.assert_any_call('xyz:SP500')
-        strategy._tracker.cancel_all_orders_for_coin.assert_any_call('xyz:NVDA')
+        strategy._tracker.cancel_all_orders_for_coin.assert_any_call('xyz:SP500', reason="quiet_hour")
+        strategy._tracker.cancel_all_orders_for_coin.assert_any_call('xyz:NVDA', reason="quiet_hour")
         assert strategy._was_quiet is True
 
     @patch('strategies.market_making_strategy.datetime')

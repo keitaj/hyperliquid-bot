@@ -149,7 +149,7 @@ class TestCancelOnFillInRun:
 
         strategy.run(['BTC'])
 
-        strategy._tracker.cancel_all_orders_for_coin.assert_called_once_with('BTC')
+        strategy._tracker.cancel_all_orders_for_coin.assert_called_once_with('BTC', reason="fill")
 
     def test_no_fill_no_cancel(self):
         """When a position already existed, no cancel is triggered."""
