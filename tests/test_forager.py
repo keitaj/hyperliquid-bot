@@ -147,6 +147,41 @@ def test_triggers_when_inactive_even_without_close_data():
     assert "BTC" in s._coin_cooldown_until
 
 
+def test_quality_gate_boundary_at_neutral_score():
+    """Activity exactly at the neutral score must NOT engage the gate.
+
+    The gate fires only when ``activity_score > _NO_HISTORY_NEUTRAL_SCORE``;
+    equality should not block trigger. Pinned here so a future refactor
+    of the boundary semantic (>= vs >) is detected.
+    """
+    s = _make_strategy(forager_consecutive=3, forager_min_closes_for_quality=10)
+    tracker = MagicMock()
+    s._coin_health_tracker = tracker
+    # Insufficient close data + activity exactly at the neutral midpoint.
+    # With strict '>' the gate is NOT engaged, so trigger should fire.
+    tracker.get_health.return_value = _stub_health(
+        score=10.0, n_closes=2, activity=CoinHealthTracker._NO_HISTORY_NEUTRAL_SCORE,
+    )
+    for _ in range(3):
+        s._check_forager_health("BTC")
+    assert "BTC" in s._coin_cooldown_until
+
+
+def test_quality_gate_just_above_neutral_score_blocks_trigger():
+    """Activity just above the neutral score must engage the gate."""
+    s = _make_strategy(forager_consecutive=3, forager_min_closes_for_quality=10)
+    tracker = MagicMock()
+    s._coin_health_tracker = tracker
+    tracker.get_health.return_value = _stub_health(
+        score=10.0,
+        n_closes=2,
+        activity=CoinHealthTracker._NO_HISTORY_NEUTRAL_SCORE + 0.1,
+    )
+    for _ in range(5):
+        s._check_forager_health("BTC")
+    assert "BTC" not in s._coin_cooldown_until
+
+
 # --------------------------------------------------------------------------- #
 # Cooldown lifecycle
 # --------------------------------------------------------------------------- #
