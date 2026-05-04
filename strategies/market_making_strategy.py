@@ -1211,10 +1211,13 @@ class MarketMakingStrategy(BaseStrategy):
             return
 
         # Avoid false positives on coins that are active but lack close
-        # history yet (quality dimension undefined).
+        # history yet (quality dimension undefined). The activity boundary
+        # is anchored to ``_NO_HISTORY_NEUTRAL_SCORE`` so the gate scales
+        # with the same midpoint the tracker uses for unknown coins —
+        # adjusting one place updates both.
         if (
             health.n_closes < cfg.min_closes_for_quality
-            and health.activity_score > 50.0
+            and health.activity_score > CoinHealthTracker._NO_HISTORY_NEUTRAL_SCORE
         ):
             return
 
