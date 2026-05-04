@@ -99,7 +99,7 @@ class BboGuard:
             return  # Rate limit: avoid spamming cancels
 
         self._last_cancel_time[coin] = now
-        self.order_tracker.cancel_all_orders_for_coin(coin)
+        self.order_tracker.cancel_all_orders_for_coin(coin, reason="bbo_guard")
         self._cancels_triggered += 1
         logger.info(
             "[bbo-guard] BBO change %.1f bps for %s — cancelled orders",

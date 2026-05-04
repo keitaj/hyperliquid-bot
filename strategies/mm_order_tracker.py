@@ -257,11 +257,26 @@ class OrderTracker:
             "cancelled_age": sum(self._refresh_cancelled_age.values()),
         }
 
-    def cancel_all_orders_for_coin(self, coin: str) -> None:
+    def cancel_all_orders_for_coin(self, coin: str, reason: str = "manual") -> None:
         """Cancel all tracked orders for a coin.
 
-        Called when one side fills to prevent the opposite side from also
-        filling (which would double adverse selection cost).
+        Called from several distinct control paths — real fill detection,
+        drain mode, quiet-hour entry, BBO guard, WS fill feed — and the
+        *reason* argument is logged verbatim so observers can tell them
+        apart downstream. The legacy log claimed "post-fill cleanup"
+        regardless of caller, which was actively misleading on illiquid
+        coins where the BBO-guard path dominates.
+
+        Recognised values (free-form, used as a string tag in the log):
+
+        * ``"fill"`` — real fill detection in the strategy main loop
+        * ``"ws_fill"`` — WS fill feed instant cancel
+        * ``"bbo_guard"`` — BBO guard cancelled both sides on rapid move
+        * ``"drain"`` — drain-mode entry (graceful pre-shutdown)
+        * ``"quiet_hour"`` — quiet-hour entry (full-stop mode)
+        * ``"manual"`` (default) — unspecified caller / tests
+
+        New callers should pick a short snake_case tag and add it here.
 
         Thread-safe: may be called from the WS fill feed thread.
         """
@@ -277,11 +292,12 @@ class OrderTracker:
             cancelled = self.order_manager.bulk_cancel_orders(cancel_requests)
             logger.info(
                 f"[mm] Cancelled {cancelled}/{len(cancel_requests)} orders for {coin} "
-                f"(post-fill cleanup): {oid_list}"
+                f"(reason={reason}): {oid_list}"
             )
         except Exception as e:
             logger.error(
-                f"[mm] Error cancelling orders for {coin} after fill: {e}, oids: {oid_list}"
+                f"[mm] Error cancelling orders for {coin} (reason={reason}): "
+                f"{e}, oids: {oid_list}"
             )
 
     def cancel_orders_by_side(self, coin: str, side: str) -> None:

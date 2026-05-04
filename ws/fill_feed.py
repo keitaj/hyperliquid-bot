@@ -200,7 +200,7 @@ class FillFeed:
             # Cancel opposite-side orders for each filled coin.
             # OrderTracker.cancel_all_orders_for_coin is thread-safe (has its own lock).
             for coin in filled_coins:
-                self.order_tracker.cancel_all_orders_for_coin(coin)
+                self.order_tracker.cancel_all_orders_for_coin(coin, reason="ws_fill")
                 self._cancel_count += 1
                 logger.info(
                     "[ws-fill] Instant cancel for %s (fill detected via WS)", coin
