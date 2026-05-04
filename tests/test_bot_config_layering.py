@@ -169,3 +169,115 @@ def test_loader_output_layers_correctly_under_cli(tmp_path):
         "forager_enabled": True,    # JSON > default
         "max_open_orders": 4,       # default
     }
+
+
+# --------------------------------------------------------------------------- #
+# Risk namespace: JSON values must reach Config, not just strategy_config.
+# --------------------------------------------------------------------------- #
+
+
+class TestJsonRiskOverrides:
+    """``_apply_json_risk_overrides`` wires JSON ``risk:`` keys to Config.
+
+    Saves and restores the relevant ``Config`` attributes so tests stay
+    isolated from each other and from the wider suite.
+    """
+
+    _SAVED_ATTRS = (
+        'MAX_POSITION_PCT', 'MAX_MARGIN_USAGE', 'DAILY_LOSS_LIMIT',
+        'PER_TRADE_STOP_LOSS', 'FORCE_CLOSE_MARGIN', 'FORCE_CLOSE_LEVERAGE',
+    )
+
+    def setup_method(self):
+        from config import Config
+        self._snapshot = {a: getattr(Config, a) for a in self._SAVED_ATTRS}
+
+    def teardown_method(self):
+        from config import Config
+        for a, v in self._snapshot.items():
+            setattr(Config, a, v)
+
+    def _args(self, **overrides):
+        """Build a Namespace mimicking argparse output (None where unset)."""
+        import argparse
+        attrs = {p: None for p in (
+            'max_position_pct', 'max_margin_usage', 'daily_loss_limit',
+            'per_trade_stop_loss', 'force_close_margin', 'force_close_leverage',
+            'max_open_positions', 'cooldown_after_stop',
+        )}
+        attrs.update(overrides)
+        return argparse.Namespace(**attrs)
+
+    def test_json_risk_value_sets_config_when_cli_unset(self):
+        from bot import _apply_json_risk_overrides
+        from config import Config
+
+        json_overrides = {"daily_loss_limit": 250.0, "spread_bps": 10}
+        args = self._args(daily_loss_limit=None)
+
+        _apply_json_risk_overrides(json_overrides, args)
+
+        assert Config.DAILY_LOSS_LIMIT == 250.0
+        # Risk key popped from the dict — it should not pollute strategy_config.
+        assert "daily_loss_limit" not in json_overrides
+        # Non-risk key is left alone.
+        assert json_overrides == {"spread_bps": 10}
+
+    def test_cli_value_beats_json_for_risk(self):
+        """CLI > JSON: when args has a risk param, JSON is ignored & popped."""
+        from bot import _apply_json_risk_overrides
+        from config import Config
+
+        # Simulate the existing CLI loop having already applied 999 to Config.
+        Config.DAILY_LOSS_LIMIT = 999.0
+
+        json_overrides = {"daily_loss_limit": 250.0}
+        args = self._args(daily_loss_limit=999.0)
+
+        _apply_json_risk_overrides(json_overrides, args)
+
+        # Config still holds the CLI value.
+        assert Config.DAILY_LOSS_LIMIT == 999.0
+        # JSON value was popped (so it doesn't leak into strategy_config)
+        # but Config was *not* touched by the helper.
+        assert "daily_loss_limit" not in json_overrides
+
+    def test_multiple_risk_params(self):
+        from bot import _apply_json_risk_overrides
+        from config import Config
+
+        json_overrides = {
+            "max_position_pct": 0.5,
+            "max_margin_usage": 0.6,
+            "daily_loss_limit": 100.0,
+            "per_trade_stop_loss": 0.03,
+            "spread_bps": 7,
+        }
+        args = self._args()
+
+        _apply_json_risk_overrides(json_overrides, args)
+
+        assert Config.MAX_POSITION_PCT == 0.5
+        assert Config.MAX_MARGIN_USAGE == 0.6
+        assert Config.DAILY_LOSS_LIMIT == 100.0
+        assert Config.PER_TRADE_STOP_LOSS == 0.03
+        # Only the non-risk key remains in json_overrides.
+        assert json_overrides == {"spread_bps": 7}
+
+    def test_no_op_when_json_overrides_empty_or_none(self):
+        from bot import _apply_json_risk_overrides
+        from config import Config
+
+        before = Config.DAILY_LOSS_LIMIT
+        _apply_json_risk_overrides(None, self._args())
+        _apply_json_risk_overrides({}, self._args())
+        assert Config.DAILY_LOSS_LIMIT == before
+
+    def test_unknown_risk_key_in_json_ignored(self):
+        """Keys not in _RISK_PARAMS pass through untouched."""
+        from bot import _apply_json_risk_overrides
+
+        json_overrides = {"spread_bps": 10, "made_up_risk_param": 0.5}
+        _apply_json_risk_overrides(json_overrides, self._args())
+        # No risk keys present — both pass through untouched.
+        assert json_overrides == {"spread_bps": 10, "made_up_risk_param": 0.5}

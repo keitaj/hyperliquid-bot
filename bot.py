@@ -41,6 +41,46 @@ warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL")
 logger = logging.getLogger(__name__)
 
 
+# Risk-guardrail parameter names. Promoted to module-level so the JSON
+# config layer (``_apply_json_risk_overrides``) and the existing CLI
+# override loop in ``main()`` share the same list. Each name maps to:
+#   - argparse dest: ``args.{name}``
+#   - Config class attribute: ``Config.{name.upper()}``
+_RISK_PARAMS = [
+    'max_position_pct', 'max_margin_usage', 'force_close_margin',
+    'force_close_leverage', 'daily_loss_limit', 'per_trade_stop_loss',
+    'max_open_positions', 'cooldown_after_stop',
+]
+
+
+def _apply_json_risk_overrides(json_overrides: Optional[Dict], args) -> None:
+    """Wire risk parameters from JSON config into the ``Config`` class.
+
+    JSON values flow to ``Config.{KEY.upper()}`` only when the same key
+    is **not** also present on ``args`` (CLI > JSON precedence). After
+    application the keys are popped from ``json_overrides`` so they do
+    not leak into the strategy_config dict (where the strategy would
+    not know what to do with them and the typo detector would false-warn).
+
+    No-op when ``json_overrides`` is empty or None. Existing CLI / env
+    behaviour is unaffected.
+    """
+    if not json_overrides:
+        return
+    for param in _RISK_PARAMS:
+        if param not in json_overrides:
+            continue
+        cli_val = getattr(args, param, None)
+        if cli_val is not None:
+            # CLI already specified — let the existing CLI loop handle it
+            # and just pop the JSON value so it does not pollute strategy_config.
+            json_overrides.pop(param, None)
+            continue
+        value = json_overrides.pop(param)
+        setattr(Config, param.upper(), value)
+        logger.info(f"[config] Risk param from JSON: {param.upper()}={value}")
+
+
 class HyperliquidBot:
     def __init__(self, strategy_name: str = "simple_ma", coins: Optional[List[str]] = None,
                  strategy_config: Optional[Dict] = None,
@@ -1371,12 +1411,9 @@ if __name__ == "__main__":
     if args.no_hl:
         Config.ENABLE_STANDARD_HL = False
 
-    # Apply CLI overrides for risk guardrails (CLI > env > default)
-    _RISK_PARAMS = [
-        'max_position_pct', 'max_margin_usage', 'force_close_margin',
-        'force_close_leverage', 'daily_loss_limit', 'per_trade_stop_loss',
-        'max_open_positions', 'cooldown_after_stop',
-    ]
+    # Apply CLI overrides for risk guardrails (CLI > env > default).
+    # ``_RISK_PARAMS`` is defined at module level so the JSON layer
+    # (``_apply_json_risk_overrides``) and this loop stay in sync.
     for param in _RISK_PARAMS:
         val = getattr(args, param, None)
         if val is not None:
@@ -1420,6 +1457,11 @@ if __name__ == "__main__":
         except ConfigError as e:
             logger.error(f"{e}")
             raise SystemExit(2)
+
+        # Risk parameters from JSON flow to ``Config`` (separate from
+        # ``strategy_config``). CLI args still beat JSON because the CLI
+        # override loop further down checks ``args.{param}`` first.
+        _apply_json_risk_overrides(json_overrides, args)
 
     bot = HyperliquidBot(
         strategy_name=args.strategy,
