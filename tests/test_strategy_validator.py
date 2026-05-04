@@ -1,6 +1,10 @@
 """Tests for strategy parameter validation."""
 
-from validation.strategy_validator import validate_strategy_config, VALID_CANDLE_INTERVALS
+from validation.strategy_validator import (
+    validate_strategy_config,
+    known_market_making_keys,
+    VALID_CANDLE_INTERVALS,
+)
 
 
 class TestCommonValidation:
@@ -239,3 +243,58 @@ class TestUnknownStrategy:
         assert validate_strategy_config('unknown_strategy', {
             'position_size_usd': 100,
         }) is None
+
+
+class TestKnownMarketMakingKeys:
+    """Regression tests for ``known_market_making_keys``.
+
+    The function imports ``_STRATEGY_PARAMS``, ``_COMMON_PARAMS``, and
+    ``_RISK_PARAMS`` lazily from ``bot``. They must all be **module
+    level** in ``bot.py`` — if any are demoted back inside ``main()``,
+    the JSON config loader's typo detector will crash at runtime when a
+    user invokes ``--config``. These tests pin that contract.
+    """
+
+    def test_returns_non_empty_set(self):
+        keys = known_market_making_keys()
+        assert isinstance(keys, set)
+        assert len(keys) > 0
+
+    def test_includes_market_making_params(self):
+        """Spot-check a handful of representative MM keys."""
+        keys = known_market_making_keys()
+        for k in ('spread_bps', 'order_size_usd', 'refresh_interval_seconds',
+                  'forager_enabled', 'dynamic_age_enabled'):
+            assert k in keys, f'{k} missing from known_market_making_keys'
+
+    def test_includes_common_params(self):
+        keys = known_market_making_keys()
+        for k in ('position_size_usd', 'max_positions', 'candle_interval'):
+            assert k in keys, f'common param {k} missing'
+
+    def test_includes_risk_params(self):
+        """Risk-guardrail keys must be recognised so JSON ``risk:`` blocks
+        don't trigger spurious typo warnings."""
+        keys = known_market_making_keys()
+        for k in ('max_position_pct', 'daily_loss_limit', 'per_trade_stop_loss'):
+            assert k in keys, f'risk param {k} missing'
+
+    def test_includes_derived_runtime_keys(self):
+        """Keys read via ``config.get`` in MarketMakingStrategy but not in
+        ``_STRATEGY_PARAMS`` (e.g. ``maker_only``, ``close_immediately``).
+        """
+        keys = known_market_making_keys()
+        for k in ('maker_only', 'close_immediately', 'enable_ws'):
+            assert k in keys
+
+    def test_bot_module_exports_param_lists(self):
+        """Direct import — pins that the three lists are at module scope.
+
+        If ``_STRATEGY_PARAMS`` or ``_COMMON_PARAMS`` ever get demoted
+        back inside ``main()``, this import will raise ``ImportError``.
+        """
+        from bot import _STRATEGY_PARAMS, _COMMON_PARAMS, _RISK_PARAMS
+        assert isinstance(_STRATEGY_PARAMS, dict)
+        assert 'market_making' in _STRATEGY_PARAMS
+        assert isinstance(_COMMON_PARAMS, list)
+        assert isinstance(_RISK_PARAMS, list)

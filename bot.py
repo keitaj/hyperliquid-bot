@@ -52,6 +52,121 @@ _RISK_PARAMS = [
     'max_open_positions', 'cooldown_after_stop',
 ]
 
+# Common-strategy parameter names (apply to most / all strategies).
+# Module-level so ``validation.strategy_validator.known_market_making_keys()``
+# can introspect them for typo detection without circular-import gymnastics.
+_COMMON_PARAMS = [
+    'position_size_usd', 'max_positions', 'take_profit_percent',
+    'stop_loss_percent', 'candle_interval', 'account_cap_pct',
+]
+
+# Per-strategy parameter names. Each list contains the ``config_key``
+# (i.e. the name produced by argparse ``dest=``); for renames where the
+# CLI flag and config key differ, ``_collect_params`` accepts an
+# ``(arg_name, config_key)`` tuple. Module-level for the same reason as
+# ``_COMMON_PARAMS`` above.
+_STRATEGY_PARAMS = {
+    'simple_ma': ['fast_ma_period', 'slow_ma_period'],
+    'rsi': [
+        'rsi_period', 'oversold_threshold', 'overbought_threshold',
+        'rsi_extreme_low', 'rsi_moderate_low',
+        'size_multiplier_extreme', 'size_multiplier_moderate',
+    ],
+    'bollinger_bands': [
+        'bb_period', 'std_dev', 'squeeze_threshold',
+        'volatility_expansion_threshold',
+        'high_band_width_threshold', 'high_band_width_multiplier',
+        'low_band_width_threshold', 'low_band_width_multiplier',
+    ],
+    'macd': [
+        'fast_ema', 'slow_ema', 'signal_ema', 'divergence_lookback',
+        'histogram_strength_high', 'histogram_strength_low',
+        'histogram_multiplier_high', 'histogram_multiplier_low',
+    ],
+    'grid_trading': [
+        'grid_levels', 'grid_spacing_pct', 'position_size_per_grid',
+        'range_period', 'range_pct_threshold', 'volatility_threshold',
+        'grid_recalc_bars', 'grid_saturation_threshold',
+        'grid_boundary_margin_low', 'grid_boundary_margin_high',
+    ],
+    'breakout': [
+        'lookback_period', 'volume_multiplier',
+        'breakout_confirmation_bars', 'atr_period',
+        'pivot_window', 'avg_volume_lookback',
+        'stop_loss_atr_multiplier', 'position_stop_loss_atr_multiplier',
+        'strong_breakout_multiplier',
+        'high_atr_threshold', 'low_atr_threshold',
+        'high_atr_multiplier', 'low_atr_multiplier',
+    ],
+    'market_making': [
+        'spread_bps', 'order_size_usd', 'max_open_orders',
+        'refresh_interval_seconds',
+        'refresh_tolerance_bp',
+        'refresh_max_age_seconds',
+        'max_position_age_seconds',
+        'taker_fallback_age_seconds',
+        'aggressive_loss_bps',
+        'force_close_max_loss_bps',
+        'close_spread_bps',
+        'close_breakeven_pct',
+        'close_aggressive_pct',
+        'unrealized_loss_close_bps',
+        'bbo_mode',
+        'bbo_offset_bps',
+        'inventory_skew_bps',
+        'imbalance_threshold',
+        'loss_streak_limit',
+        'loss_streak_cooldown',
+        'bbo_guard_threshold_bps',
+        'imbalance_guard_threshold',
+        'imbalance_guard_depth',
+        'vol_adjust_enabled',
+        'vol_adjust_multiplier',
+        'vol_lookback',
+        'vol_adjust_max_offset',
+        'adverse_selection_log_interval',
+        'coin_offset_overrides',
+        'coin_spread_overrides',
+        'coin_size_overrides',
+        'coin_unrealized_loss_overrides',
+        'close_refresh_threshold_bps',
+        'spread_schedule',
+        'quiet_hours_utc',
+        'quiet_hours_spread_multiplier',
+        'microprice_skew_enabled',
+        'microprice_skew_multiplier',
+        'microprice_max_skew_bps',
+        'velocity_guard_enabled',
+        'velocity_consecutive',
+        'velocity_min_move_bps',
+        'dynamic_offset_enabled',
+        'dynamic_offset_sensitivity',
+        'dynamic_offset_tighten_rate',
+        'dynamic_offset_max_addition',
+        'dynamic_offset_max_reduction',
+        'dynamic_offset_floor',
+        'dynamic_offset_min_fills',
+        'dynamic_age_enabled',
+        'dynamic_age_baseline_vol',
+        'dynamic_age_min',
+        'dynamic_age_max',
+        'auto_exclude_enabled',
+        'auto_exclude_threshold_bps',
+        'auto_exclude_consecutive',
+        'auto_exclude_min_fills',
+        'auto_exclude_cooldown',
+        'auto_exclude_window_label',
+        'forager_enabled',
+        'forager_score_threshold',
+        'forager_consecutive',
+        'forager_cooldown_seconds',
+        'forager_weight_activity',
+        'forager_weight_quality',
+        'forager_weight_cost',
+        'drain_flag_file',
+    ],
+}
+
 
 def _apply_json_risk_overrides(json_overrides: Optional[Dict], args) -> None:
     """Wire risk parameters from JSON config into the ``Config`` class.
@@ -1270,114 +1385,12 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Build strategy config from command line arguments.
-    # Each list maps CLI arg names to config keys (same name when identical).
-    # For renamed keys use a (arg_name, config_key) tuple.
-    _COMMON_PARAMS = [
-        'position_size_usd', 'max_positions', 'take_profit_percent',
-        'stop_loss_percent', 'candle_interval', 'account_cap_pct',
-    ]
-    _STRATEGY_PARAMS = {
-        'simple_ma': ['fast_ma_period', 'slow_ma_period'],
-        'rsi': [
-            'rsi_period', 'oversold_threshold', 'overbought_threshold',
-            'rsi_extreme_low', 'rsi_moderate_low',
-            'size_multiplier_extreme', 'size_multiplier_moderate',
-        ],
-        'bollinger_bands': [
-            'bb_period', 'std_dev', 'squeeze_threshold',
-            'volatility_expansion_threshold',
-            'high_band_width_threshold', 'high_band_width_multiplier',
-            'low_band_width_threshold', 'low_band_width_multiplier',
-        ],
-        'macd': [
-            'fast_ema', 'slow_ema', 'signal_ema', 'divergence_lookback',
-            'histogram_strength_high', 'histogram_strength_low',
-            'histogram_multiplier_high', 'histogram_multiplier_low',
-        ],
-        'grid_trading': [
-            'grid_levels', 'grid_spacing_pct', 'position_size_per_grid',
-            'range_period', 'range_pct_threshold', 'volatility_threshold',
-            'grid_recalc_bars', 'grid_saturation_threshold',
-            'grid_boundary_margin_low', 'grid_boundary_margin_high',
-        ],
-        'breakout': [
-            'lookback_period', 'volume_multiplier',
-            'breakout_confirmation_bars', 'atr_period',
-            'pivot_window', 'avg_volume_lookback',
-            'stop_loss_atr_multiplier', 'position_stop_loss_atr_multiplier',
-            'strong_breakout_multiplier',
-            'high_atr_threshold', 'low_atr_threshold',
-            'high_atr_multiplier', 'low_atr_multiplier',
-        ],
-        'market_making': [
-            'spread_bps', 'order_size_usd', 'max_open_orders',
-            'refresh_interval_seconds',
-            'refresh_tolerance_bp',
-            'refresh_max_age_seconds',
-            'max_position_age_seconds',
-            'taker_fallback_age_seconds',
-            'aggressive_loss_bps',
-            'force_close_max_loss_bps',
-            'close_spread_bps',
-            'close_breakeven_pct',
-            'close_aggressive_pct',
-            'unrealized_loss_close_bps',
-            'bbo_mode',
-            'bbo_offset_bps',
-            'inventory_skew_bps',
-            'imbalance_threshold',
-            'loss_streak_limit',
-            'loss_streak_cooldown',
-            'bbo_guard_threshold_bps',
-            'imbalance_guard_threshold',
-            'imbalance_guard_depth',
-            'vol_adjust_enabled',
-            'vol_adjust_multiplier',
-            'vol_lookback',
-            'vol_adjust_max_offset',
-            'adverse_selection_log_interval',
-            'coin_offset_overrides',
-            'coin_spread_overrides',
-            'coin_size_overrides',
-            'coin_unrealized_loss_overrides',
-            'close_refresh_threshold_bps',
-            'spread_schedule',
-            'quiet_hours_utc',
-            'quiet_hours_spread_multiplier',
-            'microprice_skew_enabled',
-            'microprice_skew_multiplier',
-            'microprice_max_skew_bps',
-            'velocity_guard_enabled',
-            'velocity_consecutive',
-            'velocity_min_move_bps',
-            'dynamic_offset_enabled',
-            'dynamic_offset_sensitivity',
-            'dynamic_offset_tighten_rate',
-            'dynamic_offset_max_addition',
-            'dynamic_offset_max_reduction',
-            'dynamic_offset_floor',
-            'dynamic_offset_min_fills',
-            'dynamic_age_enabled',
-            'dynamic_age_baseline_vol',
-            'dynamic_age_min',
-            'dynamic_age_max',
-            'auto_exclude_enabled',
-            'auto_exclude_threshold_bps',
-            'auto_exclude_consecutive',
-            'auto_exclude_min_fills',
-            'auto_exclude_cooldown',
-            'auto_exclude_window_label',
-            'forager_enabled',
-            'forager_score_threshold',
-            'forager_consecutive',
-            'forager_cooldown_seconds',
-            'forager_weight_activity',
-            'forager_weight_quality',
-            'forager_weight_cost',
-            'drain_flag_file',
-        ],
-    }
+    # ``_COMMON_PARAMS`` and ``_STRATEGY_PARAMS`` are defined at module
+    # level (top of this file) so the JSON config layer's typo detector
+    # (``validation.strategy_validator.known_market_making_keys``) can
+    # introspect them without circular-import gymnastics. The local
+    # references below preserve the existing call-site shape of
+    # ``_collect_params``.
 
     def _collect_params(params, source, dest):
         """Copy non-None CLI args into *dest* dict."""
