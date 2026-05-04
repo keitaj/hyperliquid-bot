@@ -302,6 +302,84 @@ class AutoExcludeConfig:
 
 
 @dataclass
+class ForagerConfig:
+    """Multi-axis coin health scoring for auto-exclude.
+
+    Complements :class:`AutoExcludeConfig` (markout-based) with three
+    additional signals: activity (fill frequency), close-quality
+    (maker rate), and cost ($/1K vol). The composite score (0-100,
+    higher is healthier) drops below ``score_threshold`` for
+    ``consecutive`` consecutive checks → coin is paused via the existing
+    ``_coin_cooldown_until`` map shared with :class:`AutoExcludeConfig`
+    and :class:`LossStreakConfig`.
+
+    Defaults match ``docs/design-doc/20260504_forager_coin_health.md``.
+    """
+
+    enabled: bool = False
+    score_threshold: float = 30.0
+    consecutive: int = 3
+    cooldown_seconds: int = 1800
+    weight_activity: float = 0.3
+    weight_quality: float = 0.4
+    weight_cost: float = 0.3
+    # env-only knobs (no CLI flag) — formula constants, rarely tuned
+    window_seconds: float = 1800.0
+    check_interval_seconds: float = 300.0
+    activity_idle_min_seconds: float = 300.0
+    cost_max_per_1k: float = 0.6
+    min_closes_for_quality: int = 5
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.score_threshold <= 100.0:
+            raise ValueError(
+                f"forager_score_threshold must be in [0, 100], got {self.score_threshold}"
+            )
+        if self.consecutive < 1:
+            raise ValueError(
+                f"forager_consecutive must be >= 1, got {self.consecutive}"
+            )
+        if self.cooldown_seconds <= 0:
+            raise ValueError(
+                f"forager_cooldown_seconds must be > 0, got {self.cooldown_seconds}"
+            )
+        for name, val in (
+            ("weight_activity", self.weight_activity),
+            ("weight_quality", self.weight_quality),
+            ("weight_cost", self.weight_cost),
+        ):
+            if not 0.0 <= val <= 1.0:
+                raise ValueError(f"forager_{name} must be in [0, 1], got {val}")
+        if self.window_seconds <= 0:
+            raise ValueError(
+                f"forager_window_seconds must be > 0, got {self.window_seconds}"
+            )
+        if self.check_interval_seconds < 0:
+            raise ValueError(
+                f"forager_check_interval_seconds must be >= 0, got {self.check_interval_seconds}"
+            )
+        if self.activity_idle_min_seconds < 0:
+            raise ValueError(
+                f"forager_activity_idle_min_seconds must be >= 0, "
+                f"got {self.activity_idle_min_seconds}"
+            )
+        if self.activity_idle_min_seconds >= self.window_seconds:
+            raise ValueError(
+                f"forager_activity_idle_min_seconds ({self.activity_idle_min_seconds}) "
+                f"must be < window_seconds ({self.window_seconds})"
+            )
+        if self.cost_max_per_1k <= 0:
+            raise ValueError(
+                f"forager_cost_max_per_1k must be > 0, got {self.cost_max_per_1k}"
+            )
+        if self.min_closes_for_quality < 1:
+            raise ValueError(
+                f"forager_min_closes_for_quality must be >= 1, "
+                f"got {self.min_closes_for_quality}"
+            )
+
+
+@dataclass
 class MMConfig:
     """Root config for ``MarketMakingStrategy``.
 
@@ -320,6 +398,7 @@ class MMConfig:
     dynamic_offset: DynamicOffsetConfig = field(default_factory=DynamicOffsetConfig)
     dynamic_age: DynamicAgeConfig = field(default_factory=DynamicAgeConfig)
     auto_exclude: AutoExcludeConfig = field(default_factory=AutoExcludeConfig)
+    forager: ForagerConfig = field(default_factory=ForagerConfig)
 
     @classmethod
     def from_legacy_dict(cls, d: Dict) -> "MMConfig":
@@ -391,5 +470,25 @@ class MMConfig:
                 min_fills=int(d.get('auto_exclude_min_fills', 3)),
                 cooldown_seconds=int(d.get('auto_exclude_cooldown', 1800)),
                 window_label=str(d.get('auto_exclude_window_label', '60s')),
+            ),
+            forager=ForagerConfig(
+                enabled=bool(d.get('forager_enabled', False)),
+                score_threshold=float(d.get('forager_score_threshold', 30.0)),
+                consecutive=int(d.get('forager_consecutive', 3)),
+                cooldown_seconds=int(d.get('forager_cooldown_seconds', 1800)),
+                weight_activity=float(d.get('forager_weight_activity', 0.3)),
+                weight_quality=float(d.get('forager_weight_quality', 0.4)),
+                weight_cost=float(d.get('forager_weight_cost', 0.3)),
+                window_seconds=float(d.get('forager_window_seconds', 1800.0)),
+                check_interval_seconds=float(
+                    d.get('forager_check_interval_seconds', 300.0)
+                ),
+                activity_idle_min_seconds=float(
+                    d.get('forager_activity_idle_min_seconds', 300.0)
+                ),
+                cost_max_per_1k=float(d.get('forager_cost_max_per_1k', 0.6)),
+                min_closes_for_quality=int(
+                    d.get('forager_min_closes_for_quality', 5)
+                ),
             ),
         )

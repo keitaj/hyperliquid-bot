@@ -246,6 +246,53 @@ def _validate_market_making(config: Dict) -> List[str]:
                 errors.append(f"taker_fallback_age_seconds: expected number, got {type(val).__name__}")
             elif val < 0:
                 errors.append(f"taker_fallback_age_seconds: must be >= 0, got {val}")
+
+    # Forager: composite-score auto-exclude (defaults align with ForagerConfig).
+    if 'forager_score_threshold' in config:
+        val = config['forager_score_threshold']
+        if not isinstance(val, (int, float)):
+            errors.append(f"forager_score_threshold: expected number, got {type(val).__name__}")
+        elif not 0.0 <= val <= 100.0:
+            errors.append(f"forager_score_threshold: must be in [0, 100], got {val}")
+    if 'forager_consecutive' in config:
+        errors += _positive_int('forager_consecutive', config['forager_consecutive'])
+    if 'forager_cooldown_seconds' in config:
+        errors += _positive_int('forager_cooldown_seconds', config['forager_cooldown_seconds'])
+    for w in ('forager_weight_activity', 'forager_weight_quality', 'forager_weight_cost'):
+        if w in config:
+            val = config[w]
+            if not isinstance(val, (int, float)):
+                errors.append(f"{w}: expected number, got {type(val).__name__}")
+            elif not 0.0 <= val <= 1.0:
+                errors.append(f"{w}: must be in [0, 1], got {val}")
+    if 'forager_window_seconds' in config:
+        errors += _positive('forager_window_seconds', config['forager_window_seconds'])
+    if 'forager_check_interval_seconds' in config:
+        val = config['forager_check_interval_seconds']
+        if not isinstance(val, (int, float)):
+            errors.append(
+                f"forager_check_interval_seconds: expected number, got {type(val).__name__}"
+            )
+        elif val < 0:
+            errors.append(
+                f"forager_check_interval_seconds: must be >= 0, got {val}"
+            )
+    if 'forager_cost_max_per_1k' in config:
+        errors += _positive('forager_cost_max_per_1k', config['forager_cost_max_per_1k'])
+    if 'forager_min_closes_for_quality' in config:
+        errors += _positive_int(
+            'forager_min_closes_for_quality', config['forager_min_closes_for_quality']
+        )
+    if 'forager_activity_idle_min_seconds' in config:
+        val = config['forager_activity_idle_min_seconds']
+        if not isinstance(val, (int, float)):
+            errors.append(
+                f"forager_activity_idle_min_seconds: expected number, got {type(val).__name__}"
+            )
+        elif val < 0:
+            errors.append(
+                f"forager_activity_idle_min_seconds: must be >= 0, got {val}"
+            )
     return errors
 
 

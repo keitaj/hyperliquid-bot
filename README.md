@@ -326,6 +326,8 @@ The `market_making` strategy uses **progressive close pricing**: as a position a
 
 **Auto-exclude on adverse selection** (`--auto-exclude`): Automatically pauses a coin when the AdverseSelectionTracker reports moderate adverse selection (`avg_<window>` below `--auto-exclude-threshold-bps`, default `-3.0`) for `--auto-exclude-consecutive` summary windows in a row (default 3, ~15 min with the default 300s log interval). The coin is paused for `--auto-exclude-cooldown` seconds (default 1800) and then automatically resumes. Requires `--enable-adverse-selection-log`. Per-window `min_fills` filtering keeps low-volume noise from triggering. Shares the per-coin cooldown map with `--loss-streak-limit`, so the two features compose naturally.
 
+**Forager: composite-score auto-exclude** (`--forager`): Complements `--auto-exclude` (markout-based) by scoring each coin on three independent dimensions and pausing it when the composite stays low. The dimensions are **activity** (recency of fills, catches dead markets like a coin that hasn't filled in hours), **close quality** (maker close rate, catches coins with structural taker fallback even when markout looks neutral), and **cost** (recent $/1K vol, catches gradual bleed). A weighted composite in `[0, 100]` is computed each cycle; below `--forager-threshold` (default 30) for `--forager-consecutive` checks (default 3) triggers `--forager-cooldown` seconds (default 1800) on the shared cooldown map. Weights are configurable via `--forager-w-activity`, `--forager-w-quality`, `--forager-w-cost`. Internal formula constants (window length, idle grace, cost scale, min-closes gate) can be overridden via env vars (`FORAGER_WINDOW_SECONDS`, `FORAGER_ACTIVITY_IDLE_MIN_SECONDS`, `FORAGER_COST_MAX_PER_1K`, `FORAGER_MIN_CLOSES_FOR_QUALITY`, `FORAGER_CHECK_INTERVAL_SECONDS`). Default disabled; both Forager and `--auto-exclude` may run side-by-side and either may set the cooldown.
+
 **WebSocket guards** (require `--enable-ws`):
 - `--bbo-guard-threshold-bps`: Cancel stale entry orders when BBO moves (default: 2.0)
 - `--imbalance-guard-threshold`: Cancel one side when L2 book is skewed (0–1, default: 0)
@@ -595,6 +597,18 @@ strategies:
     auto_exclude_min_fills: 3          # --auto-exclude-min-fills  (per-window minimum fill count)
     auto_exclude_cooldown: 1800        # --auto-exclude-cooldown  (pause seconds after trigger; auto-resume)
     auto_exclude_window_label: "60s"   # --auto-exclude-window-label  (5s|30s|60s tracker sample window)
+    forager_enabled: false             # --forager  (composite-score auto-exclude on activity + close-quality + cost)
+    forager_score_threshold: 30.0      # --forager-threshold  (composite score below this triggers; 0-100)
+    forager_consecutive: 3             # --forager-consecutive  (consecutive sub-threshold checks to trigger)
+    forager_cooldown_seconds: 1800     # --forager-cooldown  (pause seconds after trigger; auto-resume)
+    forager_weight_activity: 0.3       # --forager-w-activity  (composite weight for activity dimension)
+    forager_weight_quality: 0.4        # --forager-w-quality  (composite weight for close-quality dimension)
+    forager_weight_cost: 0.3           # --forager-w-cost  (composite weight for cost dimension)
+    forager_window_seconds: 1800.0     # env-only (rolling window for fill activity + close history)
+    forager_check_interval_seconds: 300.0  # env-only (per-coin throttle between health checks)
+    forager_activity_idle_min_seconds: 300.0  # env-only (idle grace before activity score decays)
+    forager_cost_max_per_1k: 0.6       # env-only ($/1K at which cost score reaches 0)
+    forager_min_closes_for_quality: 5  # env-only (min closes required to trust quality dimension)
     account_cap_pct: 0.05              # --account-cap-pct
     max_positions: 3
     take_profit_percent: 1

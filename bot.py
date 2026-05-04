@@ -189,6 +189,22 @@ class HyperliquidBot:
                 'take_profit_percent': 1,
                 'stop_loss_percent': 2,
                 'account_cap_pct': 0.05,
+                # Forager (composite-score auto-exclude). Defaults match the
+                # ForagerConfig dataclass; values can be overridden via env
+                # vars (e.g. FORAGER_WINDOW_SECONDS=3600) without adding a
+                # CLI flag for every internal formula constant.
+                'forager_enabled': False,
+                'forager_score_threshold': 30.0,
+                'forager_consecutive': 3,
+                'forager_cooldown_seconds': 1800,
+                'forager_weight_activity': 0.3,
+                'forager_weight_quality': 0.4,
+                'forager_weight_cost': 0.3,
+                'forager_window_seconds': 1800.0,
+                'forager_check_interval_seconds': 300.0,
+                'forager_activity_idle_min_seconds': 300.0,
+                'forager_cost_max_per_1k': 0.6,
+                'forager_min_closes_for_quality': 5,
             }
         }
 
@@ -498,6 +514,17 @@ class HyperliquidBot:
         if self.adverse_tracker and self.strategy_config.get('dynamic_offset_enabled', False):
             self.strategy._adverse_tracker = self.adverse_tracker
             logger.info("[ws] Dynamic offset linked to AdverseSelectionTracker")
+
+        # Forager: route fill events from FillFeed into the strategy's
+        # CoinHealthTracker so the quality + cost dimensions are populated.
+        coin_health_tracker = getattr(self.strategy, '_coin_health_tracker', None)
+        if (
+            self.fill_feed is not None
+            and coin_health_tracker is not None
+            and self.strategy_config.get('forager_enabled', False)
+        ):
+            self.fill_feed.set_coin_health_tracker(coin_health_tracker)
+            logger.info("[ws] Forager linked to FillFeed (CoinHealthTracker)")
 
         if self._enable_ws and self.ws_feed is not None:
             self._ws_reconnector = WsReconnector(stale_threshold=60.0)
@@ -1144,6 +1171,27 @@ if __name__ == "__main__":
                         help='Adverse-selection sample window for auto-exclude: 5s|30s|60s '
                              '(default: 60s, market_making)')
 
+    # Forager: composite-score auto-exclude (orthogonal to auto_exclude)
+    parser.add_argument('--forager', dest='forager_enabled',
+                        action='store_true', default=False,
+                        help='Auto-exclude a coin when its composite health score (activity + close '
+                             'maker rate + cost) stays below --forager-threshold for '
+                             '--forager-consecutive checks in a row (market_making)')
+    parser.add_argument('--forager-threshold', dest='forager_score_threshold', type=float,
+                        help='Composite health score threshold (0-100); below this triggers '
+                             '(default: 30.0, market_making)')
+    parser.add_argument('--forager-consecutive', type=int,
+                        help='Consecutive sub-threshold checks required to trigger forager exclude '
+                             '(default: 3, market_making)')
+    parser.add_argument('--forager-cooldown', dest='forager_cooldown_seconds', type=int,
+                        help='Cooldown seconds after forager triggers (default: 1800, market_making)')
+    parser.add_argument('--forager-w-activity', dest='forager_weight_activity', type=float,
+                        help='Composite-score weight for activity dimension (default: 0.3, market_making)')
+    parser.add_argument('--forager-w-quality', dest='forager_weight_quality', type=float,
+                        help='Composite-score weight for close-quality dimension (default: 0.4, market_making)')
+    parser.add_argument('--forager-w-cost', dest='forager_weight_cost', type=float,
+                        help='Composite-score weight for cost dimension (default: 0.3, market_making)')
+
     # Risk guardrail parameters
     parser.add_argument('--max-position-pct', type=float,
                         help='Max single position as %% of account (default: 0.2)')
@@ -1265,6 +1313,13 @@ if __name__ == "__main__":
             'auto_exclude_min_fills',
             'auto_exclude_cooldown',
             'auto_exclude_window_label',
+            'forager_enabled',
+            'forager_score_threshold',
+            'forager_consecutive',
+            'forager_cooldown_seconds',
+            'forager_weight_activity',
+            'forager_weight_quality',
+            'forager_weight_cost',
             'drain_flag_file',
         ],
     }
