@@ -6,6 +6,7 @@ Simple script to check Hyperliquid account balance and positions
 from config import Config
 from coin_utils import make_hip3_coin
 from rate_limiter import API_ERRORS
+from datetime import datetime
 import requests
 import logging
 import sys
@@ -86,6 +87,7 @@ def main():
 
         print("=" * 50)
         print("🏦 HYPERLIQUID ACCOUNT BALANCE")
+        print(f"🕒 {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}")
         print("=" * 50)
         print("📦 Spot (USDC/USDH/USDT0):")
         if spot_balances:
