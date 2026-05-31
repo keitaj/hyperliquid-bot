@@ -1,13 +1,81 @@
 import logging
 import os
+import sys
 import time
 import signal
 import types
 import warnings
-from typing import Any, Dict, List, Optional
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
+from typing import Any, Dict, List, Optional, Tuple
 
 from log_config import setup_logging
 setup_logging()
+
+# ---------------------------------------------------------------------------
+# SDK compatibility gate
+# ---------------------------------------------------------------------------
+# Hyperliquid mainnet metadata evolves over time. The installed
+# ``hyperliquid-python-sdk`` must be at least this version to handle the
+# current spot universe correctly. When upgrading the SDK, bump this constant
+# in the same PR so deployed environments are validated at startup.
+MINIMUM_HYPERLIQUID_SDK_VERSION: Tuple[int, int, int] = (0, 23, 0)
+
+
+def _parse_version_tuple(version: str) -> Tuple[int, int, int]:
+    """Parse a version string into a comparable ``MAJOR.MINOR.PATCH`` tuple.
+
+    Only the first three numeric components are considered. Pre-release or
+    development suffixes (e.g. ``rc1``, ``a2``) on any component are stripped
+    so that ``0.23.0rc1`` is treated as ``(0, 23, 0)``. Missing components
+    default to 0 (``"1.0"`` becomes ``(1, 0, 0)``).
+    """
+    parts = version.split(".")
+    nums: List[int] = []
+    for part in parts[:3]:
+        digits = ""
+        for ch in part:
+            if ch.isdigit():
+                digits += ch
+            else:
+                break
+        nums.append(int(digits) if digits else 0)
+    while len(nums) < 3:
+        nums.append(0)
+    return (nums[0], nums[1], nums[2])
+
+
+def _assert_sdk_version() -> None:
+    """Abort startup if ``hyperliquid-python-sdk`` is below the minimum.
+
+    Exits with status 2 (configuration error) and a clear remediation message
+    so a crash loop in production can be diagnosed from a single log line
+    rather than a deep API traceback.
+    """
+    pkg = "hyperliquid-python-sdk"
+    try:
+        installed = _pkg_version(pkg)
+    except PackageNotFoundError:
+        min_str = ".".join(str(n) for n in MINIMUM_HYPERLIQUID_SDK_VERSION)
+        sys.stderr.write(
+            f"FATAL: {pkg} is not installed but is required (>= {min_str}). "
+            f"Run `pip install \".[dev]\"` from the bot repo to install all "
+            f"dependencies.\n"
+        )
+        sys.exit(2)
+
+    if _parse_version_tuple(installed) < MINIMUM_HYPERLIQUID_SDK_VERSION:
+        min_str = ".".join(str(n) for n in MINIMUM_HYPERLIQUID_SDK_VERSION)
+        sys.stderr.write(
+            f"FATAL: {pkg} {installed} is installed, but minimum required "
+            f"version is {min_str}. The bot will not function correctly with "
+            f"this SDK due to upstream API metadata changes.\n"
+            f"To fix: `pip install \".[dev]\"` from the bot repo "
+            f"(or `pip install --upgrade '{pkg}>={min_str}'`).\n"
+        )
+        sys.exit(2)
+
+
+_assert_sdk_version()
 
 from hyperliquid.exchange import Exchange  # noqa: E402
 from config import Config  # noqa: E402
