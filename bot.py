@@ -234,6 +234,7 @@ _STRATEGY_PARAMS = {
         'rejection_log_level',
         'rejection_summary_interval',
         'drain_flag_file',
+        'max_position_multiple',
     ],
 }
 
@@ -433,6 +434,11 @@ class HyperliquidBot:
                 'forager_activity_idle_min_seconds': 300.0,
                 'forager_cost_max_per_1k': 0.6,
                 'forager_min_closes_for_quality': 5,
+                # Per-coin entry-side position cap. When set, suppresses
+                # same-direction entries once |position| * mid_price reaches
+                # ``max_position_multiple`` × effective ``order_size_usd``.
+                # ``0.0`` (default) disables the cap.
+                'max_position_multiple': 0.0,
             }
         }
 

@@ -130,6 +130,17 @@ class MarketMakingStrategy(BaseStrategy):
                 f"cooldown={self.cfg.auto_exclude.cooldown_seconds}s"
             )
 
+        # ---- Per-coin entry-side position cap (alias of self.cfg.position_cap) ---- #
+        # When accumulated |position| * mid >= max_position_multiple * order_size_usd,
+        # suppress same-direction entries to prevent oversized force-close events.
+        # 0.0 = disabled (legacy behaviour).
+        self._max_position_multiple: float = self.cfg.position_cap.max_position_multiple
+        if self._max_position_multiple > 0:
+            logger.info(
+                f"[mm] Position cap armed: max_position_multiple="
+                f"{self._max_position_multiple}x order_size_usd"
+            )
+
         # ---- Forager: composite per-coin health scoring ---- #
         self._coin_health_tracker: Optional[CoinHealthTracker] = (
             CoinHealthTracker(self.cfg.forager) if self.cfg.forager.enabled else None
@@ -859,6 +870,34 @@ class MarketMakingStrategy(BaseStrategy):
                 elif imb > self.imbalance_threshold:
                     skip_sell = True
                     logger.debug(f"[mm] {coin} skipping SELL (book imbalance {imb:.2f})")
+
+        # Per-coin position cap: suppress same-direction entries once
+        # accumulated |position| × mid_price reaches the cap. Opposite-side
+        # entries are still allowed so existing inventory can unwind through
+        # normal quoting. ``self._max_position_multiple == 0`` disables the
+        # check entirely (legacy behaviour). ``getattr`` is used so tests
+        # that bypass ``__init__`` inherit the disabled default.
+        if getattr(self, '_max_position_multiple', 0.0) > 0:
+            pos = self.positions.get(coin)
+            if pos is not None and pos.get('size', 0) != 0:
+                pos_size = float(pos['size'])
+                md = self.market_data.get_market_data(coin)
+                if md is not None and md.mid_price > 0:
+                    coin_size_usd = self._get_coin_size(coin)
+                    cap_value = self._max_position_multiple * coin_size_usd
+                    pos_value = abs(pos_size) * md.mid_price
+                    if pos_value >= cap_value:
+                        direction = 'LONG' if pos_size > 0 else 'SHORT'
+                        if pos_size > 0:
+                            skip_buy = True
+                        else:
+                            skip_sell = True
+                        logger.info(
+                            f"[mm] {coin} position cap hit: |pos|=${pos_value:.0f} "
+                            f"({direction}) >= cap=${cap_value:.0f} "
+                            f"(={self._max_position_multiple}x size_usd) — "
+                            f"skipping same-side entry"
+                        )
 
         if (
             current_count < self.max_open_orders
