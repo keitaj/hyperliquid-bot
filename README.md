@@ -354,6 +354,8 @@ The `market_making` strategy uses **progressive close pricing**: as a position a
 
 **Auto-exclude on adverse selection** (`--auto-exclude`): Automatically pauses a coin when the AdverseSelectionTracker reports moderate adverse selection (`avg_<window>` below `--auto-exclude-threshold-bps`, default `-3.0`) for `--auto-exclude-consecutive` summary windows in a row (default 3, ~15 min with the default 300s log interval). The coin is paused for `--auto-exclude-cooldown` seconds (default 1800) and then automatically resumes. Requires `--enable-adverse-selection-log`. Per-window `min_fills` filtering keeps low-volume noise from triggering. Shares the per-coin cooldown map with `--loss-streak-limit`, so the two features compose naturally.
 
+**Per-coin position cap** (`max_position_multiple`, env-only): Suppresses same-direction entries once the accumulated position value (`|position| × mid_price`) reaches `max_position_multiple × effective_order_size_usd` for that coin. Opposite-side entries still place so existing inventory can unwind through normal quoting. Prevents the accumulated-position-then-single-large-close scenario that exposes a market-making bot to oversized adverse fills. The cap respects `coin_size_overrides`, so a per-coin order-size override tightens or loosens the cap proportionally. Default `0.0` (disabled) preserves the pre-cap behaviour.
+
 **Forager: composite-score auto-exclude** (`--forager`): Complements `--auto-exclude` (markout-based) by scoring each coin on three independent dimensions and pausing it when the composite stays low. The dimensions are **activity** (recency of fills, catches dead markets like a coin that hasn't filled in hours), **close quality** (maker close rate, catches coins with structural taker fallback even when markout looks neutral), and **cost** (recent $/1K vol, catches gradual bleed). A weighted composite in `[0, 100]` is computed each cycle; below `--forager-threshold` (default 30) for `--forager-consecutive` checks (default 3) triggers `--forager-cooldown` seconds (default 1800) on the shared cooldown map. Weights are configurable via `--forager-w-activity`, `--forager-w-quality`, `--forager-w-cost`. Internal formula constants (window length, idle grace, cost scale, min-closes gate) can be overridden via env vars (`FORAGER_WINDOW_SECONDS`, `FORAGER_ACTIVITY_IDLE_MIN_SECONDS`, `FORAGER_COST_MAX_PER_1K`, `FORAGER_MIN_CLOSES_FOR_QUALITY`, `FORAGER_CHECK_INTERVAL_SECONDS`). Default disabled; both Forager and `--auto-exclude` may run side-by-side and either may set the cooldown.
 
 **WebSocket guards** (require `--enable-ws`):
@@ -639,6 +641,7 @@ strategies:
     forager_activity_idle_min_seconds: 300.0  # env-only (idle grace before activity score decays)
     forager_cost_max_per_1k: 0.6       # env-only ($/1K at which cost score reaches 0)
     forager_min_closes_for_quality: 5  # env-only (min closes required to trust quality dimension)
+    max_position_multiple: 0.0         # env-only (per-coin entry-side cap on accumulated |position| × mid as a multiple of order_size_usd; 0 disables)
     account_cap_pct: 0.05              # --account-cap-pct
     max_positions: 3
     take_profit_percent: 1

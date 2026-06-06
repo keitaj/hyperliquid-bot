@@ -15,6 +15,7 @@ from strategies.mm_config import (
     MicropriceConfig,
     MMConfig,
     PerCoinOverrides,
+    PositionCapConfig,
     ScheduleConfig,
     VelocityGuardConfig,
     parse_coin_overrides,
@@ -230,6 +231,20 @@ class TestAutoExcludeConfig:
             AutoExcludeConfig(window_label='90s')
 
 
+class TestPositionCapConfig:
+    def test_defaults_are_disabled(self) -> None:
+        cfg = PositionCapConfig()
+        assert cfg.max_position_multiple == 0.0
+
+    def test_positive_multiple_accepted(self) -> None:
+        cfg = PositionCapConfig(max_position_multiple=2.5)
+        assert cfg.max_position_multiple == 2.5
+
+    def test_negative_multiple_rejected(self) -> None:
+        with pytest.raises(ValueError, match='max_position_multiple must be >= 0'):
+            PositionCapConfig(max_position_multiple=-0.1)
+
+
 class TestMMConfigFromLegacyDict:
     def test_empty_dict_yields_defaults(self) -> None:
         cfg = MMConfig.from_legacy_dict({})
@@ -339,6 +354,18 @@ class TestMMConfigFromLegacyDict:
     def test_unknown_keys_ignored(self) -> None:
         cfg = MMConfig.from_legacy_dict({'unknown_key': 'foo', 'loss_streak_limit': 2})
         assert cfg.loss_streak.limit == 2
+
+    def test_position_cap_disabled_by_default(self) -> None:
+        cfg = MMConfig.from_legacy_dict({})
+        assert cfg.position_cap.max_position_multiple == 0.0
+
+    def test_position_cap_populates_from_flat_key(self) -> None:
+        cfg = MMConfig.from_legacy_dict({'max_position_multiple': 2.5})
+        assert cfg.position_cap.max_position_multiple == 2.5
+
+    def test_position_cap_validation_propagates(self) -> None:
+        with pytest.raises(ValueError, match='max_position_multiple'):
+            MMConfig.from_legacy_dict({'max_position_multiple': -1.0})
 
     def test_validation_propagates(self) -> None:
         with pytest.raises(ValueError):

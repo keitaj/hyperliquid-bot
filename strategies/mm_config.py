@@ -302,6 +302,29 @@ class AutoExcludeConfig:
 
 
 @dataclass
+class PositionCapConfig:
+    """Per-coin position size cap on the entry side.
+
+    When the accumulated position value (|size| × mid_price) reaches
+    ``max_position_multiple`` × effective ``order_size_usd`` for the coin,
+    same-direction entries are suppressed (opposite-direction entries are
+    still allowed so the inventory can naturally unwind through normal
+    quoting).
+
+    A value of ``0.0`` (default) disables the cap entirely, preserving the
+    pre-cap behaviour.
+    """
+
+    max_position_multiple: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.max_position_multiple < 0:
+            raise ValueError(
+                f"max_position_multiple must be >= 0, got {self.max_position_multiple}"
+            )
+
+
+@dataclass
 class ForagerConfig:
     """Multi-axis coin health scoring for auto-exclude.
 
@@ -399,6 +422,7 @@ class MMConfig:
     dynamic_age: DynamicAgeConfig = field(default_factory=DynamicAgeConfig)
     auto_exclude: AutoExcludeConfig = field(default_factory=AutoExcludeConfig)
     forager: ForagerConfig = field(default_factory=ForagerConfig)
+    position_cap: PositionCapConfig = field(default_factory=PositionCapConfig)
 
     @classmethod
     def from_legacy_dict(cls, d: Dict) -> "MMConfig":
@@ -490,5 +514,8 @@ class MMConfig:
                 min_closes_for_quality=int(
                     d.get('forager_min_closes_for_quality', 5)
                 ),
+            ),
+            position_cap=PositionCapConfig(
+                max_position_multiple=float(d.get('max_position_multiple', 0.0)),
             ),
         )
