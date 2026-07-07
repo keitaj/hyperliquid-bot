@@ -92,7 +92,8 @@ from exceptions import TransientError, DataError, ConfigurationError  # noqa: E4
 from circuit_breaker import CircuitBreaker  # noqa: E402
 from ws import (  # noqa: E402
     MarketDataFeed, FillFeed, BboGuard, ImbalanceGuard,
-    CloseRefreshGuard, BboVelocityGuard, AdverseSelectionTracker, WsReconnector,
+    CloseRefreshGuard, BboVelocityGuard, AdverseSelectionTracker,
+    FillFeatureWriter, WsReconnector,
 )
 from strategies import (  # noqa: E402
     SimpleMAStrategy,
@@ -235,6 +236,11 @@ _STRATEGY_PARAMS = {
         'rejection_summary_interval',
         'drain_flag_file',
         'max_position_multiple',
+        'fill_feature_log_enabled',
+        'fill_feature_log_dir',
+        'fill_feature_flush_interval',
+        'fill_feature_max_daily_bytes',
+        'fill_feature_buffer_max',
     ],
 }
 
@@ -299,6 +305,7 @@ class HyperliquidBot:
         self.close_refresh_guard: Optional[CloseRefreshGuard] = None
         self.velocity_guard: Optional[BboVelocityGuard] = None
         self.adverse_tracker: Optional[AdverseSelectionTracker] = None
+        self.fill_feature_writer: Optional[FillFeatureWriter] = None
         self._ws_reconnector: Optional[WsReconnector] = None
 
         # ------------------------------------------------------------------ #
@@ -439,6 +446,14 @@ class HyperliquidBot:
                 # ``max_position_multiple`` × effective ``order_size_usd``.
                 # ``0.0`` (default) disables the cap.
                 'max_position_multiple': 0.0,
+                # Fill feature logging (observation only, ML dataset).
+                # Writes per-fill order book features + markout labels to
+                # a daily JSONL file. Default OFF = zero behaviour change.
+                'fill_feature_log_enabled': False,
+                'fill_feature_log_dir': 'tracking/fill_features',
+                'fill_feature_flush_interval': 60.0,
+                'fill_feature_max_daily_bytes': 50_000_000,
+                'fill_feature_buffer_max': 5000,
             }
         }
 
@@ -756,6 +771,24 @@ class HyperliquidBot:
             self.strategy._adverse_tracker = self.adverse_tracker
             logger.info("[ws] Dynamic offset linked to AdverseSelectionTracker")
 
+        # Phase 6b: Fill feature logging (observation only, ML dataset)
+        if self.strategy_config.get('fill_feature_log_enabled', False):
+            if self.adverse_tracker is None:
+                logger.warning(
+                    "[ws] fill_feature_log_enabled requires --enable-ws and "
+                    "--enable-adverse-selection-log; feature logging disabled"
+                )
+            else:
+                log_dir = self.strategy_config.get('fill_feature_log_dir', 'tracking/fill_features')
+                self.fill_feature_writer = FillFeatureWriter(
+                    log_dir=log_dir,
+                    flush_interval=self.strategy_config.get('fill_feature_flush_interval', 60.0),
+                    max_daily_bytes=self.strategy_config.get('fill_feature_max_daily_bytes', 50_000_000),
+                    buffer_max=self.strategy_config.get('fill_feature_buffer_max', 5000),
+                )
+                self.adverse_tracker.set_feature_writer(self.fill_feature_writer)
+                logger.info(f"[ws] FillFeatureWriter enabled (dir={log_dir})")
+
         # Forager: route fill events from FillFeed into the strategy's
         # CoinHealthTracker so the quality + cost dimensions are populated.
         coin_health_tracker = getattr(self.strategy, '_coin_health_tracker', None)
@@ -897,6 +930,8 @@ class HyperliquidBot:
                     self.adverse_tracker.maybe_log_summary()
                 if self.imbalance_guard:
                     self.imbalance_guard.maybe_log_summary()
+                if self.fill_feature_writer:
+                    self.fill_feature_writer.maybe_flush()
             except TransientError as e:
                 logger.warning(f"Strategy execution hit transient error: {e}")
                 self.circuit_breaker.record_failure("strategy")
@@ -961,6 +996,9 @@ class HyperliquidBot:
         if self.adverse_tracker:
             self.adverse_tracker.stop()
             self.adverse_tracker = None
+        if self.fill_feature_writer:
+            self.fill_feature_writer.flush_all()
+            self.fill_feature_writer = None
         if self.close_refresh_guard:
             self.close_refresh_guard.stop()
             self.close_refresh_guard = None
@@ -1329,6 +1367,21 @@ if __name__ == "__main__":
                         help='Enable post-fill adverse selection measurement logging')
     parser.add_argument('--adverse-selection-log-interval', type=float,
                         help='Adverse selection summary log interval in seconds (default: 300)')
+    parser.add_argument('--fill-feature-log', dest='fill_feature_log_enabled',
+                        action='store_true', default=None,
+                        help='Write per-fill order book features + markout labels to a daily '
+                             'JSONL file for ML dataset building (requires --enable-ws and '
+                             '--enable-adverse-selection-log)')
+    parser.add_argument('--fill-feature-log-dir', type=str,
+                        help='Directory for fill feature JSONL files '
+                             '(default: tracking/fill_features)')
+    parser.add_argument('--fill-feature-flush-interval', type=float,
+                        help='Fill feature flush interval in seconds (default: 60)')
+    parser.add_argument('--fill-feature-max-daily-bytes', type=int,
+                        help='Max bytes per daily fill feature file; excess records are '
+                             'dropped (default: 50000000)')
+    parser.add_argument('--fill-feature-buffer-max', type=int,
+                        help='Max in-memory buffered fill feature records (default: 5000)')
     parser.add_argument('--rejection-log-level', type=str,
                         choices=['error', 'warning', 'info', 'debug'],
                         help='Log level for routine post-only order rejections '

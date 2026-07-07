@@ -18,7 +18,10 @@ import threading
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+
+from fill_features import FEATURE_SCHEMA_VERSION, compute_fill_features
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +36,16 @@ MAX_FILL_BUFFER = 200
 MAX_HISTORY = 10
 
 
+def _to_float(value: Any) -> Optional[float]:
+    """Best-effort float conversion; ``None`` when missing or malformed."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 @dataclass
 class FillSnapshot:
     """Single fill with post-fill price samples."""
@@ -45,6 +58,7 @@ class FillSnapshot:
     fill_time: float       # monotonic time
     wall_time: float       # time.time() for logging
     samples: Dict[str, float] = field(default_factory=dict)  # label -> adverse_bps
+    record: Optional[Dict[str, Any]] = None  # feature record for FillFeatureWriter
 
 
 class AdverseSelectionTracker:
@@ -75,6 +89,13 @@ class AdverseSelectionTracker:
         # are reset at the end of the interval.
         self._history: Dict[str, deque] = defaultdict(lambda: deque(maxlen=MAX_HISTORY))
 
+        # Optional FillFeatureWriter for per-fill feature JSONL logging.
+        self._feature_writer: Any = None
+
+    def set_feature_writer(self, writer: Any) -> None:
+        """Register a FillFeatureWriter to receive per-fill feature records."""
+        self._feature_writer = writer
+
     # ------------------------------------------------------------------ #
     #  Fill recording
     # ------------------------------------------------------------------ #
@@ -85,6 +106,7 @@ class AdverseSelectionTracker:
         fill_px: float,
         side: str,
         fill_time_ms: Optional[int] = None,
+        raw_fill: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Called from FillFeed when a fill occurs.
 
@@ -98,6 +120,10 @@ class AdverseSelectionTracker:
             ``'A'`` (sell) or ``'B'`` (buy)
         fill_time_ms : int, optional
             Exchange fill timestamp in ms (unused, reserved for future).
+        raw_fill : dict, optional
+            Raw userFills WS fill object. When provided and a feature
+            writer is registered, a per-fill feature record is buffered
+            for JSONL logging. Omitting it preserves legacy behaviour.
         """
         if not self._running:
             return
@@ -132,6 +158,15 @@ class AdverseSelectionTracker:
                 timer.daemon = True
                 timer.start()
 
+            # Buffer a feature record for JSONL logging (observation only).
+            # Fail-silent: any error here must not affect markout tracking.
+            if self._feature_writer is not None and raw_fill is not None:
+                try:
+                    snapshot.record = self._build_feature_record(raw_fill, md, now_wall)
+                    self._feature_writer.add(snapshot)
+                except Exception as e:
+                    logger.debug("[adverse] Feature record build failed: %s", e)
+
             spread_to_mid_bps = (fill_px - mid_at_fill) / mid_at_fill * 10_000
             logger.debug(
                 "[adverse] Fill %s %s px=%.6f mid=%.6f spread=%.1fbps",
@@ -140,6 +175,40 @@ class AdverseSelectionTracker:
 
         except Exception as e:
             logger.error("[adverse] Error recording fill: %s", e)
+
+    def _build_feature_record(
+        self,
+        raw_fill: Dict[str, Any],
+        md: Any,
+        wall_time: float,
+    ) -> Dict[str, Any]:
+        """Compose a JSONL feature record from a raw fill and market data.
+
+        Join keys (``tid`` / ``oid`` / ``hash``) are passed through as-is
+        (``None`` when missing) so downstream consumers can match against
+        the fills database. Feature fields come from
+        :func:`fill_features.compute_fill_features` — the shared
+        definition used by future inference (train/serve skew guard).
+        """
+        utc_now = datetime.fromtimestamp(wall_time, tz=timezone.utc)
+        record: Dict[str, Any] = {
+            "v": FEATURE_SCHEMA_VERSION,
+            "tid": raw_fill.get("tid"),
+            "oid": raw_fill.get("oid"),
+            "hash": raw_fill.get("hash"),
+            "ts": raw_fill.get("time"),
+            "ts_local": utc_now.isoformat(),
+            "coin": raw_fill.get("coin"),
+            "side": raw_fill.get("side"),
+            "is_maker": not raw_fill.get("crossed", False),
+            "direction": raw_fill.get("dir"),
+            "px": _to_float(raw_fill.get("px")),
+            "sz": _to_float(raw_fill.get("sz")),
+            "closed_pnl": _to_float(raw_fill.get("closedPnl")),
+            "fee": _to_float(raw_fill.get("fee")),
+        }
+        record.update(compute_fill_features(md, utc_now))
+        return record
 
     # ------------------------------------------------------------------ #
     #  Delayed sampling
