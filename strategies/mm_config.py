@@ -13,7 +13,7 @@ are kept here as a single source of truth.
 
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Set
+from typing import Dict, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +127,38 @@ def parse_coin_overrides(value: object) -> Dict[str, float]:
     return result
 
 
+def parse_coin_tier_overrides(value: object) -> Dict[str, Tuple[float, float]]:
+    """Parse ``"COIN:BREAKEVEN/AGGRESSIVE,..."`` into ``{coin: (b_pct, a_pct)}``.
+
+    Example: ``"NVDA:0.30/0.55,xyz:XYZ100:0.40/0.65"``. Supports both bare
+    names and DEX-prefixed names, same as :func:`parse_coin_overrides`.
+    Each pair must satisfy ``0 <= breakeven < aggressive <= 1``; invalid
+    pairs are skipped after a warning log, valid pairs survive.
+    """
+    result: Dict[str, Tuple[float, float]] = {}
+    if not value or not str(value).strip():
+        return result
+    for pair in str(value).split(','):
+        pair = pair.strip()
+        if not pair:
+            continue
+        # rpartition keeps DEX-prefixed keys intact ("xyz:XYZ100:0.4/0.65")
+        coin_key, _, val = pair.rpartition(':')
+        try:
+            if not coin_key:
+                raise ValueError("missing coin name")
+            b_str, a_str = val.split('/')
+            b, a = float(b_str), float(a_str)
+            if not (0.0 <= b < a <= 1.0):
+                raise ValueError(
+                    f"require 0 <= breakeven < aggressive <= 1, got {b}/{a}"
+                )
+            result[coin_key] = (b, a)
+        except ValueError as e:
+            logger.warning(f"[mm] Invalid close tier override: '{pair}' ({e})")
+    return result
+
+
 # ---- Dataclass groups ---- #
 
 @dataclass
@@ -173,13 +205,15 @@ class VelocityGuardConfig:
 
 @dataclass
 class PerCoinOverrides:
-    """Per-coin overrides for offset, spread, order size, and unrealized-loss
-    early-close threshold."""
+    """Per-coin overrides for offset, spread, order size, unrealized-loss
+    early-close threshold, and close tier transition timing."""
 
     offset: Dict[str, float] = field(default_factory=dict)
     spread: Dict[str, float] = field(default_factory=dict)
     size: Dict[str, float] = field(default_factory=dict)
     unrealized_loss: Dict[str, float] = field(default_factory=dict)
+    # coin -> (breakeven_pct, aggressive_pct)
+    close_tier: Dict[str, Tuple[float, float]] = field(default_factory=dict)
 
 
 @dataclass
@@ -217,6 +251,63 @@ class CloseConfig:
     refresh_threshold_bps: float = 0.0
     unrealized_loss_close_bps: float = 0.0
     force_close_max_loss_bps: float = 0.0
+    # Absolute floor (seconds) for the breakeven tier transition. Guards
+    # against over-shortening when dynamic age, per-coin overrides and
+    # toxicity acceleration stack. 0 = disabled (legacy behaviour).
+    tier_min_seconds: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.tier_min_seconds < 0:
+            raise ValueError(
+                f"close_tier_min_seconds must be >= 0, got {self.tier_min_seconds}"
+            )
+
+
+@dataclass
+class CloseTierToxicityConfig:
+    """Toxicity-linked close tier acceleration.
+
+    When the recent-window average markout for a coin (from
+    ``AdverseSelectionTracker``) is at or below ``threshold_bps``, the
+    coin's tier percentages are multiplied by ``multiplier`` so the close
+    order concedes to breakeven/aggressive earlier — increasing the chance
+    of a maker exit before the taker force-close fires. Requires the
+    tracker (``--enable-adverse-selection-log`` + WebSocket); falls back
+    to base behaviour when unavailable.
+    """
+
+    enabled: bool = False
+    threshold_bps: float = -2.0
+    window: str = "30s"
+    multiplier: float = 0.6
+    min_fills: int = 5
+    floor_pct: float = 0.15
+
+    def __post_init__(self) -> None:
+        if self.threshold_bps > 0:
+            raise ValueError(
+                f"close_tier_toxicity_threshold_bps must be <= 0 "
+                f"(negative = adverse), got {self.threshold_bps}"
+            )
+        if not (0.1 <= self.multiplier <= 1.0):
+            raise ValueError(
+                f"close_tier_toxicity_multiplier must be in [0.1, 1.0], "
+                f"got {self.multiplier}"
+            )
+        if self.window not in ("5s", "30s", "60s"):
+            raise ValueError(
+                f"close_tier_toxicity_window must be one of '5s'/'30s'/'60s', "
+                f"got {self.window!r}"
+            )
+        if self.min_fills < 1:
+            raise ValueError(
+                f"close_tier_toxicity_min_fills must be >= 1, got {self.min_fills}"
+            )
+        if not (0.0 <= self.floor_pct <= 1.0):
+            raise ValueError(
+                f"close_tier_toxicity_floor_pct must be in [0, 1], "
+                f"got {self.floor_pct}"
+            )
 
 
 @dataclass
@@ -417,6 +508,9 @@ class MMConfig:
     per_coin: PerCoinOverrides = field(default_factory=PerCoinOverrides)
     imbalance: ImbalanceConfig = field(default_factory=ImbalanceConfig)
     close: CloseConfig = field(default_factory=CloseConfig)
+    close_tier_toxicity: CloseTierToxicityConfig = field(
+        default_factory=CloseTierToxicityConfig
+    )
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
     dynamic_offset: DynamicOffsetConfig = field(default_factory=DynamicOffsetConfig)
     dynamic_age: DynamicAgeConfig = field(default_factory=DynamicAgeConfig)
@@ -453,6 +547,7 @@ class MMConfig:
                 spread=parse_coin_overrides(d.get('coin_spread_overrides', '')),
                 size=parse_coin_overrides(d.get('coin_size_overrides', '')),
                 unrealized_loss=parse_coin_overrides(d.get('coin_unrealized_loss_overrides', '')),
+                close_tier=parse_coin_tier_overrides(d.get('coin_close_tier_overrides', '')),
             ),
             imbalance=ImbalanceConfig(
                 placement_threshold=float(d.get('imbalance_threshold', 0.0)),
@@ -466,6 +561,15 @@ class MMConfig:
                 refresh_threshold_bps=float(d.get('close_refresh_threshold_bps', 0.0)),
                 unrealized_loss_close_bps=float(d.get('unrealized_loss_close_bps', 0.0)),
                 force_close_max_loss_bps=float(d.get('force_close_max_loss_bps', 0.0)),
+                tier_min_seconds=float(d.get('close_tier_min_seconds', 0.0)),
+            ),
+            close_tier_toxicity=CloseTierToxicityConfig(
+                enabled=bool(d.get('close_tier_toxicity_enabled', False)),
+                threshold_bps=float(d.get('close_tier_toxicity_threshold_bps', -2.0)),
+                window=str(d.get('close_tier_toxicity_window', '30s')),
+                multiplier=float(d.get('close_tier_toxicity_multiplier', 0.6)),
+                min_fills=int(d.get('close_tier_toxicity_min_fills', 5)),
+                floor_pct=float(d.get('close_tier_toxicity_floor_pct', 0.15)),
             ),
             schedule=ScheduleConfig(
                 spread_schedule=parse_spread_schedule(d.get('spread_schedule', '')),

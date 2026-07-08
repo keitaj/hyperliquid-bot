@@ -179,6 +179,14 @@ _STRATEGY_PARAMS = {
         'close_spread_bps',
         'close_breakeven_pct',
         'close_aggressive_pct',
+        'close_tier_min_seconds',
+        'coin_close_tier_overrides',
+        'close_tier_toxicity_enabled',
+        'close_tier_toxicity_threshold_bps',
+        'close_tier_toxicity_window',
+        'close_tier_toxicity_multiplier',
+        'close_tier_toxicity_min_fills',
+        'close_tier_toxicity_floor_pct',
         'unrealized_loss_close_bps',
         'bbo_mode',
         'bbo_offset_bps',
@@ -771,6 +779,19 @@ class HyperliquidBot:
             self.strategy._adverse_tracker = self.adverse_tracker
             logger.info("[ws] Dynamic offset linked to AdverseSelectionTracker")
 
+        # Inject adverse tracker into the position closer for toxicity-linked
+        # close tier acceleration (fail-safe: base behaviour when unavailable)
+        if self.strategy_config.get('close_tier_toxicity_enabled', False):
+            closer = getattr(self.strategy, '_closer', None)
+            if self.adverse_tracker and closer is not None:
+                closer.set_adverse_tracker(self.adverse_tracker)
+                logger.info("[ws] Close tier toxicity linked to AdverseSelectionTracker")
+            else:
+                logger.warning(
+                    "[ws] close_tier_toxicity enabled but AdverseSelectionTracker "
+                    "unavailable (requires --enable-adverse-selection-log + WS) — inactive"
+                )
+
         # Phase 6b: Fill feature logging (observation only, ML dataset)
         if self.strategy_config.get('fill_feature_log_enabled', False):
             if self.adverse_tracker is None:
@@ -1349,6 +1370,33 @@ if __name__ == "__main__":
     parser.add_argument('--close-aggressive-pct', type=float,
                         help='Fraction of max_position_age at which close tier transitions to aggressive '
                              '(default: 0.75, i.e. 75%% of max age)')
+    parser.add_argument('--close-tier-min-seconds', type=float,
+                        help='Absolute floor in seconds for the breakeven tier transition. '
+                             'Guards against over-shortening when dynamic age, per-coin overrides '
+                             'and toxicity acceleration stack (default: 0 = disabled)')
+    parser.add_argument('--coin-close-tier-overrides', type=str,
+                        help='Per-coin close tier overrides "COIN:BREAKEVEN/AGGRESSIVE,..." '
+                             '(e.g. "NVDA:0.30/0.55,xyz:XYZ100:0.40/0.65"). Requires '
+                             '0 <= breakeven < aggressive <= 1. Falls back to '
+                             '--close-breakeven-pct / --close-aggressive-pct.')
+    parser.add_argument('--close-tier-toxicity', dest='close_tier_toxicity_enabled',
+                        action='store_true', default=None,
+                        help='Accelerate close tier transitions when recent markout indicates '
+                             'toxic flow. Requires --enable-adverse-selection-log and WebSocket; '
+                             'falls back to base behaviour when unavailable. (market_making)')
+    parser.add_argument('--close-tier-toxicity-threshold-bps', type=float,
+                        help='Window-average markout at or below which acceleration fires '
+                             '(must be <= 0; negative = adverse; default: -2.0)')
+    parser.add_argument('--close-tier-toxicity-window', type=str,
+                        choices=['5s', '30s', '60s'],
+                        help='Adverse-selection sample window to read (default: 30s)')
+    parser.add_argument('--close-tier-toxicity-multiplier', type=float,
+                        help='Multiplier applied to tier percentages while firing '
+                             '(0.1-1.0, default: 0.6)')
+    parser.add_argument('--close-tier-toxicity-min-fills', type=int,
+                        help='Minimum fills in the window required to fire (default: 5)')
+    parser.add_argument('--close-tier-toxicity-floor-pct', type=float,
+                        help='Lower bound on breakeven_pct after the multiplier (default: 0.15)')
     parser.add_argument('--bbo-mode', action='store_true',
                         help='Place orders at BBO instead of mid±spread (market_making)')
     parser.add_argument('--bbo-offset-bps', type=float,

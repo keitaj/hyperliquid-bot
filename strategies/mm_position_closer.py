@@ -12,11 +12,12 @@ fill probability before the expensive taker fallback kicks in:
 import logging
 import time
 from collections import defaultdict
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from coin_utils import parse_coin
 from order_manager import BBO_OFFSET, OrderSide, round_price
 from rate_limiter import API_ERRORS
+from strategies.mm_config import CloseTierToxicityConfig
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,9 @@ class PositionCloser:
         close_aggressive_pct: float = 0.75,
         unrealized_loss_close_bps: float = 0.0,
         coin_unrealized_loss_overrides: Optional[Dict[str, float]] = None,
+        coin_close_tier_overrides: Optional[Dict[str, Tuple[float, float]]] = None,
+        close_tier_toxicity: Optional[CloseTierToxicityConfig] = None,
+        close_tier_min_seconds: float = 0.0,
     ) -> None:
         self.order_manager = order_manager
         self.market_data = market_data
@@ -82,6 +86,19 @@ class PositionCloser:
         # to bare coin name (e.g. "NVDA") if the DEX-prefixed key
         # ("xyz:NVDA") is not found.
         self._coin_unrealized_loss_overrides: Dict[str, float] = coin_unrealized_loss_overrides or {}
+        # Per-coin close tier overrides: coin -> (breakeven_pct, aggressive_pct).
+        # Same full-name -> bare-name lookup as the other per-coin overrides.
+        self._coin_close_tier_overrides: Dict[str, Tuple[float, float]] = \
+            coin_close_tier_overrides or {}
+        # Toxicity-linked tier acceleration (None or disabled = base behaviour).
+        # The tracker is injected by bot.py via set_adverse_tracker() after
+        # WS setup — same pattern as the strategy's dynamic offset.
+        self._toxicity_config = close_tier_toxicity
+        self._adverse_tracker: Optional[Any] = None
+        # coin -> last acceleration state, for state-transition-only logging
+        self._tox_active: Dict[str, bool] = {}
+        # Absolute floor (seconds) for the breakeven transition (0 = disabled)
+        self.close_tier_min_seconds = close_tier_min_seconds
 
         # coin -> (entry_time, close_oid or None, close_tier)
         self._open_positions: Dict[str, Tuple[float, Optional[int], int]] = {}
@@ -311,7 +328,7 @@ class PositionCloser:
             return
 
         # Determine desired tier for this age
-        desired_tier = self._get_tier(age, max_age=effective_max_age)
+        desired_tier = self._get_tier(coin, age, max_age=effective_max_age)
 
         # Check if close order is still alive
         if close_oid is not None:
@@ -521,11 +538,106 @@ class PositionCloser:
             return self._coin_unrealized_loss_overrides[bare]
         return self.unrealized_loss_close_bps
 
-    def _get_tier(self, age: float, max_age: Optional[float] = None) -> int:
+    def set_adverse_tracker(self, tracker: Any) -> None:
+        """Register the AdverseSelectionTracker for toxicity-linked tiers.
+
+        Called by bot.py after WS setup when ``close_tier_toxicity_enabled``
+        is set — same injection pattern as the strategy's dynamic offset.
+        """
+        self._adverse_tracker = tracker
+
+    def _get_tier_pcts_for_coin(self, coin: str) -> Tuple[float, float]:
+        """Return ``(breakeven_pct, aggressive_pct)`` for a coin.
+
+        Falls back to the global values when no override is set. Same
+        DEX-prefix-or-bare lookup as ``_get_unrealized_loss_bps_for_coin``.
+        """
+        if coin in self._coin_close_tier_overrides:
+            return self._coin_close_tier_overrides[coin]
+        _, bare = parse_coin(coin)
+        if bare in self._coin_close_tier_overrides:
+            return self._coin_close_tier_overrides[bare]
+        return (self.close_breakeven_pct, self.close_aggressive_pct)
+
+    def _apply_toxicity_accel(
+        self, coin: str, b_pct: float, a_pct: float,
+    ) -> Tuple[float, float]:
+        """Shrink tier percentages when recent markout indicates toxic flow.
+
+        Reads the tracker's current window first; when the window was just
+        reset and holds too few fills, falls back to the last completed
+        window (``get_recent_windows``), rejected when older than twice the
+        tracker's log interval. Any missing data — tracker absent, too few
+        fills, no sample for the configured label, stale snapshot — falls
+        through to base behaviour (fail-safe).
+        """
+        cfg = self._toxicity_config
+        if cfg is None or not cfg.enabled or self._adverse_tracker is None:
+            return b_pct, a_pct
+
+        key = f"avg_{cfg.window}"
+        avg = None
+        coin_stats = self._adverse_tracker.stats.get(coin)
+        if coin_stats and coin_stats.get("fills", 0) >= cfg.min_fills:
+            avg = coin_stats.get(key)
+        else:
+            # Current window just reset — look at the last completed window.
+            # Bounded by wall-clock age so an idle coin's hours-old snapshot
+            # cannot keep driving acceleration (history only refreshes for
+            # coins that had fills in a window).
+            recent = self._adverse_tracker.get_recent_windows(coin, n=1)
+            if recent and (recent[-1].get("fills") or 0) >= cfg.min_fills:
+                max_snapshot_age = 2.0 * getattr(self._adverse_tracker, 'log_interval', 300.0)
+                ts = recent[-1].get("ts")
+                if ts is not None and (time.time() - ts) <= max_snapshot_age:
+                    avg = recent[-1].get(key)
+
+        # Negative markout = adverse; fire at or below the threshold
+        if avg is None or avg > cfg.threshold_bps:
+            self._log_tox_state(coin, active=False)
+            return b_pct, a_pct
+
+        # floor_pct guards against over-shortening, but must never push the
+        # effective pcts ABOVE the base (acceleration may not loosen tiers —
+        # e.g. a pure-scratch override b_pct=0.0 stays at 0.0 while toxic).
+        eff_b = max(b_pct * cfg.multiplier, min(cfg.floor_pct, b_pct))
+        eff_a = max(a_pct * cfg.multiplier, eff_b)
+        self._log_tox_state(coin, active=True, avg=avg,
+                            pcts=(b_pct, a_pct, eff_b, eff_a))
+        return eff_b, eff_a
+
+    def _log_tox_state(
+        self, coin: str, active: bool,
+        avg: Optional[float] = None,
+        pcts: Optional[Tuple[float, float, float, float]] = None,
+    ) -> None:
+        """Log toxicity acceleration state transitions (ON/OFF) once each."""
+        prev = self._tox_active.get(coin, False)
+        if active == prev:
+            return
+        self._tox_active[coin] = active
+        if active and pcts is not None:
+            b, a, eff_b, eff_a = pcts
+            window = self._toxicity_config.window if self._toxicity_config else "?"
+            logger.info(
+                f"[close-tier] {coin} toxicity accel ON avg_{window}={avg:+.1f}bps "
+                f"pcts {b:.2f}/{a:.2f} -> {eff_b:.2f}/{eff_a:.2f}"
+            )
+        else:
+            logger.info(f"[close-tier] {coin} toxicity accel OFF")
+
+    def _get_tier(self, coin: str, age: float, max_age: Optional[float] = None) -> int:
         """Return the close price tier for the given position age."""
         effective_max_age = max_age if max_age is not None else self.max_position_age_seconds
-        threshold_breakeven = effective_max_age * self.close_breakeven_pct
-        threshold_aggressive = effective_max_age * self.close_aggressive_pct
+        b_pct, a_pct = self._get_tier_pcts_for_coin(coin)
+        b_pct, a_pct = self._apply_toxicity_accel(coin, b_pct, a_pct)
+
+        threshold_breakeven = effective_max_age * b_pct
+        threshold_aggressive = effective_max_age * a_pct
+        if self.close_tier_min_seconds > 0:
+            # Absolute floor against dynamic_age x override x toxicity stacking
+            threshold_breakeven = max(threshold_breakeven, self.close_tier_min_seconds)
+            threshold_aggressive = max(threshold_aggressive, threshold_breakeven)
 
         if age >= threshold_aggressive:
             return _TIER_AGGRESSIVE
