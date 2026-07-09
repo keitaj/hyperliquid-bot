@@ -114,6 +114,7 @@ class MarketMakingStrategy(BaseStrategy):
         self._dynamic_offset_floor: float = self.cfg.dynamic_offset.floor
         self._dynamic_offset_min_fills: int = self.cfg.dynamic_offset.min_fills
         self._adverse_tracker = None  # set by bot.py after WS init
+        self._oracle_guard = None  # set by bot.py when oracle_guard_enabled
         if self._dynamic_offset_enabled:
             logger.info(
                 f"[mm] Dynamic offset enabled: sensitivity={self._dynamic_offset_sensitivity}, "
@@ -884,6 +885,19 @@ class MarketMakingStrategy(BaseStrategy):
                 elif imb > self.imbalance_threshold:
                     skip_sell = True
                     logger.debug(f"[mm] {coin} skipping SELL (book imbalance {imb:.2f})")
+
+        # Oracle divergence guard: while a side is blocked (stale-side
+        # cancel or momentum fire), don't requote into the same stale
+        # price band on the next cycle. OR-composed with the imbalance
+        # skip above. ``getattr`` so tests that bypass __init__ inherit
+        # the disabled default.
+        oracle_guard = getattr(self, '_oracle_guard', None)
+        if oracle_guard is not None:
+            blocked = oracle_guard.get_blocked_sides(coin)
+            if blocked:
+                skip_buy = skip_buy or ("B" in blocked)
+                skip_sell = skip_sell or ("A" in blocked)
+                logger.debug(f"[mm] {coin} oracle guard blocking {sorted(blocked)}")
 
         # Per-coin position cap: suppress same-direction entries once
         # accumulated |position| × mid_price reaches the cap. Opposite-side

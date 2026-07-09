@@ -36,6 +36,7 @@ def bot():
         b.adverse_tracker = None
         b.imbalance_guard = None
         b.fill_feature_writer = None
+        b.oracle_guard = None
 
         b.risk_manager.check_risk_limits.return_value = {
             'all_checks_passed': True,

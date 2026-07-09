@@ -202,3 +202,96 @@ class TestMarketDataFeed:
         stale = feed.stale_coins(max_age=1.0)
         assert "ETH" in stale
         assert "BTC" not in stale
+
+
+class TestCtxSubscription:
+    """activeAssetCtx subscription lifecycle (oracle px stream)."""
+
+    def _make_feed(self, coins=None):
+        info = MagicMock()
+        info.ws_manager = MagicMock()
+        counter = iter(range(1, 1000))
+        info.subscribe.side_effect = lambda sub, cb: next(counter)
+        mdm = MagicMock()
+        feed = MarketDataFeed(info, mdm, coins or ["BTC", "ETH"])
+        return feed, info, mdm
+
+    @staticmethod
+    def _ctx_calls(info):
+        return [c for c in info.subscribe.call_args_list
+                if c.args[0].get("type") == "activeAssetCtx"]
+
+    def test_no_ctx_listener_no_ctx_subscription(self):
+        """Backward compat: feeds without ctx consumers keep the l2-only set."""
+        feed, info, _ = self._make_feed()
+        feed.start()
+        assert self._ctx_calls(info) == []
+        assert feed.stats["ctx_subscriptions"] == 0
+
+    def test_listener_before_start_subscribes_on_start(self):
+        feed, info, _ = self._make_feed(["BTC", "ETH", "SOL"])
+        feed.add_ctx_listener(lambda coin, ctx: None)
+        feed.start()
+        assert len(self._ctx_calls(info)) == 3
+        assert feed.stats["ctx_subscriptions"] == 3
+
+    def test_listener_after_start_subscribes_immediately(self):
+        feed, info, _ = self._make_feed(["BTC", "ETH"])
+        feed.start()
+        assert self._ctx_calls(info) == []
+        feed.add_ctx_listener(lambda coin, ctx: None)
+        assert len(self._ctx_calls(info)) == 2
+
+    def test_second_listener_does_not_resubscribe(self):
+        feed, info, _ = self._make_feed(["BTC"])
+        feed.add_ctx_listener(lambda coin, ctx: None)
+        feed.start()
+        feed.add_ctx_listener(lambda coin, ctx: None)
+        assert len(self._ctx_calls(info)) == 1
+
+    def test_ctx_update_dispatches_to_listeners(self):
+        feed, info, _ = self._make_feed(["BTC"])
+        received = []
+        feed.add_ctx_listener(lambda coin, ctx: received.append((coin, ctx)))
+        feed.start()
+        feed._on_ctx_update(
+            {"data": {"coin": "BTC", "ctx": {"oraclePx": "100.5"}}}
+        )
+        assert received == [("BTC", {"oraclePx": "100.5"})]
+        assert feed.stats["ctx_updates"] == 1
+
+    def test_ctx_listener_exception_isolated(self):
+        feed, info, _ = self._make_feed(["BTC"])
+        received = []
+
+        def bad_listener(coin, ctx):
+            raise RuntimeError("boom")
+
+        feed.add_ctx_listener(bad_listener)
+        feed.add_ctx_listener(lambda coin, ctx: received.append(coin))
+        feed.start()
+        feed._on_ctx_update({"data": {"coin": "BTC", "ctx": {"oraclePx": "1"}}})
+        assert received == ["BTC"]  # second listener still ran
+
+    def test_ctx_update_ignores_malformed(self):
+        feed, info, _ = self._make_feed(["BTC"])
+        feed.add_ctx_listener(lambda coin, ctx: None)
+        feed.start()
+        feed._on_ctx_update({})
+        feed._on_ctx_update({"data": {"coin": "", "ctx": {}}})
+        feed._on_ctx_update({"data": {"coin": "BTC", "ctx": "not-a-dict"}})
+        assert feed.stats["ctx_updates"] == 0
+        assert feed.stats["errors"] == 0
+
+    def test_stop_unsubscribes_both_channels(self):
+        feed, info, _ = self._make_feed(["BTC", "ETH"])
+        feed.add_ctx_listener(lambda coin, ctx: None)
+        feed.start()
+        feed.stop()
+        ctx_unsubs = [c for c in info.unsubscribe.call_args_list
+                      if c.args[0].get("type") == "activeAssetCtx"]
+        l2_unsubs = [c for c in info.unsubscribe.call_args_list
+                     if c.args[0].get("type") == "l2Book"]
+        assert len(ctx_unsubs) == 2
+        assert len(l2_unsubs) == 2
+        assert feed.stats["ctx_subscriptions"] == 0

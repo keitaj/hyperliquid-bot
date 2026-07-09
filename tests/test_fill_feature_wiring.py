@@ -35,6 +35,7 @@ def _make_bot(strategy_config=None):
         b._last_risk_result = {'all_checks_passed': True, 'action': 'none', 'reason': ''}
         b.adverse_tracker = None
         b.imbalance_guard = None
+        b.oracle_guard = None
         b.fill_feature_writer = None
         b.fill_feed = None
         b.ws_feed = None

@@ -93,7 +93,7 @@ from circuit_breaker import CircuitBreaker  # noqa: E402
 from ws import (  # noqa: E402
     MarketDataFeed, FillFeed, BboGuard, ImbalanceGuard,
     CloseRefreshGuard, BboVelocityGuard, AdverseSelectionTracker,
-    FillFeatureWriter, WsReconnector,
+    FillFeatureWriter, OracleDivergenceGuard, WsReconnector,
 )
 from strategies import (  # noqa: E402
     SimpleMAStrategy,
@@ -216,6 +216,14 @@ _STRATEGY_PARAMS = {
         'velocity_guard_enabled',
         'velocity_consecutive',
         'velocity_min_move_bps',
+        'oracle_guard_enabled',
+        'oracle_divergence_threshold_bps',
+        'oracle_momentum_cap_pin_bps',
+        'oracle_momentum_min_step_bps',
+        'oracle_momentum_consecutive',
+        'oracle_stale_ttl_seconds',
+        'oracle_guard_block_seconds',
+        'oracle_guard_min_cancel_interval',
         'dynamic_offset_enabled',
         'dynamic_offset_sensitivity',
         'dynamic_offset_tighten_rate',
@@ -312,6 +320,7 @@ class HyperliquidBot:
         self.imbalance_guard: Optional[ImbalanceGuard] = None
         self.close_refresh_guard: Optional[CloseRefreshGuard] = None
         self.velocity_guard: Optional[BboVelocityGuard] = None
+        self.oracle_guard: Optional[OracleDivergenceGuard] = None
         self.adverse_tracker: Optional[AdverseSelectionTracker] = None
         self.fill_feature_writer: Optional[FillFeatureWriter] = None
         self._ws_reconnector: Optional[WsReconnector] = None
@@ -745,6 +754,38 @@ class HyperliquidBot:
                         self.velocity_guard.min_total_move_bps,
                     )
 
+                # Phase 4c: Oracle divergence / momentum → stale-side cancel
+                if strategy_cfg is not None:
+                    og = strategy_cfg.oracle_guard
+                else:
+                    from strategies.mm_config import OracleGuardConfig
+                    og = OracleGuardConfig(
+                        enabled=bool(self.strategy_config.get('oracle_guard_enabled', False)),
+                    )
+                if og.enabled:
+                    self.oracle_guard = OracleDivergenceGuard(
+                        tracker,
+                        divergence_threshold_bps=og.divergence_threshold_bps,
+                        momentum_cap_pin_bps=og.momentum_cap_pin_bps,
+                        momentum_min_step_bps=og.momentum_min_step_bps,
+                        momentum_consecutive=og.momentum_consecutive,
+                        stale_ttl_seconds=og.stale_ttl_seconds,
+                        block_seconds=og.block_seconds,
+                        min_cancel_interval=og.min_cancel_interval,
+                    )
+                    self.ws_feed.add_listener(self.oracle_guard.on_l2_update)
+                    # Registering the ctx listener activates the
+                    # activeAssetCtx subscriptions on the feed.
+                    self.ws_feed.add_ctx_listener(self.oracle_guard.on_asset_ctx_update)
+                    self.strategy._oracle_guard = self.oracle_guard
+                    logger.info(
+                        "[ws] OracleDivergenceGuard enabled (div=%.1fbps, cap_pin=%.0fbps, "
+                        "mom=%dx%.1fbps, stale_ttl=%.0fs, block=%.0fs)",
+                        og.divergence_threshold_bps, og.momentum_cap_pin_bps,
+                        og.momentum_consecutive, og.momentum_min_step_bps,
+                        og.stale_ttl_seconds, og.block_seconds,
+                    )
+
                 # Phase 5: Close order refresh on BBO change
                 closer = getattr(self.strategy, '_closer', None)
                 if strategy_cfg is not None:
@@ -960,6 +1001,8 @@ class HyperliquidBot:
                     self.adverse_tracker.maybe_log_summary()
                 if self.imbalance_guard:
                     self.imbalance_guard.maybe_log_summary()
+                if self.oracle_guard:
+                    self.oracle_guard.maybe_log_summary()
                 if self.fill_feature_writer:
                     self.fill_feature_writer.maybe_flush()
             except TransientError as e:
@@ -1035,6 +1078,9 @@ class HyperliquidBot:
         if self.velocity_guard:
             self.velocity_guard.stop()
             self.velocity_guard = None
+        if self.oracle_guard:
+            self.oracle_guard.stop()
+            self.oracle_guard = None
         if self.bbo_guard:
             self.bbo_guard.stop()
             self.bbo_guard = None
@@ -1480,6 +1526,28 @@ if __name__ == "__main__":
                         help='Number of consecutive same-direction BBO moves to trigger cancel (default: 3)')
     parser.add_argument('--velocity-min-move-bps', type=float,
                         help='Minimum cumulative BBO move in bps to trigger cancel (default: 1.0)')
+    parser.add_argument('--oracle-guard', dest='oracle_guard_enabled',
+                        action='store_true', default=None,
+                        help='Enable oracle divergence/momentum guard — cancel stale-side quotes '
+                             'when book mid diverges from the HIP-3 oraclePx stream or oracle '
+                             'updates show sustained momentum (requires --enable-ws)')
+    parser.add_argument('--oracle-divergence-threshold-bps', type=float,
+                        help='|mid - oraclePx| divergence in bps that cancels the stale side '
+                             '(default: 5.0; 0 disables the divergence gate)')
+    parser.add_argument('--oracle-momentum-cap-pin-bps', type=float,
+                        help='Single oracle step in bps treated as 1%%-cap pinning — fires the '
+                             'momentum gate immediately (default: 80.0; 0 disables pin detection)')
+    parser.add_argument('--oracle-momentum-min-step-bps', type=float,
+                        help='Minimum oracle step in bps counted toward consecutive momentum '
+                             '(default: 5.0)')
+    parser.add_argument('--oracle-momentum-consecutive', type=int,
+                        help='Consecutive same-direction oracle steps that fire the momentum gate '
+                             '(default: 3; 0 disables consecutive detection)')
+    parser.add_argument('--oracle-stale-ttl-seconds', type=float,
+                        help='Disarm the guard for a coin when its oraclePx value has not changed '
+                             'for this many seconds — automatic market-close detection (default: 30)')
+    parser.add_argument('--oracle-guard-block-seconds', type=float,
+                        help='Placement block duration after a guard fire (default: 10)')
     parser.add_argument('--dynamic-offset', dest='dynamic_offset_enabled',
                         action='store_true', default=False,
                         help='Enable dynamic offset auto-adjustment based on adverse selection (requires --enable-ws)')

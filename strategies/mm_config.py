@@ -204,6 +204,54 @@ class VelocityGuardConfig:
 
 
 @dataclass
+class OracleGuardConfig:
+    """Oracle divergence / momentum guard (HIP-3 ``oraclePx`` stream).
+
+    Read by ``bot.py`` via ``strategy.cfg.oracle_guard`` when wiring the
+    WS ``OracleDivergenceGuard``.  The strategy only consumes the guard's
+    ``get_blocked_sides`` hook via injection.  ``enabled`` defaults to
+    ``False`` — no subscription or guard object is created, preserving
+    the pre-guard behaviour exactly.
+    """
+
+    enabled: bool = False
+    divergence_threshold_bps: float = 5.0
+    momentum_cap_pin_bps: float = 80.0
+    momentum_min_step_bps: float = 5.0
+    momentum_consecutive: int = 3
+    stale_ttl_seconds: float = 30.0
+    block_seconds: float = 10.0
+    # env/JSON-only knob (no CLI flag) — formula constant, rarely tuned
+    min_cancel_interval: float = 2.0
+
+    def __post_init__(self) -> None:
+        for name in ("divergence_threshold_bps", "momentum_cap_pin_bps",
+                     "momentum_min_step_bps"):
+            if getattr(self, name) < 0:
+                raise ValueError(
+                    f"oracle_{name} must be >= 0, got {getattr(self, name)}"
+                )
+        if self.momentum_consecutive < 0:
+            raise ValueError(
+                f"oracle_momentum_consecutive must be >= 0, "
+                f"got {self.momentum_consecutive}"
+            )
+        if self.stale_ttl_seconds <= 0:
+            raise ValueError(
+                f"oracle_stale_ttl_seconds must be > 0, got {self.stale_ttl_seconds}"
+            )
+        if self.block_seconds < 0:
+            raise ValueError(
+                f"oracle_guard_block_seconds must be >= 0, got {self.block_seconds}"
+            )
+        if self.min_cancel_interval < 0:
+            raise ValueError(
+                f"oracle_guard_min_cancel_interval must be >= 0, "
+                f"got {self.min_cancel_interval}"
+            )
+
+
+@dataclass
 class PerCoinOverrides:
     """Per-coin overrides for offset, spread, order size, unrealized-loss
     early-close threshold, and close tier transition timing."""
@@ -505,6 +553,7 @@ class MMConfig:
     loss_streak: LossStreakConfig = field(default_factory=LossStreakConfig)
     microprice: MicropriceConfig = field(default_factory=MicropriceConfig)
     velocity: VelocityGuardConfig = field(default_factory=VelocityGuardConfig)
+    oracle_guard: OracleGuardConfig = field(default_factory=OracleGuardConfig)
     per_coin: PerCoinOverrides = field(default_factory=PerCoinOverrides)
     imbalance: ImbalanceConfig = field(default_factory=ImbalanceConfig)
     close: CloseConfig = field(default_factory=CloseConfig)
@@ -541,6 +590,16 @@ class MMConfig:
                 enabled=bool(d.get('velocity_guard_enabled', False)),
                 consecutive=int(d.get('velocity_consecutive', 3)),
                 min_move_bps=float(d.get('velocity_min_move_bps', 1.0)),
+            ),
+            oracle_guard=OracleGuardConfig(
+                enabled=bool(d.get('oracle_guard_enabled', False)),
+                divergence_threshold_bps=float(d.get('oracle_divergence_threshold_bps', 5.0)),
+                momentum_cap_pin_bps=float(d.get('oracle_momentum_cap_pin_bps', 80.0)),
+                momentum_min_step_bps=float(d.get('oracle_momentum_min_step_bps', 5.0)),
+                momentum_consecutive=int(d.get('oracle_momentum_consecutive', 3)),
+                stale_ttl_seconds=float(d.get('oracle_stale_ttl_seconds', 30.0)),
+                block_seconds=float(d.get('oracle_guard_block_seconds', 10.0)),
+                min_cancel_interval=float(d.get('oracle_guard_min_cancel_interval', 2.0)),
             ),
             per_coin=PerCoinOverrides(
                 offset=parse_coin_overrides(d.get('coin_offset_overrides', '')),

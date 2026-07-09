@@ -286,3 +286,53 @@ class TestWsReconnectorRecovery:
         reconnector.maybe_reconnect(bot)
         assert reconnector._reconnect_count == 1
         assert reconnector._consecutive_failures == 0
+
+
+class TestOracleGuardReconnect:
+    """OracleDivergenceGuard is torn down and rebuilt across reconnects."""
+
+    @patch("ws.ws_reconnector.WsReconnector._rebuild")
+    def test_teardown_stops_oracle_guard(self, mock_rebuild):
+        bot = _make_bot(all_stale=True, ws_thread_alive=False)
+        oracle_guard = bot.oracle_guard
+        reconnector = WsReconnector(stale_threshold=60.0)
+        reconnector._check_interval = 0
+        reconnector._last_check = 0
+
+        reconnector.maybe_reconnect(bot)
+
+        oracle_guard.stop.assert_called_once()
+        assert bot.oracle_guard is None
+
+    @patch("hyperliquid.info.Info")
+    def test_rebuild_recreates_oracle_guard(self, mock_info_cls):
+        from ws.oracle_divergence_guard import OracleDivergenceGuard
+
+        bot = _make_bot()
+        bot.strategy_config = dict(bot.strategy_config)
+        bot.strategy_config["oracle_guard_enabled"] = True
+        bot.strategy_config["oracle_divergence_threshold_bps"] = 7.0
+        mock_info_cls.return_value.ws_manager = MagicMock()
+
+        reconnector = WsReconnector(stale_threshold=60.0)
+        reconnector._rebuild(bot)
+
+        assert isinstance(bot.oracle_guard, OracleDivergenceGuard)
+        assert bot.oracle_guard.divergence_threshold_bps == 7.0
+        # ctx listener registered → activeAssetCtx subscriptions active
+        assert bot.ws_feed._ctx_listeners
+        assert bot.ws_feed.stats["ctx_subscriptions"] == len(bot.ws_feed.coins)
+        # strategy hook re-injected
+        assert bot.strategy._oracle_guard is bot.oracle_guard
+
+    @patch("hyperliquid.info.Info")
+    def test_rebuild_skips_oracle_guard_when_disabled(self, mock_info_cls):
+        bot = _make_bot()
+        bot.oracle_guard = None
+        mock_info_cls.return_value.ws_manager = MagicMock()
+
+        reconnector = WsReconnector(stale_threshold=60.0)
+        reconnector._rebuild(bot)
+
+        assert bot.oracle_guard is None
+        assert bot.ws_feed._ctx_listeners == []

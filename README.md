@@ -367,6 +367,8 @@ The `market_making` strategy uses **progressive close pricing**: as a position a
 - `--imbalance-guard-threshold`: Cancel one side when L2 book is skewed (0–1, default: 0)
 - `--close-refresh-threshold-bps`: Refresh close orders on BBO change to improve maker fill rate (default: 0 = disabled)
 
+**Oracle divergence guard** (`--oracle-guard`): Subscribes to the `activeAssetCtx` stream and uses the HIP-3 `oraclePx` feed (deployer-pushed every ~3s, each update capped at 1% of the previous value) as a defensive signal against stale-quote sniping. Two gates: a **divergence gate** cancels the stale side's entry quotes when `|book mid − oraclePx|` exceeds `--oracle-divergence-threshold-bps` (oracle above mid → resting SELLs are stale-cheap → cancel sells, and vice versa), and a **momentum gate** cancels both sides and blocks placement for `--oracle-guard-block-seconds` when a single oracle step pins near the 1% cap (`--oracle-momentum-cap-pin-bps`) or `--oracle-momentum-consecutive` same-direction steps of at least `--oracle-momentum-min-step-bps` occur. A staleness TTL (`--oracle-stale-ttl-seconds`) doubles as automatic market-close detection: when the oracle value stops changing (e.g. equity perps outside US hours), the guard fully disarms so a floating book is not mistaken for divergence, and re-baselines on recovery so the post-open gap never counts as a step. Cancels affect entry orders only (close orders are untouched), and any missing data — no ctx received, WS down, unparseable oracle price — leaves the guard inert. Default disabled.
+
 **Adverse selection logging** (`--enable-adverse-selection-log`): Measures mid-price movement 5s/30s/60s after each fill, logging per-coin summaries every 300s. Observation only — no trading impact.
 
 **Order rejection log aggregation** (`--rejection-log-level`, `--rejection-summary-interval`): Routine post-only rejections (`Post only order would have immediately matched`) are an expected retry signal under maker-only quoting, but they were historically logged at ERROR — drowning out genuine errors as MM size grows. The strategy now classifies each rejection by API error text and adds a single `[reject-summary]` INFO line every `--rejection-summary-interval` seconds (default 300, set to 0 to disable). The default per-rejection log level stays `error` and emits the same byte-identical `Order rejected: …` line as before, so existing log scrapers and ERROR-rate alerts keep working. Flipping `--rejection-log-level warning` (or `info`) opts into a richer `[reject:tag] coin — …` categorised format at the chosen level; unknown rejection text always falls through to ERROR with the legacy line so format changes / new reject reasons stay visible.
@@ -701,6 +703,14 @@ ws_guards:                         # All require --enable-ws
   velocity_guard_enabled: false    # --velocity-guard  (cancel one side on sustained BBO direction; disabled by default)
   velocity_consecutive: 3          # --velocity-consecutive  (consecutive same-direction moves to trigger)
   velocity_min_move_bps: 1.0       # --velocity-min-move-bps  (min cumulative move in bps to trigger)
+  oracle_guard_enabled: false      # --oracle-guard  (cancel stale-side quotes on oraclePx divergence/momentum; disabled by default)
+  oracle_divergence_threshold_bps: 5.0  # --oracle-divergence-threshold-bps  (|mid - oraclePx| to cancel stale side; 0 disables gate)
+  oracle_momentum_cap_pin_bps: 80.0     # --oracle-momentum-cap-pin-bps  (single oracle step treated as 1% cap pinning; 0 disables)
+  oracle_momentum_min_step_bps: 5.0     # --oracle-momentum-min-step-bps  (min oracle step counted toward consecutive momentum)
+  oracle_momentum_consecutive: 3        # --oracle-momentum-consecutive  (same-direction steps to fire momentum gate; 0 disables)
+  oracle_stale_ttl_seconds: 30          # --oracle-stale-ttl-seconds  (disarm when oraclePx unchanged this long; market-close auto-detect)
+  oracle_guard_block_seconds: 10        # --oracle-guard-block-seconds  (placement block after a fire)
+  oracle_guard_min_cancel_interval: 2.0 # (env/JSON only)  per coin×side cancel rate limit in seconds
   enable_adverse_selection_log: false  # --enable-adverse-selection-log  (post-fill mid tracking)
   adverse_selection_log_interval: 300  # --adverse-selection-log-interval  (summary log interval in seconds)
   fill_feature_log_enabled: false      # --fill-feature-log  (per-fill features + markout labels to daily JSONL; requires enable_ws + enable_adverse_selection_log)

@@ -111,6 +111,9 @@ class WsReconnector:
         if bot.velocity_guard:
             bot.velocity_guard.stop()
             bot.velocity_guard = None
+        if bot.oracle_guard:
+            bot.oracle_guard.stop()
+            bot.oracle_guard = None
         if bot.imbalance_guard:
             bot.imbalance_guard.stop()
             bot.imbalance_guard = None
@@ -134,7 +137,10 @@ class WsReconnector:
     def _rebuild(self, bot: "HyperliquidBot") -> None:  # noqa: F821
         """Create fresh WS Info + feeds + guards."""
         from hyperliquid.info import Info as WsInfo
-        from ws import MarketDataFeed, FillFeed, BboGuard, ImbalanceGuard, CloseRefreshGuard, BboVelocityGuard
+        from ws import (
+            MarketDataFeed, FillFeed, BboGuard, ImbalanceGuard,
+            CloseRefreshGuard, BboVelocityGuard, OracleDivergenceGuard,
+        )
         from config import Config
 
         perp_dexs = bot._build_perp_dexs()
@@ -193,6 +199,30 @@ class WsReconnector:
                     bot.velocity_guard.consecutive_threshold,
                     bot.velocity_guard.min_total_move_bps,
                 )
+
+            # Re-register OracleDivergenceGuard (incl. ctx subscriptions)
+            if bot.strategy_config.get('oracle_guard_enabled', False):
+                bot.oracle_guard = OracleDivergenceGuard(
+                    tracker,
+                    divergence_threshold_bps=float(
+                        bot.strategy_config.get('oracle_divergence_threshold_bps', 5.0)),
+                    momentum_cap_pin_bps=float(
+                        bot.strategy_config.get('oracle_momentum_cap_pin_bps', 80.0)),
+                    momentum_min_step_bps=float(
+                        bot.strategy_config.get('oracle_momentum_min_step_bps', 5.0)),
+                    momentum_consecutive=int(
+                        bot.strategy_config.get('oracle_momentum_consecutive', 3)),
+                    stale_ttl_seconds=float(
+                        bot.strategy_config.get('oracle_stale_ttl_seconds', 30.0)),
+                    block_seconds=float(
+                        bot.strategy_config.get('oracle_guard_block_seconds', 10.0)),
+                    min_cancel_interval=float(
+                        bot.strategy_config.get('oracle_guard_min_cancel_interval', 2.0)),
+                )
+                bot.ws_feed.add_listener(bot.oracle_guard.on_l2_update)
+                bot.ws_feed.add_ctx_listener(bot.oracle_guard.on_asset_ctx_update)
+                bot.strategy._oracle_guard = bot.oracle_guard
+                logger.info("[ws-reconnect] OracleDivergenceGuard re-enabled")
 
             # Re-register CloseRefreshGuard
             closer = getattr(bot.strategy, '_closer', None)
