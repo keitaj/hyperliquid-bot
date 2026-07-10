@@ -160,7 +160,9 @@ class FillFeed:
                         side = fill.get("side", "")
                         fill_time = fill.get("time")
                         if coin and px > 0 and side:
-                            self._adverse_tracker.on_fill(coin, px, side, fill_time)
+                            self._adverse_tracker.on_fill(
+                                coin, px, side, fill_time, raw_fill=fill
+                            )
                     except Exception as e:
                         logger.debug("[ws-fill] Error notifying adverse tracker: %s", e)
 

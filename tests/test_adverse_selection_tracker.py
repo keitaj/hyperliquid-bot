@@ -267,17 +267,18 @@ class TestFillFeedIntegration:
         feed._running = True
         feed.set_adverse_selection_tracker(tracker_mock)
 
+        fill = {"coin": "SP500", "px": "100.5", "sz": "0.1", "side": "B", "time": 1234567890}
         msg = {
             "data": {
                 "isSnapshot": False,
-                "fills": [
-                    {"coin": "SP500", "px": "100.5", "sz": "0.1", "side": "B", "time": 1234567890},
-                ]
+                "fills": [fill],
             }
         }
         feed._on_fill(msg)
 
-        tracker_mock.on_fill.assert_called_once_with("SP500", 100.5, "B", 1234567890)
+        tracker_mock.on_fill.assert_called_once_with(
+            "SP500", 100.5, "B", 1234567890, raw_fill=fill
+        )
 
     def test_fill_feed_no_tracker_no_error(self):
         from ws.fill_feed import FillFeed
@@ -440,3 +441,143 @@ class TestRecentWindowHistory:
         assert snap["avg_5s"] is not None
         assert snap["avg_30s"] is None
         assert snap["avg_60s"] is None
+
+
+class TestFeatureRecord:
+    """Tests for per-fill feature record generation (FillFeatureWriter link)."""
+
+    @staticmethod
+    def _make_full_md(mid_price: float = 100.0):
+        md_mgr = MagicMock()
+        md = MagicMock()
+        md.mid_price = mid_price
+        md.spread = 0.05
+        md.book_imbalance = -0.25
+        md.bid_size_top = 12.0
+        md.ask_size_top = 18.0
+        md.micro_price = 99.98
+        md_mgr.get_market_data.return_value = md
+        return md_mgr
+
+    @staticmethod
+    def _raw_fill():
+        return {
+            "coin": "xyz:SP500",
+            "px": "100.02",
+            "sz": "0.5",
+            "side": "B",
+            "time": 1751900000123,
+            "dir": "Open Long",
+            "crossed": False,
+            "closedPnl": "0.0",
+            "fee": "0.0043",
+            "tid": 118906543210987,
+            "oid": 32189765432,
+            "hash": "0xabc123",
+        }
+
+    def test_record_built_and_passed_to_writer(self):
+        md_mgr = self._make_full_md()
+        tracker = AdverseSelectionTracker(md_mgr, log_interval=9999)
+        writer = MagicMock()
+        tracker.set_feature_writer(writer)
+
+        with patch('ws.adverse_selection_tracker.threading'):
+            tracker.on_fill("xyz:SP500", 100.02, "B", 1751900000123,
+                            raw_fill=self._raw_fill())
+
+        writer.add.assert_called_once()
+        snap = writer.add.call_args[0][0]
+        record = snap.record
+        assert record["v"] == 1
+        assert record["tid"] == 118906543210987
+        assert record["oid"] == 32189765432
+        assert record["hash"] == "0xabc123"
+        assert record["ts"] == 1751900000123
+        assert record["coin"] == "xyz:SP500"
+        assert record["side"] == "B"
+        assert record["is_maker"] is True   # crossed=False
+        assert record["direction"] == "Open Long"
+        assert record["px"] == 100.02
+        assert record["sz"] == 0.5
+        assert record["fee"] == 0.0043
+        # Features from compute_fill_features
+        assert record["mid"] == 100.0
+        assert abs(record["spread_bps"] - 5.0) < 1e-9
+        assert record["book_imbalance"] == -0.25
+        assert record["oracle_divergence_bps"] is None
+
+    def test_taker_fill_is_maker_false(self):
+        md_mgr = self._make_full_md()
+        tracker = AdverseSelectionTracker(md_mgr, log_interval=9999)
+        writer = MagicMock()
+        tracker.set_feature_writer(writer)
+
+        fill = self._raw_fill()
+        fill["crossed"] = True
+        with patch('ws.adverse_selection_tracker.threading'):
+            tracker.on_fill("xyz:SP500", 100.02, "B", raw_fill=fill)
+
+        assert writer.add.call_args[0][0].record["is_maker"] is False
+
+    def test_missing_join_keys_are_null(self):
+        md_mgr = self._make_full_md()
+        tracker = AdverseSelectionTracker(md_mgr, log_interval=9999)
+        writer = MagicMock()
+        tracker.set_feature_writer(writer)
+
+        fill = {"coin": "xyz:SP500", "px": "100.02", "sz": "0.5", "side": "B"}
+        with patch('ws.adverse_selection_tracker.threading'):
+            tracker.on_fill("xyz:SP500", 100.02, "B", raw_fill=fill)
+
+        record = writer.add.call_args[0][0].record
+        assert record["tid"] is None
+        assert record["oid"] is None
+        assert record["hash"] is None
+
+    def test_no_writer_means_no_record(self):
+        md_mgr = self._make_full_md()
+        tracker = AdverseSelectionTracker(md_mgr, log_interval=9999)
+
+        with patch('ws.adverse_selection_tracker.threading'):
+            tracker.on_fill("xyz:SP500", 100.02, "B", raw_fill=self._raw_fill())
+
+        assert tracker._fills[0].record is None
+
+    def test_no_raw_fill_means_no_writer_call(self):
+        """Legacy call signature: markout tracking works, no feature record."""
+        md_mgr = self._make_full_md()
+        tracker = AdverseSelectionTracker(md_mgr, log_interval=9999)
+        writer = MagicMock()
+        tracker.set_feature_writer(writer)
+
+        with patch('ws.adverse_selection_tracker.threading'):
+            tracker.on_fill("xyz:SP500", 100.02, "B")
+
+        writer.add.assert_not_called()
+        assert len(tracker._fills) == 1  # markout tracking unaffected
+
+    def test_no_market_data_means_no_record(self):
+        md_mgr = MagicMock()
+        md_mgr.get_market_data.return_value = None
+        tracker = AdverseSelectionTracker(md_mgr, log_interval=9999)
+        writer = MagicMock()
+        tracker.set_feature_writer(writer)
+
+        with patch('ws.adverse_selection_tracker.threading'):
+            tracker.on_fill("xyz:SP500", 100.02, "B", raw_fill=self._raw_fill())
+
+        writer.add.assert_not_called()
+
+    def test_writer_failure_does_not_break_tracking(self):
+        md_mgr = self._make_full_md()
+        tracker = AdverseSelectionTracker(md_mgr, log_interval=9999)
+        writer = MagicMock()
+        writer.add.side_effect = RuntimeError("boom")
+        tracker.set_feature_writer(writer)
+
+        with patch('ws.adverse_selection_tracker.threading'):
+            tracker.on_fill("xyz:SP500", 100.02, "B", raw_fill=self._raw_fill())
+
+        # Markout tracking must survive the writer failure
+        assert len(tracker._fills) == 1

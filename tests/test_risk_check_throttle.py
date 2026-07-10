@@ -35,6 +35,7 @@ def bot():
         b._last_risk_result = {'all_checks_passed': False, 'action': 'none'}
         b.adverse_tracker = None
         b.imbalance_guard = None
+        b.fill_feature_writer = None
 
         b.risk_manager.check_risk_limits.return_value = {
             'all_checks_passed': True,

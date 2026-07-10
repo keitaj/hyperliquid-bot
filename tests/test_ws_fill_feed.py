@@ -146,3 +146,29 @@ class TestFillCallback:
         })
 
         tracker.cancel_all_orders_for_coin.assert_not_called()
+
+
+class TestAdverseTrackerNotification:
+    """FillFeed passes the raw fill object to the adverse tracker."""
+
+    def test_on_fill_receives_raw_fill_kwarg(self):
+        feed, info, _ = _make_feed()
+        adverse = MagicMock()
+        feed.set_adverse_selection_tracker(adverse)
+        feed.start()
+
+        fill = {
+            "coin": "xyz:SP500",
+            "px": "5200.5",
+            "sz": "0.02",
+            "side": "B",
+            "time": 1751900000123,
+            "tid": 42,
+            "hash": "0xdeadbeef",
+        }
+        callback = info.subscribe.call_args[0][1]
+        callback({"data": {"isSnapshot": False, "fills": [fill]}})
+
+        adverse.on_fill.assert_called_once_with(
+            "xyz:SP500", 5200.5, "B", 1751900000123, raw_fill=fill
+        )
