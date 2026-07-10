@@ -205,6 +205,17 @@ class MarketMakingStrategy(BaseStrategy):
             logger.info(
                 f"[mm] Per-coin unrealized-loss overrides: {self._coin_unrealized_loss_overrides}"
             )
+        if self.cfg.per_coin.close_tier:
+            logger.info(
+                f"[mm] Per-coin close tier overrides: {self.cfg.per_coin.close_tier}"
+            )
+        if self.cfg.close_tier_toxicity.enabled:
+            tox = self.cfg.close_tier_toxicity
+            logger.info(
+                f"[mm] Close tier toxicity accel enabled: threshold={tox.threshold_bps}bps "
+                f"window={tox.window} multiplier={tox.multiplier} floor={tox.floor_pct} "
+                f"min_fills={tox.min_fills}"
+            )
 
         # ---- Micro-price asymmetric offset (aliases of self.cfg.microprice) ---- #
         self._microprice_enabled: bool = self.cfg.microprice.enabled
@@ -300,6 +311,9 @@ class MarketMakingStrategy(BaseStrategy):
             close_aggressive_pct=self.cfg.close.aggressive_pct,
             unrealized_loss_close_bps=self.cfg.close.unrealized_loss_close_bps,
             coin_unrealized_loss_overrides=self._coin_unrealized_loss_overrides,
+            coin_close_tier_overrides=self.cfg.per_coin.close_tier,
+            close_tier_toxicity=self.cfg.close_tier_toxicity,
+            close_tier_min_seconds=self.cfg.close.tier_min_seconds,
         )
 
     @property

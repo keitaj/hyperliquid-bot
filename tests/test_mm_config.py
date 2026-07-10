@@ -8,6 +8,7 @@ from strategies.mm_config import (
     INVENTORY_SKEW_CAP,
     AutoExcludeConfig,
     CloseConfig,
+    CloseTierToxicityConfig,
     DynamicAgeConfig,
     DynamicOffsetConfig,
     ImbalanceConfig,
@@ -19,6 +20,7 @@ from strategies.mm_config import (
     ScheduleConfig,
     VelocityGuardConfig,
     parse_coin_overrides,
+    parse_coin_tier_overrides,
     parse_quiet_hours,
     parse_spread_schedule,
 )
@@ -52,6 +54,94 @@ class TestParseCoinOverrides:
         assert parse_coin_overrides('SP500:abc,MSFT:3') == {'MSFT': 3.0}
         # Trailing comma — skipped
         assert parse_coin_overrides('SP500:1.5,,MSFT:3,') == {'SP500': 1.5, 'MSFT': 3.0}
+
+
+class TestParseCoinTierOverrides:
+    def test_empty(self) -> None:
+        assert parse_coin_tier_overrides('') == {}
+        assert parse_coin_tier_overrides(None) == {}
+        assert parse_coin_tier_overrides('   ') == {}
+
+    def test_single_bare(self) -> None:
+        assert parse_coin_tier_overrides('NVDA:0.30/0.55') == {'NVDA': (0.30, 0.55)}
+
+    def test_multiple_with_dex_prefix(self) -> None:
+        result = parse_coin_tier_overrides('NVDA:0.30/0.55,xyz:XYZ100:0.40/0.65')
+        assert result == {'NVDA': (0.30, 0.55), 'xyz:XYZ100': (0.40, 0.65)}
+
+    def test_whitespace_around_pairs(self) -> None:
+        result = parse_coin_tier_overrides(' NVDA:0.3/0.55 , TSLA:0.35/0.6 ')
+        assert result == {'NVDA': (0.3, 0.55), 'TSLA': (0.35, 0.6)}
+
+    def test_breakeven_zero_allowed(self) -> None:
+        # Pure-scratch mode: breakeven quote from the start
+        assert parse_coin_tier_overrides('NVDA:0.0/0.55') == {'NVDA': (0.0, 0.55)}
+
+    def test_aggressive_one_allowed(self) -> None:
+        assert parse_coin_tier_overrides('NVDA:0.5/1.0') == {'NVDA': (0.5, 1.0)}
+
+    def test_invalid_pairs_skipped_valid_survive(self) -> None:
+        # Missing '/' — skipped
+        assert parse_coin_tier_overrides('NVDA:0.30,TSLA:0.3/0.6') == {'TSLA': (0.3, 0.6)}
+        # Non-numeric — skipped
+        assert parse_coin_tier_overrides('NVDA:a/b,TSLA:0.3/0.6') == {'TSLA': (0.3, 0.6)}
+        # breakeven >= aggressive — skipped
+        assert parse_coin_tier_overrides('NVDA:0.55/0.30,TSLA:0.3/0.6') == {'TSLA': (0.3, 0.6)}
+        assert parse_coin_tier_overrides('NVDA:0.5/0.5') == {}
+        # Out of range — skipped
+        assert parse_coin_tier_overrides('NVDA:1.2/1.5') == {}
+        assert parse_coin_tier_overrides('NVDA:-0.1/0.5') == {}
+        # Missing coin name — skipped
+        assert parse_coin_tier_overrides(':0.3/0.6') == {}
+        # Trailing comma — skipped
+        assert parse_coin_tier_overrides('NVDA:0.3/0.55,') == {'NVDA': (0.3, 0.55)}
+
+    def test_invalid_pair_logs_warning(self, caplog) -> None:
+        import logging
+        with caplog.at_level(logging.WARNING, logger='strategies.mm_config'):
+            result = parse_coin_tier_overrides('NVDA:0.55/0.30,TSLA:0.3/0.6')
+        assert result == {'TSLA': (0.3, 0.6)}
+        warnings = [r for r in caplog.records
+                    if 'Invalid close tier override' in r.message]
+        assert len(warnings) == 1
+        assert 'NVDA:0.55/0.30' in warnings[0].message
+
+
+class TestCloseTierToxicityConfig:
+    def test_defaults_are_disabled(self) -> None:
+        cfg = CloseTierToxicityConfig()
+        assert cfg.enabled is False
+        assert cfg.threshold_bps == -2.0
+        assert cfg.window == '30s'
+        assert cfg.multiplier == 0.6
+        assert cfg.min_fills == 5
+        assert cfg.floor_pct == 0.15
+
+    def test_positive_threshold_rejected(self) -> None:
+        with pytest.raises(ValueError, match='threshold_bps must be <= 0'):
+            CloseTierToxicityConfig(threshold_bps=1.0)
+
+    def test_zero_threshold_allowed(self) -> None:
+        cfg = CloseTierToxicityConfig(threshold_bps=0.0)
+        assert cfg.threshold_bps == 0.0
+
+    def test_multiplier_out_of_range_rejected(self) -> None:
+        with pytest.raises(ValueError, match='multiplier must be in'):
+            CloseTierToxicityConfig(multiplier=0.05)
+        with pytest.raises(ValueError, match='multiplier must be in'):
+            CloseTierToxicityConfig(multiplier=1.5)
+
+    def test_invalid_window_rejected(self) -> None:
+        with pytest.raises(ValueError, match='window must be one of'):
+            CloseTierToxicityConfig(window='120s')
+
+    def test_min_fills_below_one_rejected(self) -> None:
+        with pytest.raises(ValueError, match='min_fills must be >= 1'):
+            CloseTierToxicityConfig(min_fills=0)
+
+    def test_floor_pct_out_of_range_rejected(self) -> None:
+        with pytest.raises(ValueError, match='floor_pct must be in'):
+            CloseTierToxicityConfig(floor_pct=1.5)
 
 
 class TestLossStreakConfig:
@@ -346,6 +436,39 @@ class TestMMConfigFromLegacyDict:
         # Distinguish "not provided" from "0.0" — closer needs Optional[float]
         cfg = MMConfig.from_legacy_dict({})
         assert cfg.close.spread_bps is None
+
+    def test_close_tier_defaults(self) -> None:
+        cfg = MMConfig.from_legacy_dict({})
+        assert cfg.per_coin.close_tier == {}
+        assert cfg.close.tier_min_seconds == 0.0
+        assert cfg.close_tier_toxicity.enabled is False
+
+    def test_close_tier_keys_wired(self) -> None:
+        cfg = MMConfig.from_legacy_dict({
+            'coin_close_tier_overrides': 'NVDA:0.30/0.55,xyz:XYZ100:0.40/0.65',
+            'close_tier_min_seconds': 20.0,
+            'close_tier_toxicity_enabled': True,
+            'close_tier_toxicity_threshold_bps': -3.0,
+            'close_tier_toxicity_window': '60s',
+            'close_tier_toxicity_multiplier': 0.5,
+            'close_tier_toxicity_min_fills': 8,
+            'close_tier_toxicity_floor_pct': 0.2,
+        })
+        assert cfg.per_coin.close_tier == {
+            'NVDA': (0.30, 0.55), 'xyz:XYZ100': (0.40, 0.65),
+        }
+        assert cfg.close.tier_min_seconds == 20.0
+        tox = cfg.close_tier_toxicity
+        assert tox.enabled is True
+        assert tox.threshold_bps == -3.0
+        assert tox.window == '60s'
+        assert tox.multiplier == 0.5
+        assert tox.min_fills == 8
+        assert tox.floor_pct == 0.2
+
+    def test_negative_tier_min_seconds_rejected(self) -> None:
+        with pytest.raises(ValueError, match='close_tier_min_seconds must be >= 0'):
+            MMConfig.from_legacy_dict({'close_tier_min_seconds': -1.0})
 
     def test_imbalance_validation_propagates(self) -> None:
         with pytest.raises(ValueError, match='imbalance_threshold'):

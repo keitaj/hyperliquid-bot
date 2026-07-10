@@ -291,23 +291,23 @@ class TestGetTierWithMaxAge:
     def test_short_max_age_aggressive_tier(self):
         """age=45, max_age=60 -> 75% -> aggressive tier."""
         closer, _, _ = _make_closer(max_age=120)
-        assert closer._get_tier(45, max_age=60) == _TIER_AGGRESSIVE
+        assert closer._get_tier('BTC', 45, max_age=60) == _TIER_AGGRESSIVE
 
     def test_same_age_default_max_normal_tier(self):
         """age=45, default max_age=120 -> 37.5% -> normal tier."""
         closer, _, _ = _make_closer(max_age=120)
-        assert closer._get_tier(45) == _TIER_NORMAL
+        assert closer._get_tier('BTC', 45) == _TIER_NORMAL
 
     def test_breakeven_with_custom_max(self):
         """age=45, max_age=80 -> 56% -> breakeven tier."""
         closer, _, _ = _make_closer(max_age=120)
-        assert closer._get_tier(45, max_age=80) == _TIER_BREAKEVEN
+        assert closer._get_tier('BTC', 45, max_age=80) == _TIER_BREAKEVEN
 
     def test_none_max_age_uses_default(self):
         """max_age=None -> uses self.max_position_age_seconds."""
         closer, _, _ = _make_closer(max_age=120)
-        assert closer._get_tier(45, max_age=None) == _TIER_NORMAL
-        assert closer._get_tier(90, max_age=None) == _TIER_AGGRESSIVE
+        assert closer._get_tier('BTC', 45, max_age=None) == _TIER_NORMAL
+        assert closer._get_tier('BTC', 90, max_age=None) == _TIER_AGGRESSIVE
 
 
 # ------------------------------------------------------------------ #

@@ -62,13 +62,13 @@ class TestTierTransitionTiming:
         """Default: breakeven at 50%, aggressive at 75%."""
         closer, _, _ = _make_closer(max_position_age_seconds=120)
         # age=59s → NORMAL
-        assert closer._get_tier(59) == _TIER_NORMAL
+        assert closer._get_tier('SP500', 59) == _TIER_NORMAL
         # age=60s → BREAKEVEN (120 * 0.50)
-        assert closer._get_tier(60) == _TIER_BREAKEVEN
+        assert closer._get_tier('SP500', 60) == _TIER_BREAKEVEN
         # age=89s → BREAKEVEN
-        assert closer._get_tier(89) == _TIER_BREAKEVEN
+        assert closer._get_tier('SP500', 89) == _TIER_BREAKEVEN
         # age=90s → AGGRESSIVE (120 * 0.75)
-        assert closer._get_tier(90) == _TIER_AGGRESSIVE
+        assert closer._get_tier('SP500', 90) == _TIER_AGGRESSIVE
 
     def test_early_transition(self):
         """Earlier tier transitions with custom percentages."""
@@ -78,13 +78,13 @@ class TestTierTransitionTiming:
             close_aggressive_pct=0.50,
         )
         # age=39s → NORMAL (120 * 0.33 = 39.6)
-        assert closer._get_tier(39) == _TIER_NORMAL
+        assert closer._get_tier('SP500', 39) == _TIER_NORMAL
         # age=40s → BREAKEVEN
-        assert closer._get_tier(40) == _TIER_BREAKEVEN
+        assert closer._get_tier('SP500', 40) == _TIER_BREAKEVEN
         # age=59s → BREAKEVEN
-        assert closer._get_tier(59) == _TIER_BREAKEVEN
+        assert closer._get_tier('SP500', 59) == _TIER_BREAKEVEN
         # age=60s → AGGRESSIVE (120 * 0.50)
-        assert closer._get_tier(60) == _TIER_AGGRESSIVE
+        assert closer._get_tier('SP500', 60) == _TIER_AGGRESSIVE
 
 
 class TestBboTrackingClosePrice:
