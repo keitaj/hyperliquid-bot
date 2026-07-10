@@ -15,6 +15,7 @@ from strategies.mm_config import (
     LossStreakConfig,
     MicropriceConfig,
     MMConfig,
+    OracleGuardConfig,
     PerCoinOverrides,
     PositionCapConfig,
     ScheduleConfig,
@@ -529,3 +530,76 @@ class TestModuleConstants:
     def test_dynamic_age_log_interval(self) -> None:
         assert isinstance(DYNAMIC_AGE_LOG_INTERVAL, float)
         assert DYNAMIC_AGE_LOG_INTERVAL > 0
+
+
+class TestOracleGuardConfig:
+    def test_defaults_are_disabled(self) -> None:
+        cfg = OracleGuardConfig()
+        assert cfg.enabled is False
+        assert cfg.divergence_threshold_bps == 5.0
+        assert cfg.momentum_cap_pin_bps == 80.0
+        assert cfg.momentum_min_step_bps == 5.0
+        assert cfg.momentum_consecutive == 3
+        assert cfg.stale_ttl_seconds == 30.0
+        assert cfg.block_seconds == 10.0
+        assert cfg.min_cancel_interval == 2.0
+
+    def test_negative_bps_rejected(self) -> None:
+        with pytest.raises(ValueError, match='divergence_threshold_bps'):
+            OracleGuardConfig(divergence_threshold_bps=-1.0)
+        with pytest.raises(ValueError, match='momentum_cap_pin_bps'):
+            OracleGuardConfig(momentum_cap_pin_bps=-1.0)
+        with pytest.raises(ValueError, match='momentum_min_step_bps'):
+            OracleGuardConfig(momentum_min_step_bps=-0.1)
+
+    def test_negative_consecutive_rejected(self) -> None:
+        with pytest.raises(ValueError, match='momentum_consecutive'):
+            OracleGuardConfig(momentum_consecutive=-1)
+
+    def test_nonpositive_stale_ttl_rejected(self) -> None:
+        with pytest.raises(ValueError, match='stale_ttl_seconds'):
+            OracleGuardConfig(stale_ttl_seconds=0.0)
+
+    def test_negative_block_seconds_rejected(self) -> None:
+        with pytest.raises(ValueError, match='block_seconds'):
+            OracleGuardConfig(block_seconds=-1.0)
+
+    def test_zero_gate_values_allowed(self) -> None:
+        # 0 disables individual gates, must construct fine
+        cfg = OracleGuardConfig(divergence_threshold_bps=0.0,
+                                momentum_cap_pin_bps=0.0,
+                                momentum_consecutive=0,
+                                block_seconds=0.0)
+        assert cfg.divergence_threshold_bps == 0.0
+
+
+class TestOracleGuardFromLegacyDict:
+    def test_defaults(self) -> None:
+        cfg = MMConfig.from_legacy_dict({})
+        assert cfg.oracle_guard.enabled is False
+        assert cfg.oracle_guard.divergence_threshold_bps == 5.0
+
+    def test_keys_wired(self) -> None:
+        cfg = MMConfig.from_legacy_dict({
+            'oracle_guard_enabled': True,
+            'oracle_divergence_threshold_bps': 8.0,
+            'oracle_momentum_cap_pin_bps': 60.0,
+            'oracle_momentum_min_step_bps': 4.0,
+            'oracle_momentum_consecutive': 5,
+            'oracle_stale_ttl_seconds': 45.0,
+            'oracle_guard_block_seconds': 15.0,
+            'oracle_guard_min_cancel_interval': 3.0,
+        })
+        og = cfg.oracle_guard
+        assert og.enabled is True
+        assert og.divergence_threshold_bps == 8.0
+        assert og.momentum_cap_pin_bps == 60.0
+        assert og.momentum_min_step_bps == 4.0
+        assert og.momentum_consecutive == 5
+        assert og.stale_ttl_seconds == 45.0
+        assert og.block_seconds == 15.0
+        assert og.min_cancel_interval == 3.0
+
+    def test_invalid_value_raises_at_startup(self) -> None:
+        with pytest.raises(ValueError, match='oracle_stale_ttl_seconds'):
+            MMConfig.from_legacy_dict({'oracle_stale_ttl_seconds': -5})

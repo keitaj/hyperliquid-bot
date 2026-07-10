@@ -35,16 +35,32 @@ class MarketDataFeed:
         self.coins = list(coins)
 
         self._subscription_ids: Dict[str, int] = {}
+        self._ctx_subscription_ids: Dict[str, int] = {}
         self._lock = threading.Lock()
         self._running = False
         self._update_count = 0
+        self._ctx_update_count = 0
         self._error_count = 0
         self._last_update: Dict[str, float] = {}
         self._listeners: List[Callable[[str, Any], None]] = []
+        self._ctx_listeners: List[Callable[[str, Dict], None]] = []
 
     def add_listener(self, callback: Callable[[str, Any], None]) -> None:
         """Register a callback that receives ``(coin, levels)`` on each l2Book update."""
         self._listeners.append(callback)
+
+    def add_ctx_listener(self, callback: Callable[[str, Dict], None]) -> None:
+        """Register a callback that receives ``(coin, ctx)`` on each activeAssetCtx update.
+
+        The ``activeAssetCtx`` channel is only subscribed when at least one
+        ctx listener is registered — feeds without ctx consumers keep the
+        exact pre-existing subscription set.  Safe to call before or after
+        :meth:`start`; when the feed is already running the subscriptions
+        are established immediately.
+        """
+        self._ctx_listeners.append(callback)
+        if self._running and not self._ctx_subscription_ids:
+            self._subscribe_ctx_all()
 
     # ------------------------------------------------------------------ #
     #  Lifecycle
@@ -59,6 +75,8 @@ class MarketDataFeed:
         self._running = True
         for coin in self.coins:
             self._subscribe_coin(coin)
+        if self._ctx_listeners:
+            self._subscribe_ctx_all()
 
         logger.info(
             "[ws] MarketDataFeed started — subscribed to %d coins: %s",
@@ -79,6 +97,15 @@ class MarketDataFeed:
                 except Exception:
                     pass
             self._subscription_ids.clear()
+            for coin, sub_id in list(self._ctx_subscription_ids.items()):
+                try:
+                    self.info.unsubscribe(
+                        {"type": "activeAssetCtx", "coin": coin},
+                        sub_id,
+                    )
+                except Exception:
+                    pass
+            self._ctx_subscription_ids.clear()
         logger.info(
             "[ws] MarketDataFeed stopped (updates=%d, errors=%d)",
             self._update_count,
@@ -102,6 +129,28 @@ class MarketDataFeed:
         except Exception as e:
             self._error_count += 1
             logger.error("[ws] Failed to subscribe l2Book for %s: %s", coin, e)
+
+    def _subscribe_ctx_all(self) -> None:
+        """Subscribe to activeAssetCtx for all coins (oracle px stream)."""
+        for coin in self.coins:
+            self._subscribe_ctx_coin(coin)
+        logger.info(
+            "[ws] activeAssetCtx subscribed for %d coins", len(self._ctx_subscription_ids),
+        )
+
+    def _subscribe_ctx_coin(self, coin: str) -> None:
+        """Subscribe to activeAssetCtx for a single coin."""
+        try:
+            sub_id = self.info.subscribe(
+                {"type": "activeAssetCtx", "coin": coin},
+                self._on_ctx_update,
+            )
+            with self._lock:
+                self._ctx_subscription_ids[coin] = sub_id
+            logger.debug("[ws] Subscribed activeAssetCtx for %s (id=%d)", coin, sub_id)
+        except Exception as e:
+            self._error_count += 1
+            logger.error("[ws] Failed to subscribe activeAssetCtx for %s: %s", coin, e)
 
     def _on_l2_update(self, msg: Dict) -> None:
         """Callback invoked on the SDK WebSocket thread."""
@@ -130,6 +179,30 @@ class MarketDataFeed:
             if self._error_count <= 5 or self._error_count % 100 == 0:
                 logger.error("[ws] Error processing l2Book update: %s", e)
 
+    def _on_ctx_update(self, msg: Dict) -> None:
+        """activeAssetCtx callback invoked on the SDK WebSocket thread."""
+        if not self._running:
+            return
+        try:
+            data = msg.get("data", {})
+            coin = data.get("coin", "")
+            ctx = data.get("ctx")
+            if not coin or not isinstance(ctx, dict):
+                return
+
+            self._ctx_update_count += 1
+
+            for listener in self._ctx_listeners:
+                try:
+                    listener(coin, ctx)
+                except Exception as exc:
+                    logger.error("[ws] Ctx listener error: %s", exc)
+
+        except Exception as e:
+            self._error_count += 1
+            if self._error_count <= 5 or self._error_count % 100 == 0:
+                logger.error("[ws] Error processing activeAssetCtx update: %s", e)
+
     # ------------------------------------------------------------------ #
     #  Observability
     # ------------------------------------------------------------------ #
@@ -143,7 +216,9 @@ class MarketDataFeed:
         return {
             "running": self._running,
             "subscriptions": len(self._subscription_ids),
+            "ctx_subscriptions": len(self._ctx_subscription_ids),
             "updates": self._update_count,
+            "ctx_updates": self._ctx_update_count,
             "errors": self._error_count,
         }
 

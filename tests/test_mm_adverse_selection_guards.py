@@ -349,3 +349,71 @@ class TestInputValidation:
     def test_loss_streak_cooldown_zero_with_limit(self):
         with pytest.raises(ValueError, match="loss_streak_cooldown"):
             self._init_strategy(loss_streak_limit=2, loss_streak_cooldown=0)
+
+
+class TestOracleGuardPlacementSkip:
+    """Injected OracleDivergenceGuard blocks placement on flagged sides."""
+
+    def _setup(self, blocked_sides):
+        s, om, md = _make_strategy(imbalance_threshold=0.0)
+        market_data = MagicMock()
+        market_data.mid_price = 100.0
+        market_data.bid = 99.99
+        market_data.ask = 100.01
+        market_data.book_imbalance = 0.0
+        md.get_market_data.return_value = market_data
+        md.round_size.return_value = 1.0
+
+        guard = MagicMock()
+        guard.get_blocked_sides.return_value = blocked_sides
+        s._oracle_guard = guard
+
+        placed = []
+        om.bulk_place_orders.side_effect = lambda orders: (
+            placed.extend(orders),
+            [MagicMock(id=i) for i in range(len(orders))]
+        )[1]
+        return s, guard, placed
+
+    def test_no_guard_places_both_sides(self):
+        s, om, md = _make_strategy(imbalance_threshold=0.0)
+        market_data = MagicMock()
+        market_data.mid_price = 100.0
+        market_data.bid = 99.99
+        market_data.ask = 100.01
+        market_data.book_imbalance = 0.0
+        md.get_market_data.return_value = market_data
+        md.round_size.return_value = 1.0
+        # _make_strategy bypasses __init__; getattr default must disable
+        assert getattr(s, '_oracle_guard', None) is None
+
+        placed = []
+        om.bulk_place_orders.side_effect = lambda orders: (
+            placed.extend(orders),
+            [MagicMock(id=i) for i in range(len(orders))]
+        )[1]
+        s._place_orders('BTC')
+        assert len(placed) == 2
+
+    def test_buy_side_blocked(self):
+        s, guard, placed = self._setup({"B"})
+        s._place_orders('BTC')
+        guard.get_blocked_sides.assert_called_with('BTC')
+        assert len(placed) == 1
+        assert placed[0].side.value == 'sell'
+
+    def test_sell_side_blocked(self):
+        s, guard, placed = self._setup({"A"})
+        s._place_orders('BTC')
+        assert len(placed) == 1
+        assert placed[0].side.value == 'buy'
+
+    def test_both_sides_blocked(self):
+        s, guard, placed = self._setup({"B", "A"})
+        s._place_orders('BTC')
+        assert placed == []
+
+    def test_empty_block_set_places_both(self):
+        s, guard, placed = self._setup(set())
+        s._place_orders('BTC')
+        assert len(placed) == 2
