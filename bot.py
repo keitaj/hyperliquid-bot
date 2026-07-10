@@ -849,6 +849,15 @@ class HyperliquidBot:
                 logger.error(f"Error in main loop (#{consecutive_errors}): {e}")
                 time.sleep(10)
 
+        # Flush buffered feature records on loop exit. The internal
+        # stop_bot (daily-loss) and cooldown exits set ``self.running =
+        # False`` and never reach ``_signal_handler``, so without this the
+        # final maturity window of records would be silently dropped.
+        # ``flush_all`` is a no-op when the signal handler already flushed
+        # and cleared the writer.
+        if self.fill_feature_writer:
+            self.fill_feature_writer.flush_all()
+
     def _trading_loop(self) -> None:
         # Throttle risk checks to avoid burning API weight every cycle.
         # With MAIN_LOOP_INTERVAL=3s, checking every 30s saves ~36 weight/min.

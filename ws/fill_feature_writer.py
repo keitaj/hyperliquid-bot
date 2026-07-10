@@ -60,6 +60,7 @@ class FillFeatureWriter:
         self._error_count = 0
         self._dropped_overflow = 0
         self._dropped_size_cap = 0
+        self._dropped_serialize = 0
         self._size_cap_warned_date: Optional[str] = None
 
         try:
@@ -124,9 +125,9 @@ class FillFeatureWriter:
         self._flush(force=force)
 
     def _flush(self, force: bool) -> None:
+        mature: List[Any] = []
         try:
             now = time.monotonic()
-            mature: List[Any] = []
             with self._lock:
                 # Buffer is appended chronologically, so we can stop at
                 # the first immature record.
@@ -139,21 +140,40 @@ class FillFeatureWriter:
             if not mature:
                 return
 
-            lines = []
+            # Serialize per-record: a single unserializable record is
+            # dropped and counted so it can never sink the rest of the
+            # batch (previously one bad record discarded the whole window).
+            serialized: List[Any] = []
             for snap in mature:
                 record = dict(snap.record or {})
                 for label, field in _SAMPLE_FIELDS.items():
                     record[field] = snap.samples.get(label)
-                lines.append(json.dumps(record, separators=(",", ":")))
+                try:
+                    serialized.append((snap, json.dumps(record, separators=(",", ":"))))
+                except (TypeError, ValueError) as e:
+                    self._dropped_serialize += 1
+                    self._record_error(e)
+
+            if not serialized:
+                return  # all poison — already counted and discarded
 
             path = self._current_path()
             if self._over_size_cap(path):
-                self._dropped_size_cap += len(lines)
-                return
+                self._dropped_size_cap += len(serialized)
+                return  # intentional drop (records discarded)
 
-            with open(path, "a", encoding="utf-8") as f:
-                for line in lines:
-                    f.write(line + "\n")
+            lines = [line for _, line in serialized]
+            try:
+                with open(path, "a", encoding="utf-8") as f:
+                    f.write("".join(line + "\n" for line in lines))
+            except OSError as e:
+                # Transient IO failure (disk full, permission): re-buffer the
+                # serializable records at the front so the next flush retries
+                # them instead of silently losing a whole window of good rows.
+                self._record_error(e)
+                with self._lock:
+                    self._buffer.extendleft(snap for snap, _ in reversed(serialized))
+                return
             self._written_count += len(lines)
 
         except Exception as e:
@@ -164,7 +184,15 @@ class FillFeatureWriter:
     # ------------------------------------------------------------------ #
 
     def _current_path(self) -> str:
-        """Daily-rotated file path based on the current UTC date."""
+        """Daily-rotated file path based on the current UTC date.
+
+        Note: the file date is the *write* date, not the fill date.
+        Because records are held ~65s for maturity plus up to one flush
+        interval, a fill in the last ~2 minutes of a UTC day is written
+        into the next day's file. Each record's own ``ts`` field keeps
+        joins correct; consumers that need strict fill-date partitioning
+        should partition on ``ts`` rather than the filename.
+        """
         day = datetime.now(timezone.utc).strftime("%Y%m%d")
         return os.path.join(self.log_dir, f"{day}.jsonl")
 
@@ -204,4 +232,5 @@ class FillFeatureWriter:
             "errors": self._error_count,
             "dropped_overflow": self._dropped_overflow,
             "dropped_size_cap": self._dropped_size_cap,
+            "dropped_serialize": self._dropped_serialize,
         }

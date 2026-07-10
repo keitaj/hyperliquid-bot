@@ -123,22 +123,51 @@ class TestFlushInterval:
 
 class TestRotationAndCaps:
     def test_daily_rotation_by_utc_date(self, tmp_path):
+        # Exercise the REAL _current_path (UTC date -> filename) by driving
+        # the module clock, so a regression to local time is caught.
+        from datetime import datetime, timezone
+
         writer = FillFeatureWriter(str(tmp_path), flush_interval=0.0)
         writer._last_flush = 0.0
-        with patch.object(writer, "_current_path") as mock_path:
-            mock_path.side_effect = [
-                str(tmp_path / "20260708.jsonl"),
-                str(tmp_path / "20260709.jsonl"),
-            ]
+
+        class _FakeDateTime:
+            _now = datetime(2026, 7, 8, 23, 59, 0, tzinfo=timezone.utc)
+
+            @classmethod
+            def now(cls, tz=None):
+                return cls._now
+
+        with patch("ws.fill_feature_writer.datetime", _FakeDateTime):
             with patch(
                 "ws.fill_feature_writer.time.monotonic", return_value=10_000.0
             ):
                 writer.add(_make_snapshot(fill_time=1000.0))
                 writer.maybe_flush()
+                # Advance one UTC day (also crosses local midnight the other way
+                # for negative-offset zones, so file date must track UTC).
+                _FakeDateTime._now = datetime(2026, 7, 9, 0, 1, 0, tzinfo=timezone.utc)
                 writer.add(_make_snapshot(fill_time=2000.0))
                 writer.maybe_flush()
 
         assert sorted(os.listdir(tmp_path)) == ["20260708.jsonl", "20260709.jsonl"]
+
+    def test_current_path_uses_utc_not_local(self):
+        # An instant where local date differs from UTC date: file date
+        # must be the UTC one regardless of the host timezone.
+        from datetime import datetime, timezone
+
+        writer = FillFeatureWriter.__new__(FillFeatureWriter)
+        writer.log_dir = "/tmp/x"
+
+        class _FakeDateTime:
+            @staticmethod
+            def now(tz=None):
+                # 23:30 UTC on the 8th; local (UTC+2) would be the 9th
+                assert tz == timezone.utc
+                return datetime(2026, 7, 8, 23, 30, tzinfo=timezone.utc)
+
+        with patch("ws.fill_feature_writer.datetime", _FakeDateTime):
+            assert writer._current_path().endswith("20260708.jsonl")
 
     def test_daily_size_cap_drops_records(self, tmp_path):
         writer = FillFeatureWriter(str(tmp_path), flush_interval=0.0, max_daily_bytes=10)
@@ -166,6 +195,9 @@ class TestRotationAndCaps:
 
         assert writer.stats["buffered"] == 2
         assert writer.stats["dropped_overflow"] == 1
+        # The oldest (fill_time=1.0) must be the one evicted, not the newest.
+        remaining = [snap.fill_time for snap in writer._buffer]
+        assert remaining == [2.0, 3.0]
 
 
 class TestFailSilent:
@@ -180,6 +212,48 @@ class TestFailSilent:
                 writer.maybe_flush()  # must not raise
 
         assert writer.stats["errors"] == 1
+
+    def test_io_error_rebuffers_records_for_retry(self, tmp_path):
+        # A transient write failure must NOT lose the good records — they
+        # stay buffered and the next flush writes them.
+        writer = FillFeatureWriter(str(tmp_path), flush_interval=0.0)
+        writer._last_flush = 0.0
+        writer.add(_make_snapshot(fill_time=1000.0))
+        writer.add(_make_snapshot(fill_time=1001.0))
+        with patch(
+            "ws.fill_feature_writer.time.monotonic", return_value=10_000.0
+        ):
+            with patch("builtins.open", side_effect=OSError("disk full")):
+                writer.maybe_flush()
+            assert writer.stats["written"] == 0
+            assert writer.stats["buffered"] == 2  # re-buffered, not lost
+            # Order preserved for the retry
+            assert [s.fill_time for s in writer._buffer] == [1000.0, 1001.0]
+            # Next flush succeeds
+            writer.maybe_flush()
+
+        rows = _read_lines(os.path.join(tmp_path, os.listdir(tmp_path)[0]))
+        assert len(rows) == 2
+        assert writer.stats["written"] == 2
+        assert writer.stats["buffered"] == 0
+
+    def test_one_bad_record_does_not_sink_batch(self, tmp_path):
+        # [good, bad, good] must write the two good rows and drop only the bad.
+        writer = FillFeatureWriter(str(tmp_path), flush_interval=0.0)
+        writer._last_flush = 0.0
+        writer.add(_make_snapshot(fill_time=1000.0, record={"v": 1, "id": "a"}))
+        writer.add(_make_snapshot(fill_time=1001.0, record={"bad": object()}))
+        writer.add(_make_snapshot(fill_time=1002.0, record={"v": 1, "id": "c"}))
+        with patch(
+            "ws.fill_feature_writer.time.monotonic", return_value=10_000.0
+        ):
+            writer.maybe_flush()
+
+        rows = _read_lines(os.path.join(tmp_path, os.listdir(tmp_path)[0]))
+        assert [r["id"] for r in rows] == ["a", "c"]
+        assert writer.stats["written"] == 2
+        assert writer.stats["dropped_serialize"] == 1
+        assert writer.stats["buffered"] == 0
 
     def test_makedirs_failure_disables_writer(self, tmp_path):
         with patch("ws.fill_feature_writer.os.makedirs", side_effect=OSError("denied")):
@@ -204,3 +278,5 @@ class TestFailSilent:
             writer.maybe_flush()  # json.dumps fails -> swallowed
 
         assert writer.stats["errors"] == 1
+        assert writer.stats["dropped_serialize"] == 1
+        assert writer.stats["buffered"] == 0  # poison discarded, not retried
