@@ -28,7 +28,7 @@ def _make_md(
 
 class TestComputeFillFeatures:
     def test_schema_version_is_pinned(self):
-        assert FEATURE_SCHEMA_VERSION == 1
+        assert FEATURE_SCHEMA_VERSION == 2
 
     def test_computes_all_features(self):
         md = _make_md()
@@ -45,6 +45,19 @@ class TestComputeFillFeatures:
         assert features["bid_sz"] == 12.0
         assert features["ask_sz"] == 18.0
         assert features["utc_hour"] == 14
+
+    def test_realized_vol_passthrough(self):
+        """realized_vol_bps is written through when supplied."""
+        md = _make_md()
+        utc_now = datetime(2026, 7, 8, 14, 30, tzinfo=timezone.utc)
+        features = compute_fill_features(md, utc_now, realized_vol_bps=3.5)
+        assert features["realized_vol_bps"] == pytest.approx(3.5)
+
+    def test_realized_vol_defaults_to_none(self):
+        """Omitting realized_vol_bps yields None (unavailable / unwired)."""
+        md = _make_md()
+        features = compute_fill_features(md, datetime(2026, 1, 1, tzinfo=timezone.utc))
+        assert features["realized_vol_bps"] is None
 
     def test_micro_price_skew_sign(self):
         """micro_price above mid -> positive skew (buy pressure)."""

@@ -92,9 +92,24 @@ class AdverseSelectionTracker:
         # Optional FillFeatureWriter for per-fill feature JSONL logging.
         self._feature_writer: Any = None
 
+        # Latest per-coin realized volatility (bps), published by the strategy
+        # each cycle and read at fill time for the feature record. A single
+        # float per coin is GIL-atomic, so no lock is taken (main-loop writer,
+        # WS-thread reader — same pattern as the aggregate dicts above).
+        self._coin_vol: Dict[str, Optional[float]] = {}
+
     def set_feature_writer(self, writer: Any) -> None:
         """Register a FillFeatureWriter to receive per-fill feature records."""
         self._feature_writer = writer
+
+    def set_coin_volatility(self, coin: str, vol_bps: Optional[float]) -> None:
+        """Publish the latest realized volatility (bps) for ``coin``.
+
+        Called by the market-making strategy once per cycle; read at fill time
+        by :meth:`_build_feature_record` for the feature JSONL. Observation
+        only — never influences trading.
+        """
+        self._coin_vol[coin] = vol_bps
 
     # ------------------------------------------------------------------ #
     #  Fill recording
@@ -207,7 +222,10 @@ class AdverseSelectionTracker:
             "closed_pnl": _to_float(raw_fill.get("closedPnl")),
             "fee": _to_float(raw_fill.get("fee")),
         }
-        record.update(compute_fill_features(md, utc_now))
+        record.update(compute_fill_features(
+            md, utc_now,
+            realized_vol_bps=self._coin_vol.get(raw_fill.get("coin")),
+        ))
         return record
 
     # ------------------------------------------------------------------ #

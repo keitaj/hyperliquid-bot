@@ -850,6 +850,14 @@ class HyperliquidBot:
                 )
                 self.adverse_tracker.set_feature_writer(self.fill_feature_writer)
                 logger.info(f"[ws] FillFeatureWriter enabled (dir={log_dir})")
+                # Publish per-coin realized volatility into the feature record.
+                # RV is a market-making strategy signal; guard for other
+                # strategies that lack the hooks. This also links the tracker so
+                # RV flows even when dynamic-offset is disabled.
+                if hasattr(self.strategy, '_publish_vol_for_logging'):
+                    self.strategy._adverse_tracker = self.adverse_tracker
+                    self.strategy._publish_vol_for_logging = True
+                    logger.info("[ws] Realized-vol publishing enabled for fill-feature log")
 
         # Forager: route fill events from FillFeed into the strategy's
         # CoinHealthTracker so the quality + cost dimensions are populated.

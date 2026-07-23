@@ -115,6 +115,10 @@ class MarketMakingStrategy(BaseStrategy):
         self._dynamic_offset_min_fills: int = self.cfg.dynamic_offset.min_fills
         self._adverse_tracker = None  # set by bot.py after WS init
         self._oracle_guard = None  # set by bot.py when oracle_guard_enabled
+        # When True (set by bot.py with fill-feature logging), record mids and
+        # publish realized volatility to the adverse tracker for the feature
+        # log even if vol-adjust / dynamic-age are disabled.
+        self._publish_vol_for_logging: bool = False
         if self._dynamic_offset_enabled:
             logger.info(
                 f"[mm] Dynamic offset enabled: sensitivity={self._dynamic_offset_sensitivity}, "
@@ -640,7 +644,9 @@ class MarketMakingStrategy(BaseStrategy):
 
     def _record_mid_price(self, coin: str, mid_price: float) -> None:
         """Record a mid price for volatility tracking. Call once per cycle."""
-        if not self.vol_adjust_enabled and not getattr(self, '_dynamic_age_enabled', False):
+        if (not self.vol_adjust_enabled
+                and not getattr(self, '_dynamic_age_enabled', False)
+                and not getattr(self, '_publish_vol_for_logging', False)):
             return
         if coin not in self._recent_mids:
             self._recent_mids[coin] = deque(maxlen=self.vol_lookback)
@@ -767,6 +773,14 @@ class MarketMakingStrategy(BaseStrategy):
             # offset below sees the freshest sample in both call paths
             # (run-loop tolerance check and order placement).
             self._record_mid_price(coin, mid_price)
+            # Publish realized volatility for the fill-feature log (observation
+            # only; no effect on quoting). Uses the same computation consumed
+            # by dynamic-age / dynamic-offset.
+            if (getattr(self, '_publish_vol_for_logging', False)
+                    and self._adverse_tracker is not None):
+                self._adverse_tracker.set_coin_volatility(
+                    coin, self._compute_realized_volatility(coin)
+                )
             base_offset = self._get_coin_offset(coin)
             if self.vol_adjust_enabled:
                 effective_offset_bps = self._get_volatility_adjusted_offset(coin, base_offset)

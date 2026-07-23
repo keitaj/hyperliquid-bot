@@ -16,10 +16,15 @@ from typing import Any, Dict, Optional
 
 # Bump when the feature set / semantics change so downstream consumers
 # (training pipelines, coefficient files) can detect incompatibilities.
-FEATURE_SCHEMA_VERSION = 1
+# v2: added realized_vol_bps.
+FEATURE_SCHEMA_VERSION = 2
 
 
-def compute_fill_features(md: Any, utc_now: datetime) -> Dict[str, Optional[float]]:
+def compute_fill_features(
+    md: Any,
+    utc_now: datetime,
+    realized_vol_bps: Optional[float] = None,
+) -> Dict[str, Optional[float]]:
     """Compute fill-time order book features from a ``MarketData`` snapshot.
 
     Parameters
@@ -29,6 +34,13 @@ def compute_fill_features(md: Any, utc_now: datetime) -> Dict[str, Optional[floa
         calling (mirrors the guard in ``AdverseSelectionTracker.on_fill``).
     utc_now : datetime
         Current UTC time, used for the ``utc_hour`` feature.
+    realized_vol_bps : float, optional
+        Recent per-coin realized volatility (bps), computed by the strategy
+        and published to the tracker each cycle. ``None`` when unavailable
+        (insufficient price history / feature unwired). Same definition is
+        used by future inference, so passing it in here (rather than
+        recomputing) preserves the single-source-of-truth / no train-serve
+        skew property.
 
     Returns
     -------
@@ -47,6 +59,7 @@ def compute_fill_features(md: Any, utc_now: datetime) -> Dict[str, Optional[floa
         "bid_sz": getattr(md, 'bid_size_top', 0.0),
         "ask_sz": getattr(md, 'ask_size_top', 0.0),
         "utc_hour": utc_now.hour,
+        "realized_vol_bps": realized_vol_bps,
         # Reserved slot: populated once an oracle price feed is wired in.
         "oracle_divergence_bps": None,
     }
