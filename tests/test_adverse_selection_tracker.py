@@ -489,7 +489,7 @@ class TestFeatureRecord:
         writer.add.assert_called_once()
         snap = writer.add.call_args[0][0]
         record = snap.record
-        assert record["v"] == 1
+        assert record["v"] == 2
         assert record["tid"] == 118906543210987
         assert record["oid"] == 32189765432
         assert record["hash"] == "0xabc123"
@@ -506,6 +506,36 @@ class TestFeatureRecord:
         assert abs(record["spread_bps"] - 5.0) < 1e-9
         assert record["book_imbalance"] == -0.25
         assert record["oracle_divergence_bps"] is None
+        # realized_vol_bps is None until published for this coin
+        assert record["realized_vol_bps"] is None
+
+    def test_realized_vol_published_into_record(self):
+        """RV published via set_coin_volatility appears in the fill record."""
+        md_mgr = self._make_full_md()
+        tracker = AdverseSelectionTracker(md_mgr, log_interval=9999)
+        writer = MagicMock()
+        tracker.set_feature_writer(writer)
+        tracker.set_coin_volatility("xyz:SP500", 4.2)
+
+        with patch('ws.adverse_selection_tracker.threading'):
+            tracker.on_fill("xyz:SP500", 100.02, "B", 1751900000123,
+                            raw_fill=self._raw_fill())
+
+        assert writer.add.call_args[0][0].record["realized_vol_bps"] == 4.2
+
+    def test_realized_vol_none_for_unpublished_coin(self):
+        """A coin without a published RV keeps realized_vol_bps None."""
+        md_mgr = self._make_full_md()
+        tracker = AdverseSelectionTracker(md_mgr, log_interval=9999)
+        writer = MagicMock()
+        tracker.set_feature_writer(writer)
+        tracker.set_coin_volatility("xyz:OTHER", 9.9)  # different coin
+
+        with patch('ws.adverse_selection_tracker.threading'):
+            tracker.on_fill("xyz:SP500", 100.02, "B", 1751900000123,
+                            raw_fill=self._raw_fill())
+
+        assert writer.add.call_args[0][0].record["realized_vol_bps"] is None
 
     def test_taker_fill_is_maker_false(self):
         md_mgr = self._make_full_md()
