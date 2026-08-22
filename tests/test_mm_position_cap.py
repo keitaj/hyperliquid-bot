@@ -2,9 +2,13 @@
 
 The cap suppresses same-direction entries once the accumulated
 position value (``|size| × mid_price``) reaches
-``max_position_multiple × effective_order_size_usd``. Opposite-side
-entries are still placed so existing inventory can unwind through
-normal quoting.
+``max_position_multiple × effective_order_size_usd``.
+
+Note: these tests call ``_place_orders`` directly with a non-zero position,
+a state the live flow never produces -- ``run()`` delegates coins holding a
+position to PositionCloser, so the cap is inert in production. They pin the
+arithmetic for a future two-sided quoting mode; see
+``tests/test_mm_single_sided_flow.py`` for the invariant that makes it inert.
 """
 
 from collections import defaultdict

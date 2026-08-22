@@ -356,7 +356,13 @@ The `market_making` strategy uses **progressive close pricing**: as a position a
 
 **Auto-exclude on adverse selection** (`--auto-exclude`): Automatically pauses a coin when the AdverseSelectionTracker reports moderate adverse selection (`avg_<window>` below `--auto-exclude-threshold-bps`, default `-3.0`) for `--auto-exclude-consecutive` summary windows in a row (default 3, ~15 min with the default 300s log interval). The coin is paused for `--auto-exclude-cooldown` seconds (default 1800) and then automatically resumes. Requires `--enable-adverse-selection-log`. Per-window `min_fills` filtering keeps low-volume noise from triggering. Shares the per-coin cooldown map with `--loss-streak-limit`, so the two features compose naturally.
 
-**Per-coin position cap** (`max_position_multiple`, env-only): Suppresses same-direction entries once the accumulated position value (`|position| × mid_price`) reaches `max_position_multiple × effective_order_size_usd` for that coin. Opposite-side entries still place so existing inventory can unwind through normal quoting. Prevents the accumulated-position-then-single-large-close scenario that exposes a market-making bot to oversized adverse fills. The cap respects `coin_size_overrides`, so a per-coin order-size override tightens or loosens the cap proportionally. Default `0.0` (disabled) preserves the pre-cap behaviour.
+**Per-coin position cap** (`max_position_multiple`, env-only): Suppresses same-direction entries once the accumulated position value (`|position| × mid_price`) reaches `max_position_multiple × effective_order_size_usd` for that coin, to prevent the accumulated-position-then-single-large-close scenario that exposes a market-making bot to oversized adverse fills. The cap respects `coin_size_overrides`, so a per-coin order-size override tightens or loosens the cap proportionally. Default `0.0` (disabled) preserves the pre-cap behaviour. **⚠️ No-op in the current single-sided flow** — see [Inventory skew and position cap are inert](#inventory-skew-and-position-cap-are-inert) below.
+
+#### Inventory skew and position cap are inert
+
+`inventory_skew_bps` and `max_position_multiple` are **currently no-ops**: the market-making loop hands any coin that holds a position to the position closer and skips quoting for it, so order placement only ever runs while flat. Both features gate on a non-zero position, so neither can influence a placed order. Setting either to a non-zero value logs a warning at startup.
+
+They are retained (not removed) because both become meaningful under a two-sided quoting mode, where a coin keeps quoting while holding inventory — `inventory_skew_bps` would then shift quotes to mean-revert inventory, and `max_position_multiple` would bound the accumulation. Implementing that mode is a deliberate strategy change, not a config toggle: it trades faster inventory flattening (which keeps post-fill markout mild) for more quote uptime, and it only pays off when the risk manager's net-inventory cap is large relative to the order size.
 
 **Fill feature logging** (`--fill-feature-log`): Writes one JSON line per fill to a daily-rotated file (`{dir}/YYYYMMDD.jsonl`, UTC) containing the fill's join keys (`tid`/`oid`/`hash`), fill attributes, order-book features at fill time (spread, book imbalance, micro-price skew, top-of-book sizes, recent realized volatility), and the tracker's 5s/30s/60s markout samples as labels — a ready-made supervised dataset for offline adverse-selection modelling. Observation-only: the WebSocket thread performs no file IO (records are buffered in memory and flushed from the main loop after a 65s maturity window so markout labels can be embedded), all failures are swallowed, and a daily size cap plus buffer cap protect disk and memory. Requires `--enable-ws` and `--enable-adverse-selection-log`. Feature definitions live in a single shared function (`fill_features.compute_fill_features`) so future in-bot inference uses identical inputs (no train/serve skew). Default disabled.
 
@@ -611,7 +617,7 @@ strategies:
     unrealized_loss_close_bps: 0       # --unrealized-loss-close-bps  (early taker close when unrealized loss exceeds this bps; 0 = disabled)
     bbo_mode: false                    # --bbo-mode  (place orders at best bid/ask instead of mid ± spread)
     bbo_offset_bps: 0                  # --bbo-offset-bps  (bps behind BBO; 0 = at BBO)
-    inventory_skew_bps: 0              # --inventory-skew-bps (skew per unit of inventory; 0 = disabled)
+    inventory_skew_bps: 0              # --inventory-skew-bps (NO-OP in the current single-sided flow: a coin holding a position does not re-quote, so the skew never reaches an order; warns at startup if non-zero)
     coin_offset_overrides: ""          # --coin-offset-overrides  (per-coin BBO offset: "SP500:0.5,MSFT:3")
     coin_spread_overrides: ""          # --coin-spread-overrides  (per-coin spread: "SP500:8,XYZ100:15")
     coin_size_overrides: ""            # --coin-size-overrides  (per-coin order size USD: "TSLA:150,NVDA:150")
@@ -655,7 +661,7 @@ strategies:
     forager_activity_idle_min_seconds: 300.0  # env-only (idle grace before activity score decays)
     forager_cost_max_per_1k: 0.6       # env-only ($/1K at which cost score reaches 0)
     forager_min_closes_for_quality: 5  # env-only (min closes required to trust quality dimension)
-    max_position_multiple: 0.0         # env-only (per-coin entry-side cap on accumulated |position| × mid as a multiple of order_size_usd; 0 disables)
+    max_position_multiple: 0.0         # env-only (NO-OP in the current single-sided flow: entries are not placed while a position is open, so the same-side suppression never triggers; warns at startup if non-zero)
     account_cap_pct: 0.05              # --account-cap-pct
     max_positions: 3
     take_profit_percent: 1
