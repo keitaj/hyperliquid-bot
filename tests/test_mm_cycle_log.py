@@ -1,4 +1,8 @@
-"""Tests for MM strategy [cycle] log with inventory skew info."""
+"""Tests for the MM strategy ``[cycle]`` log.
+
+Note: the cycle log deliberately does *not* surface the inventory skew --
+see ``tests/test_mm_single_sided_flow.py`` for why it would be misleading.
+"""
 
 import logging
 from collections import defaultdict
@@ -90,7 +94,13 @@ class TestMMCycleLog:
         assert len(cycle_lines) == 1
         assert 'BTC:idle' in cycle_lines[0].message
 
-    def test_position_with_skew(self, caplog):
+    def test_position_never_reports_skew(self, caplog):
+        """A held position logs ``:pos`` even when a skew is configured.
+
+        The skew cannot reach an order in the single-sided flow (the coin is
+        delegated to PositionCloser and stops quoting), so surfacing it here
+        would imply an effect that does not exist.
+        """
         s, om, md = _make_strategy(inventory_skew_bps=2, order_size_usd=100)
         s.positions = {'BTC': {'size': 1.0, 'entry_price': 100.0,
                                'unrealized_pnl': 0, 'margin_used': 10}}
@@ -102,7 +112,8 @@ class TestMMCycleLog:
 
         cycle_lines = [r for r in caplog.records if '[cycle]' in r.message]
         assert len(cycle_lines) == 1
-        assert 'BTC:skew+' in cycle_lines[0].message
+        assert 'BTC:pos' in cycle_lines[0].message
+        assert 'skew' not in cycle_lines[0].message
         assert '1 pos' in cycle_lines[0].message
 
     def test_position_with_zero_skew(self, caplog):

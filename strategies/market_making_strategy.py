@@ -140,11 +140,8 @@ class MarketMakingStrategy(BaseStrategy):
         # suppress same-direction entries to prevent oversized force-close events.
         # 0.0 = disabled (legacy behaviour).
         self._max_position_multiple: float = self.cfg.position_cap.max_position_multiple
-        if self._max_position_multiple > 0:
-            logger.info(
-                f"[mm] Position cap armed: max_position_multiple="
-                f"{self._max_position_multiple}x order_size_usd"
-            )
+
+        self._warn_inert_parameters()
 
         # ---- Forager: composite per-coin health scoring ---- #
         self._coin_health_tracker: Optional[CoinHealthTracker] = (
@@ -574,13 +571,11 @@ class MarketMakingStrategy(BaseStrategy):
             pos = self.positions.get(coin)
             if pos and pos['size'] != 0:
                 active_positions += 1
-                md = self.market_data.get_market_data(coin)
-                mid = md.mid_price if md else 0
-                skew = self._calculate_inventory_skew(coin, mid)
-                if abs(skew) > 0:
-                    coin_statuses.append(f"{coin}:skew{skew:+.1f}bp")
-                else:
-                    coin_statuses.append(f"{coin}:pos")
+                # Deliberately does not surface the inventory skew: a coin holding
+                # a position never re-quotes (it is delegated to PositionCloser), so
+                # printing a non-zero skew here would imply an effect on orders that
+                # cannot happen. See _calculate_inventory_skew for the full note.
+                coin_statuses.append(f"{coin}:pos")
             else:
                 # Show vol-adjusted offset when it differs from base (read-only)
                 if self.vol_adjust_enabled and self.bbo_mode:
@@ -914,11 +909,16 @@ class MarketMakingStrategy(BaseStrategy):
                 logger.debug(f"[mm] {coin} oracle guard blocking {sorted(blocked)}")
 
         # Per-coin position cap: suppress same-direction entries once
-        # accumulated |position| × mid_price reaches the cap. Opposite-side
-        # entries are still allowed so existing inventory can unwind through
-        # normal quoting. ``self._max_position_multiple == 0`` disables the
-        # check entirely (legacy behaviour). ``getattr`` is used so tests
-        # that bypass ``__init__`` inherit the disabled default.
+        # accumulated |position| × mid_price reaches the cap.
+        # ``self._max_position_multiple == 0`` disables the check entirely
+        # (legacy behaviour). ``getattr`` is used so tests that bypass
+        # ``__init__`` inherit the disabled default.
+        #
+        # NOTE: unreachable in the current single-sided flow. ``run()`` delegates
+        # any coin holding a position to PositionCloser and ``continue``s, so this
+        # function only runs while flat and the ``size != 0`` guard below never
+        # passes in production. Retained for a future two-sided quoting mode; the
+        # unit tests below exercise it by calling ``_place_orders`` directly.
         if getattr(self, '_max_position_multiple', 0.0) > 0:
             pos = self.positions.get(coin)
             if pos is not None and pos.get('size', 0) != 0:
@@ -989,11 +989,47 @@ class MarketMakingStrategy(BaseStrategy):
         offset = mid_price * (self.spread_bps / 10_000)
         return mid_price - offset, mid_price + offset
 
+    def _warn_inert_parameters(self) -> None:
+        """Warn when a parameter that cannot take effect is configured non-zero.
+
+        ``run()`` hands any coin that holds a position to :class:`PositionCloser`
+        and ``continue``s, so :meth:`_place_orders` only ever runs while flat.
+        Both the inventory skew and the entry-side position cap gate on a
+        *non-zero* position, so neither can influence a placed order in the
+        current single-sided flow. The parameters are kept (not removed) so a
+        future two-sided quoting mode can activate them, but an operator setting
+        one today must not be left assuming it is live.
+        """
+        if self.inventory_skew_bps:
+            logger.warning(
+                f"[mm] inventory_skew_bps={self.inventory_skew_bps} has NO EFFECT in the "
+                f"current single-sided flow: a coin holding a position is managed by "
+                f"PositionCloser and does not re-quote, so the skew never reaches an order"
+            )
+        if self._max_position_multiple > 0:
+            logger.warning(
+                f"[mm] max_position_multiple={self._max_position_multiple} has NO EFFECT in "
+                f"the current single-sided flow: entries are not placed while a position is "
+                f"open, so the same-side suppression never triggers"
+            )
+
     def _calculate_inventory_skew(self, coin: str, mid_price: float) -> float:
         """Calculate price skew in bps based on current inventory.
 
         Positive skew shifts both prices down (encourages selling when long).
         Negative skew shifts both prices up (encourages buying when short).
+
+        .. note::
+           **No-op in the current single-sided flow.** :meth:`run` delegates any
+           coin that holds a position to :class:`PositionCloser` and ``continue``s,
+           so the only production caller (:meth:`_place_orders`) always runs while
+           flat and the position guard below returns ``0.0``. ``self.positions`` is
+           only repopulated by ``update_positions()`` at the top of a cycle, so
+           there is no race that could make it non-zero mid-cycle either.
+
+           Kept (rather than removed) for a future two-sided quoting mode, where a
+           coin would keep quoting while holding inventory. Until then, setting
+           ``inventory_skew_bps`` has no effect and ``__init__`` warns about it.
         """
         if not self.inventory_skew_bps:
             return 0.0
