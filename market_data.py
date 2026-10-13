@@ -151,6 +151,16 @@ class MarketDataManager:
             micro_price=micro_price,
         )
 
+    def get_cached_market_data(self, coin: str) -> Optional[MarketData]:
+        """Return the cached snapshot for *coin*, or ``None`` when not fresh.
+
+        Unlike :meth:`get_market_data` this never falls back to a REST L2
+        fetch, so callers that only want an opportunistic read (observation,
+        logging) cannot add API load. Returns ``None`` on a cache miss — the
+        caller is expected to skip rather than fetch.
+        """
+        return self._cache.get(coin)
+
     def update_from_ws(self, coin: str, levels) -> None:
         """Update the cache from a WebSocket l2Book message.
 

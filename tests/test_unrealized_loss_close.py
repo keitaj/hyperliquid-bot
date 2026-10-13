@@ -27,6 +27,9 @@ def _make_closer(
     """Build a PositionCloser with mocked dependencies."""
     om = MagicMock()
     md = MagicMock()
+    # Cache miss by default: manage() samples market data unconditionally
+    # for max-adverse-excursion tracking, which is observation-only.
+    md.get_cached_market_data.return_value = None
     md.round_size.return_value = 0.5
     md.get_sz_decimals.return_value = 0
     md.price_rounding_params.return_value = (0, True)

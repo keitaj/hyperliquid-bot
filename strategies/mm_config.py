@@ -303,6 +303,11 @@ class CloseConfig:
     # against over-shortening when dynamic age, per-coin overrides and
     # toxicity acceleration stack. 0 = disabled (legacy behaviour).
     tier_min_seconds: float = 0.0
+    # Log the worst unrealized loss each position reached (mae_bps/mae_age on
+    # the close-event line). Observation only — no effect on close decisions
+    # and no extra API calls, so it defaults on. Needed to calibrate
+    # unrealized_loss_close_bps, which cannot be done from fills alone.
+    track_max_adverse_excursion: bool = True
 
     def __post_init__(self) -> None:
         if self.tier_min_seconds < 0:
@@ -621,6 +626,9 @@ class MMConfig:
                 unrealized_loss_close_bps=float(d.get('unrealized_loss_close_bps', 0.0)),
                 force_close_max_loss_bps=float(d.get('force_close_max_loss_bps', 0.0)),
                 tier_min_seconds=float(d.get('close_tier_min_seconds', 0.0)),
+                track_max_adverse_excursion=bool(
+                    d.get('track_max_adverse_excursion', True)
+                ),
             ),
             close_tier_toxicity=CloseTierToxicityConfig(
                 enabled=bool(d.get('close_tier_toxicity_enabled', False)),

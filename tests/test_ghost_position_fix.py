@@ -109,6 +109,9 @@ class TestUserStateCacheInvalidation:
 def _make_closer(max_age=120, maker_only=False, spread_bps=10):
     om = MagicMock()
     md = MagicMock()
+    # Cache miss by default: manage() samples market data unconditionally
+    # for max-adverse-excursion tracking, which is observation-only.
+    md.get_cached_market_data.return_value = None
     md.round_size.return_value = 0.5
     closer = PositionCloser(
         order_manager=om,

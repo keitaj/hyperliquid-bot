@@ -22,6 +22,9 @@ def _make_closer(max_age=120, maker_only=True, taker_fallback=None,
                  spread_bps=10):
     om = MagicMock()
     md = MagicMock()
+    # Cache miss by default: manage() samples market data unconditionally
+    # for max-adverse-excursion tracking, which is observation-only.
+    md.get_cached_market_data.return_value = None
     md.round_size.return_value = 0.5
     md.get_sz_decimals.return_value = 0
     md.price_rounding_params.return_value = (0, True)
@@ -349,6 +352,9 @@ def _make_tier_closer(max_age=120, coin_tiers=None, tox_cfg=None, tracker=None,
                       maker_only=False):
     om = MagicMock()
     md = MagicMock()
+    # Cache miss by default: manage() samples market data unconditionally
+    # for max-adverse-excursion tracking, which is observation-only.
+    md.get_cached_market_data.return_value = None
     md.round_size.return_value = 0.5
     md.price_rounding_params.return_value = (0, True)
     om.get_all_positions.return_value = [{'coin': 'BTC', 'szi': '1.0'}]

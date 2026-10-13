@@ -11,6 +11,9 @@ def _make_closer(max_age=120, taker_fallback=120, aggressive_loss_bps=1.0,
     """Create a PositionCloser with mocked dependencies."""
     om = MagicMock()
     md = MagicMock()
+    # Cache miss by default: manage() samples market data unconditionally
+    # for max-adverse-excursion tracking, which is observation-only.
+    md.get_cached_market_data.return_value = None
     closer = PositionCloser(
         order_manager=om, market_data=md,
         spread_bps=10, max_position_age_seconds=max_age,

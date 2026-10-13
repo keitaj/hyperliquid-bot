@@ -316,6 +316,7 @@ class MarketMakingStrategy(BaseStrategy):
             coin_close_tier_overrides=self.cfg.per_coin.close_tier,
             close_tier_toxicity=self.cfg.close_tier_toxicity,
             close_tier_min_seconds=self.cfg.close.tier_min_seconds,
+            track_max_adverse_excursion=self.cfg.close.track_max_adverse_excursion,
         )
 
     @property
