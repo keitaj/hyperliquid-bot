@@ -250,13 +250,103 @@ class TestMaeEdgeCases:
         _manage(closer, md, 99.95)     # new position, 5 bps
         assert closer._mae['BTC'][0] == pytest.approx(5.0)
 
-    def test_ghost_clear_drops_state(self):
-        """The ghost-position path pops MAE even though it logs no close event."""
+
+class TestMaeClearedOnNonCloseExits:
+    """The three paths that drop a tracked position without logging a close
+    event must also drop its peak, or it would be carried into the next
+    position on that coin.
+
+    These exercise the real code paths rather than mutating ``_mae``
+    directly -- a test that pops the entry itself would pass even if the
+    production call were removed.
+    """
+
+    def test_ghost_position_clear(self):
+        """Repeated close-order placement failures clear the stale peak."""
+        closer, om, md = _make_closer()
+        om.create_limit_order.return_value = None  # placement always fails
+        position = {'size': 1.0, 'entry_price': 100.0}
+        _set_mid(md, 99.0)
+
+        for _ in range(5):  # _GHOST_CLEAR_THRESHOLD
+            if 'BTC' in closer._open_positions:
+                entry_time = closer._open_positions['BTC'][0]
+                closer._open_positions['BTC'] = (entry_time, None, 0)
+            closer.manage('BTC', position, MagicMock())
+
+        assert 'BTC' not in closer._open_positions
+        assert 'BTC' not in closer._mae
+
+    def test_already_closed_before_force_close(self, caplog):
+        """The pre-force-close flat-position check clears the peak."""
+        closer, om, md = _make_closer(max_age=60)
+        _manage(closer, md, 99.0)
+        assert closer._mae['BTC'][0] == pytest.approx(100.0)
+
+        # Age past max_age, and let the exchange report the position as gone.
+        entry_time, oid, tier = closer._open_positions['BTC']
+        closer._open_positions['BTC'] = (entry_time - 120, oid, tier)
+        om.get_all_positions.return_value = [{'coin': 'BTC', 'szi': '0'}]
+
+        with caplog.at_level(logging.INFO):
+            closer.manage('BTC', {'size': 1.0, 'entry_price': 100.0}, MagicMock())
+
+        assert 'BTC' not in closer._mae
+        # No close event is logged on this path, so nothing should be emitted.
+        assert not [r for r in caplog.records if '[close-reason]' in r.message]
+
+    def test_already_closed_before_placement(self):
+        """The pre-placement flat-position check clears the peak."""
         closer, om, md = _make_closer()
         _manage(closer, md, 99.0)
-        closer._open_positions.pop('BTC', None)
-        closer._mae.pop('BTC', None)
+        assert 'BTC' in closer._mae
+
+        # Force a re-placement attempt against a position the exchange says
+        # is already flat.
+        entry_time, _, tier = closer._open_positions['BTC']
+        closer._open_positions['BTC'] = (entry_time, None, tier)
+        om.get_all_positions.return_value = [{'coin': 'BTC', 'szi': '0'}]
+
+        closer.manage('BTC', {'size': 1.0, 'entry_price': 100.0}, MagicMock())
+
+        assert 'BTC' not in closer._open_positions
         assert 'BTC' not in closer._mae
+
+
+class TestMaeFloor:
+    """The reported value never goes negative, independent of seeding."""
+
+    def test_profit_only_position_stays_at_zero(self):
+        closer, om, md = _make_closer()
+        _manage(closer, md, 100.8)
+        assert closer._mae['BTC'] == (0.0, 0.0)
+
+    def test_floor_holds_without_the_registration_seed(self):
+        """_update_mae must floor on its own, not rely on the seed.
+
+        _record_close pops the entry and can run on the WS thread while a
+        manage() call is already past the registration check, so the
+        unseeded branch is reachable in production.
+        """
+        closer, om, md = _make_closer()
+        closer._open_positions['BTC'] = (time.monotonic(), None, 0)
+        closer._mae.pop('BTC', None)
+        _set_mid(md, 100.5)  # long in profit
+
+        closer._update_mae('BTC', 1.0, 100.0, 5.0)
+
+        assert 'BTC' not in closer._mae  # nothing worse than the 0.0 floor
+
+    def test_adverse_sample_still_recorded_without_seed(self):
+        """The floor must not swallow a genuine adverse sample."""
+        closer, om, md = _make_closer()
+        closer._open_positions['BTC'] = (time.monotonic(), None, 0)
+        closer._mae.pop('BTC', None)
+        _set_mid(md, 99.0)
+
+        closer._update_mae('BTC', 1.0, 100.0, 5.0)
+
+        assert closer._mae['BTC'][0] == pytest.approx(100.0)
 
 
 class TestMaeAddsNoApiCalls:

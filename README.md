@@ -617,7 +617,7 @@ strategies:
     close_tier_toxicity_min_fills: 5   # --close-tier-toxicity-min-fills  (min fills in window required to fire)
     close_tier_toxicity_floor_pct: 0.15  # --close-tier-toxicity-floor-pct  (breakeven fraction floor after multiplier)
     unrealized_loss_close_bps: 0       # --unrealized-loss-close-bps  (early taker close when unrealized loss exceeds this bps; 0 = disabled)
-    track_max_adverse_excursion: true  # (log mae_bps/mae_age on the close-event line; observation only, no extra API calls)
+    track_max_adverse_excursion: true  # (no CLI flag; JSON config only) log mae_bps/mae_age on the close-event line; observation only, no extra API calls
     bbo_mode: false                    # --bbo-mode  (place orders at best bid/ask instead of mid ± spread)
     bbo_offset_bps: 0                  # --bbo-offset-bps  (bps behind BBO; 0 = at BBO)
     inventory_skew_bps: 0              # --inventory-skew-bps (NO-OP in the current single-sided flow: a coin holding a position does not re-quote, so the skew never reaches an order; warns at startup if non-zero)

@@ -576,7 +576,10 @@ class PositionCloser:
         than fetched.
 
         ``mae_bps`` uses the same sign convention as the unrealized-loss
-        early close: positive means the position has moved against us.
+        early close: positive means the position has moved against us. The
+        value is floored at 0.0 rather than going negative when a position
+        only ever moved in our favour, so the floor does not depend on the
+        seeding path having run.
 
         Sampling is bounded by the main-loop interval, so the recorded
         value is a *lower bound* on the true excursion — an intra-interval
@@ -594,7 +597,13 @@ class PositionCloser:
         else:         # short: adverse when the mid rises above entry
             adverse_bps = (md.mid_price - entry_price) / entry_price * 10_000
         prev = self._mae.get(coin)
-        if prev is None or adverse_bps > prev[0]:
+        # Floor at 0.0 so a position that only moved in our favour cannot
+        # record a negative "adverse" excursion. Relying on the registration
+        # seed for this would break whenever _update_mae runs without it --
+        # _record_close pops the entry and can fire on the WS thread while a
+        # manage() call is already past the registration check.
+        floor = prev[0] if prev is not None else 0.0
+        if adverse_bps > floor:
             self._mae[coin] = (adverse_bps, age)
 
     def set_adverse_tracker(self, tracker: Any) -> None:
