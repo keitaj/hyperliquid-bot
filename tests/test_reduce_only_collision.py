@@ -17,6 +17,9 @@ def _make_closer(**kwargs):
     """Create a PositionCloser with mocked dependencies."""
     om = MagicMock()
     md = MagicMock()
+    # Cache miss by default: manage() samples market data unconditionally
+    # for max-adverse-excursion tracking, which is observation-only.
+    md.get_cached_market_data.return_value = None
     # Default: get_all_positions returns a position so force-close
     # verification passes (existing tests assume position exists).
     om.get_all_positions.return_value = [{'coin': 'SP500', 'szi': '0.5'}]

@@ -62,6 +62,7 @@ class PositionCloser:
         coin_close_tier_overrides: Optional[Dict[str, Tuple[float, float]]] = None,
         close_tier_toxicity: Optional[CloseTierToxicityConfig] = None,
         close_tier_min_seconds: float = 0.0,
+        track_max_adverse_excursion: bool = True,
     ) -> None:
         self.order_manager = order_manager
         self.market_data = market_data
@@ -99,9 +100,18 @@ class PositionCloser:
         self._tox_active: Dict[str, bool] = {}
         # Absolute floor (seconds) for the breakeven transition (0 = disabled)
         self.close_tier_min_seconds = close_tier_min_seconds
+        # Observation only: track the worst unrealized loss each position
+        # reaches while it is open, so the close-event log can report it.
+        self._track_mae = track_max_adverse_excursion
 
         # coin -> (entry_time, close_oid or None, close_tier)
         self._open_positions: Dict[str, Tuple[float, Optional[int], int]] = {}
+        # coin -> (max_adverse_excursion_bps, position_age_when_reached).
+        # Seeded to (0.0, 0.0) when a position is first tracked so a position
+        # that never moved against us is recorded as 0.0 rather than being
+        # omitted — the recovered positions are the denominator when
+        # calibrating the unrealized-loss close threshold.
+        self._mae: Dict[str, Tuple[float, float]] = {}
         # coin -> consecutive cycles where manage() failed to place a close order
         self._consecutive_close_failures: Dict[str, int] = {}
         # coin -> last effective_max_age seen by manage(); used so close-event
@@ -142,11 +152,21 @@ class PositionCloser:
         clamped low) or by the full grace window. Optional and
         backward-compatible — the existing log regex
         ``last_tier=(\\S+)`` still matches the same group.
+
+        ``mae_bps`` / ``mae_age`` report the worst unrealized loss the
+        position reached and the age at which it did. Emitted for every
+        close reason, including profitable maker closes, because a
+        threshold-based early close can only be calibrated against the
+        positions that drifted and then recovered. Appended at the end of
+        the line for the same backward-compatibility reason as ``max_age``.
         """
         self._close_stats[reason] += 1
         self._close_stats_by_coin[coin][reason] += 1
         tier_name = _TIER_NAMES.get(tier, f"tier{tier}")
         suffix = f" max_age={effective_max_age:.0f}s" if effective_max_age is not None else ""
+        mae = self._mae.pop(coin, None)
+        if mae is not None:
+            suffix += f" mae_bps={mae[0]:.1f} mae_age={mae[1]:.0f}s"
         logger.info(
             f"[close-reason] {coin} reason={reason} age={age:.0f}s "
             f"last_tier={tier_name}{suffix}"
@@ -276,6 +296,8 @@ class PositionCloser:
         # Register position if not tracked
         if coin not in self._open_positions:
             self._open_positions[coin] = (now, None, _TIER_NORMAL)
+            if self._track_mae:
+                self._mae[coin] = (0.0, 0.0)
             logger.info(f"[mm] Tracking position for {coin}: size={size:.6f} entry={entry_price:.4f}")
 
         entry_time, close_oid, current_tier = self._open_positions[coin]
@@ -284,6 +306,11 @@ class PositionCloser:
         # Snapshot for close-event logging from cleanup_closed /
         # on_position_closed paths that don't otherwise know it.
         self._last_effective_max_age[coin] = effective_max_age
+
+        # Sample the running max adverse excursion before any close decision
+        # below, so the reading reported with the close event includes this
+        # cycle. Observation only.
+        self._update_mae(coin, size, entry_price, age)
 
         # Unrealized loss early close: taker close when loss exceeds threshold.
         # Uses the per-coin override if present, else the global threshold.
@@ -378,6 +405,7 @@ class PositionCloser:
                 )
                 self._open_positions.pop(coin, None)
                 self._consecutive_close_failures.pop(coin, None)
+                self._mae.pop(coin, None)
         else:
             self._consecutive_close_failures.pop(coin, None)
 
@@ -408,6 +436,7 @@ class PositionCloser:
                 )
                 self._open_positions.pop(coin, None)
                 self._consecutive_close_failures.pop(coin, None)
+                self._mae.pop(coin, None)
                 return
         except Exception as e:
             logger.debug(f"[mm] Could not verify position for {coin} before force close: {e}")
@@ -537,6 +566,45 @@ class PositionCloser:
         if bare in self._coin_unrealized_loss_overrides:
             return self._coin_unrealized_loss_overrides[bare]
         return self.unrealized_loss_close_bps
+
+    def _update_mae(self, coin: str, size: float, entry_price: float, age: float) -> None:
+        """Update the running max adverse excursion for an open position.
+
+        Observation only — never influences a close decision. Uses the
+        cache-only market-data read so an enabled-by-default observation
+        cannot add API load: on a cache miss the sample is skipped rather
+        than fetched.
+
+        ``mae_bps`` uses the same sign convention as the unrealized-loss
+        early close: positive means the position has moved against us. The
+        value is floored at 0.0 rather than going negative when a position
+        only ever moved in our favour, so the floor does not depend on the
+        seeding path having run.
+
+        Sampling is bounded by the main-loop interval, so the recorded
+        value is a *lower bound* on the true excursion — an intra-interval
+        spike that retraced before the next cycle is not seen. Consumers
+        calibrating a threshold against this must treat counts of positions
+        that breached a level as under-counted.
+        """
+        if not self._track_mae or entry_price <= 0 or size == 0:
+            return
+        md = self.market_data.get_cached_market_data(coin)
+        if md is None or md.mid_price <= 0:
+            return
+        if size > 0:  # long: adverse when the mid falls below entry
+            adverse_bps = (entry_price - md.mid_price) / entry_price * 10_000
+        else:         # short: adverse when the mid rises above entry
+            adverse_bps = (md.mid_price - entry_price) / entry_price * 10_000
+        prev = self._mae.get(coin)
+        # Floor at 0.0 so a position that only moved in our favour cannot
+        # record a negative "adverse" excursion. Relying on the registration
+        # seed for this would break whenever _update_mae runs without it --
+        # _record_close pops the entry and can fire on the WS thread while a
+        # manage() call is already past the registration check.
+        floor = prev[0] if prev is not None else 0.0
+        if adverse_bps > floor:
+            self._mae[coin] = (adverse_bps, age)
 
     def set_adverse_tracker(self, tracker: Any) -> None:
         """Register the AdverseSelectionTracker for toxicity-linked tiers.
@@ -670,6 +738,7 @@ class PositionCloser:
                 logger.info(f"[mm] Position for {coin} already closed, skipping close order")
                 self._open_positions.pop(coin, None)
                 self._consecutive_close_failures.pop(coin, None)
+                self._mae.pop(coin, None)
                 return False
         except Exception:
             pass  # Proceed with placement — rejection is safer than missing a close
