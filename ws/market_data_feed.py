@@ -138,6 +138,14 @@ class MarketDataFeed:
                 # ongoing stall look fresh. Only reachable from start() on a
                 # fresh instance today, so both forms behave the same in the
                 # current call graph -- this keeps the safer one.
+                # The lock here is the existing one for _subscription_ids;
+                # _last_update is written lock-free from the WS thread in
+                # _on_l2_update and relies on single-op atomicity, so do not
+                # read this as _last_update being lock-protected.
+                # NOTE: oracle_divergence_guard uses the same
+                # `.get(coin, 0.0)` + monotonic shape *deliberately* -- there
+                # the default keeps the guard disarmed on a first sighting or
+                # a market-closed oracle. Do not seed that one by symmetry.
                 self._last_update.setdefault(coin, time.monotonic())
             logger.debug("[ws] Subscribed l2Book for %s (id=%d)", coin, sub_id)
         except Exception as e:
