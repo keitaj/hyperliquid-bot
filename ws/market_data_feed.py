@@ -125,6 +125,20 @@ class MarketDataFeed:
             )
             with self._lock:
                 self._subscription_ids[coin] = sub_id
+                # Treat a freshly subscribed coin as fresh until the staleness
+                # window has had a chance to elapse. Without this, stale_coins()
+                # compares against the dict default of 0 while time.monotonic()
+                # returns the host's uptime, so a coin that has not yet received
+                # its first l2Book message is unconditionally "stale" -- which
+                # made WsReconnector tear down and rebuild the WS stack within
+                # milliseconds of every subscribe. A coin whose subscribe raised
+                # is deliberately left unseeded so it is still reported stale.
+                # setdefault, not assignment: re-subscribing a coin that has
+                # been silent must not move its timestamp forward and make an
+                # ongoing stall look fresh. Only reachable from start() on a
+                # fresh instance today, so both forms behave the same in the
+                # current call graph -- this keeps the safer one.
+                self._last_update.setdefault(coin, time.monotonic())
             logger.debug("[ws] Subscribed l2Book for %s (id=%d)", coin, sub_id)
         except Exception as e:
             self._error_count += 1
@@ -223,7 +237,13 @@ class MarketDataFeed:
         }
 
     def stale_coins(self, max_age: float = 30.0) -> List[str]:
-        """Return coins that haven't received a WS update in *max_age* seconds."""
+        """Return coins that haven't received a WS update in *max_age* seconds.
+
+        A coin is seeded with a timestamp when its subscribe succeeds, so a
+        successfully subscribed coin only becomes stale once *max_age* has
+        actually elapsed. A coin whose subscribe failed is never seeded and is
+        therefore reported stale immediately, which is the intended signal.
+        """
         now = time.monotonic()
         return [
             c for c in self.coins

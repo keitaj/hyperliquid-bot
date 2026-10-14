@@ -336,3 +336,53 @@ class TestOracleGuardReconnect:
 
         assert bot.oracle_guard is None
         assert bot.ws_feed._ctx_listeners == []
+
+
+class TestNoReconnectRightAfterSubscribe:
+    """Integration: a real MarketDataFeed must not trip the reconnector.
+
+    The other tests in this file stub `stale_coins`, so they cannot catch a
+    defect in the staleness computation itself. These wire a real feed in.
+    """
+
+    _LARGE_MONOTONIC = 4_000_000.0
+
+    def _bot_with_real_feed(self, monotonic_value):
+        from ws.market_data_feed import MarketDataFeed
+
+        info = MagicMock()
+        info.ws_manager = MagicMock()
+        info.ws_manager.is_alive.return_value = True
+        info.subscribe.side_effect = lambda sub, cb: hash(sub["coin"]) % 1000
+
+        with patch("ws.market_data_feed.time.monotonic", return_value=monotonic_value):
+            feed = MarketDataFeed(info, MagicMock(), ["BTC", "ETH"])
+            feed.start()
+
+        bot = _make_bot()
+        bot.ws_feed = feed
+        return bot, feed
+
+    def test_fresh_subscribe_does_not_reconnect(self):
+        bot, _ = self._bot_with_real_feed(self._LARGE_MONOTONIC)
+        reconnector = WsReconnector(stale_threshold=60.0)
+
+        with patch("ws.ws_reconnector.time.monotonic", return_value=self._LARGE_MONOTONIC), \
+             patch("ws.market_data_feed.time.monotonic", return_value=self._LARGE_MONOTONIC), \
+             patch.object(reconnector, "_do_reconnect") as do_reconnect:
+            reconnector.maybe_reconnect(bot)
+
+        do_reconnect.assert_not_called()
+
+    def test_genuinely_stale_feed_still_reconnects(self):
+        """The fix must not suppress a real stall."""
+        bot, _ = self._bot_with_real_feed(self._LARGE_MONOTONIC)
+        reconnector = WsReconnector(stale_threshold=60.0)
+        later = self._LARGE_MONOTONIC + 300.0
+
+        with patch("ws.ws_reconnector.time.monotonic", return_value=later), \
+             patch("ws.market_data_feed.time.monotonic", return_value=later), \
+             patch.object(reconnector, "_do_reconnect") as do_reconnect:
+            reconnector.maybe_reconnect(bot)
+
+        do_reconnect.assert_called_once()

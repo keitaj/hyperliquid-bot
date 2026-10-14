@@ -295,3 +295,104 @@ class TestCtxSubscription:
         assert len(ctx_unsubs) == 2
         assert len(l2_unsubs) == 2
         assert feed.stats["ctx_subscriptions"] == 0
+
+
+# A monotonic value large enough to expose the unseeded-coin bug. With a small
+# monotonic, `now - 0 > max_age` is false and the bug is invisible, so these
+# tests would pass without the fix -- which is exactly why it only ever showed
+# up in production, on a host with a long uptime.
+_LARGE_MONOTONIC = 4_000_000.0
+
+
+class TestSubscribeSeedsStaleness:
+    """A successfully subscribed coin must not be stale before its first tick.
+
+    `_last_update` is only written when an l2Book message arrives, so without
+    seeding, `stale_coins()` compares against the dict default of 0. On a host
+    with a long uptime that makes every not-yet-ticked coin stale, and since
+    WsReconnector only reconnects when *all* coins are stale, a fresh subscribe
+    satisfies precisely that condition.
+    """
+
+    def _make_feed(self, coins=None):
+        info = MagicMock()
+        info.ws_manager = MagicMock()
+        info.subscribe.side_effect = lambda sub, cb: hash(sub["coin"]) % 1000
+        coins = coins or ["BTC", "ETH"]
+        return MarketDataFeed(info, MagicMock(), coins), info
+
+    def test_no_coin_is_stale_right_after_start(self):
+        feed, _ = self._make_feed(["BTC", "ETH", "SOL"])
+        with patch("ws.market_data_feed.time.monotonic", return_value=_LARGE_MONOTONIC):
+            feed.start()
+            assert feed.stale_coins(max_age=60.0) == []
+
+    def test_regression_large_uptime_does_not_mark_fresh_subscribe_stale(self):
+        """The production failure mode: long uptime, nothing ticked yet."""
+        feed, _ = self._make_feed(["BTC", "ETH"])
+        with patch("ws.market_data_feed.time.monotonic", return_value=_LARGE_MONOTONIC):
+            feed.start()
+            # Only milliseconds have passed since subscribe.
+            stale = feed.stale_coins(max_age=60.0)
+        assert stale == [], f"fresh subscribe reported stale: {stale}"
+
+    def test_seeded_coin_goes_stale_once_max_age_elapses(self):
+        """Seeding must not blunt real staleness detection."""
+        feed, _ = self._make_feed(["BTC", "ETH"])
+        with patch("ws.market_data_feed.time.monotonic", return_value=_LARGE_MONOTONIC):
+            feed.start()
+        with patch(
+            "ws.market_data_feed.time.monotonic",
+            return_value=_LARGE_MONOTONIC + 120.0,
+        ):
+            assert sorted(feed.stale_coins(max_age=60.0)) == ["BTC", "ETH"]
+
+    def test_failed_subscribe_is_reported_stale_immediately(self):
+        """A coin whose subscribe raised is left unseeded on purpose.
+
+        Filtering unseeded coins out of stale_coins() instead of seeding would
+        hide this case -- trading a false positive for a false negative.
+        """
+        feed, info = self._make_feed(["BTC", "ETH"])
+
+        def _subscribe(sub, cb):
+            if sub["coin"] == "ETH":
+                raise RuntimeError("subscribe rejected")
+            return 1
+
+        info.subscribe.side_effect = _subscribe
+        with patch("ws.market_data_feed.time.monotonic", return_value=_LARGE_MONOTONIC):
+            feed.start()
+            stale = feed.stale_coins(max_age=60.0)
+        assert stale == ["ETH"]
+        assert "BTC" not in feed.stale_coins(max_age=60.0)
+
+    def test_resubscribe_does_not_reset_the_staleness_clock(self):
+        """setdefault, not assignment: a re-subscribe must not mask a stall.
+
+        If seeding assigned unconditionally, re-subscribing a coin that has
+        been silent would move its timestamp forward and make an ongoing stall
+        look fresh. `_subscribe_coin` is only reached from `start()` on a fresh
+        instance today, so the two forms behave identically in the current
+        call graph -- this pins the safer one so a future feed-reuse path
+        cannot silently suppress staleness.
+        """
+        feed, _ = self._make_feed(["BTC"])
+        # A coin whose last tick is old enough to be stale.
+        feed._last_update["BTC"] = _LARGE_MONOTONIC
+
+        with patch(
+            "ws.market_data_feed.time.monotonic",
+            return_value=_LARGE_MONOTONIC + 300.0,
+        ):
+            feed._subscribe_coin("BTC")
+            assert feed._last_update["BTC"] == _LARGE_MONOTONIC
+            assert "BTC" in feed.stale_coins(max_age=60.0)
+
+    def test_seed_uses_the_same_clock_as_updates(self):
+        """Seed and tick timestamps must be comparable (both monotonic)."""
+        feed, _ = self._make_feed(["BTC"])
+        before = time.monotonic()
+        feed.start()
+        seeded = feed._last_update["BTC"]
+        assert before <= seeded <= time.monotonic()
