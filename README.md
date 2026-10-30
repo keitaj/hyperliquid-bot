@@ -418,6 +418,11 @@ Minimum order values and margin multipliers used during startup validation. Over
 | `MIN_ORDER_VALUE_{COIN}` | — | Minimum order value for any coin (e.g. `MIN_ORDER_VALUE_SOL=80`) |
 | `INITIAL_MARGIN_MULTIPLIER` | 3.0 | Margin multiplier for initial orders |
 | `MARGIN_SAFETY_BUFFER` | 1.5 | Safety buffer on margin calculations |
+| `STARTUP_PRICE_RETRIES` | 3 | Times to retry fetching a coin's price before treating it as unavailable (0 = single attempt) |
+| `STARTUP_PRICE_RETRY_INTERVAL` | 2.0 | Seconds between those retries |
+| `SKIP_UNAVAILABLE_COINS` | false | When true, a coin whose price is still unavailable is dropped for the session instead of aborting startup. A coin with an open position (or whose position cannot be confirmed) is never dropped, and startup still aborts if no coin would remain |
+
+Delisted HIP-3 coins (marked `isDelisted` in the DEX meta) are always removed from the trading list before validation, since they have no order book. Coins you listed explicitly in `{DEX}_COINS` are logged as `[coin-skip] <coin> reason=delisted`; coins dropped because no price was available are logged as `[coin-skip] <coin> reason=no_price`.
 
 ### Rate Limiter
 
@@ -689,6 +694,10 @@ margin_validation:
   min_order_value_eth: 100        # env MIN_ORDER_VALUE_ETH
   initial_margin_multiplier: 3.0  # env INITIAL_MARGIN_MULTIPLIER
   margin_safety_buffer: 1.5       # env MARGIN_SAFETY_BUFFER
+  skip_unavailable_coins: false   # env SKIP_UNAVAILABLE_COINS  (drop coins with no price at startup instead of aborting; never drops a coin with an open position, aborts if no coin is left)
+  startup_price_retries: 3        # env STARTUP_PRICE_RETRIES  (retries per coin before treating the price as unavailable; 0 = single attempt)
+  startup_price_retry_interval: 2.0  # env STARTUP_PRICE_RETRY_INTERVAL  (seconds between retries)
+  # Delisted HIP-3 coins (meta isDelisted) are always excluded from the coin list, regardless of these settings.
 
 logging:
   log_format: "text"              # env LOG_FORMAT  (text|json)

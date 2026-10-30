@@ -90,6 +90,7 @@ from position_closer import close_position_market  # noqa: E402
 from rate_limiter import API_ERRORS  # noqa: E402
 from exceptions import TransientError, DataError, ConfigurationError  # noqa: E402
 from circuit_breaker import CircuitBreaker  # noqa: E402
+from coin_utils import parse_coin  # noqa: E402
 from ws import (  # noqa: E402
     MarketDataFeed, FillFeed, BboGuard, ImbalanceGuard,
     CloseRefreshGuard, BboVelocityGuard, AdverseSelectionTracker,
@@ -495,14 +496,7 @@ class HyperliquidBot:
 
         # Build full coin list: standard HL coins + HIP-3 "dex:coin" coins
         hl_coins = coins or ['BTC', 'ETH'] if Config.ENABLE_STANDARD_HL else []
-        hip3_coins: List[str] = []
-        for dex in self.hip3_dexes:
-            # Use per-DEX override if configured, else use discovered coins
-            if dex in Config.DEX_COINS:
-                dex_coin_names = Config.DEX_COINS[dex]
-            else:
-                dex_coin_names = self.registry.list_coins(dex)
-            hip3_coins.extend(f"{dex}:{c}" for c in dex_coin_names)
+        hip3_coins, delisted = self._build_hip3_coins()
 
         all_coins = (hl_coins if Config.ENABLE_STANDARD_HL else []) + hip3_coins
 
@@ -510,7 +504,11 @@ class HyperliquidBot:
         if duplicates:
             logger.warning(f"Duplicate coins removed from trading list: {duplicates}")
 
-        self.trading_coins = unique_coins or ['BTC', 'ETH']
+        # The BTC/ETH fallback is for an empty configuration.  When the list is
+        # empty only because every configured coin was delisted, falling back
+        # would trade markets nobody asked for; leave it empty so startup
+        # validation aborts instead.
+        self.trading_coins = unique_coins or ([] if delisted else ['BTC', 'ETH'])
 
         if hip3_coins:
             logger.info(f"HIP-3 coins: {hip3_coins}")
@@ -539,6 +537,35 @@ class HyperliquidBot:
             raise ValueError(f"Unknown strategy: {strategy_name}. Available strategies: {available_strategies}")
 
         self.coins = self.trading_coins
+
+    def _build_hip3_coins(self) -> Tuple[List[str], List[str]]:
+        """Build "dex:coin" names for every HIP-3 DEX, dropping delisted assets.
+
+        Returns (coins, delisted).  A delisted coin has no order book, so
+        keeping it would only make startup validation fail for every coin.
+        """
+        coins: List[str] = []
+        delisted: List[str] = []
+        for dex in self.hip3_dexes:
+            # Use per-DEX override if configured, else use discovered coins
+            explicit = dex in Config.DEX_COINS
+            if explicit:
+                dex_coin_names = Config.DEX_COINS[dex]
+            else:
+                dex_coin_names = self.registry.list_coins(dex)
+            dex_delisted: List[str] = []
+            for name in dex_coin_names:
+                coin = f"{dex}:{name}"
+                if self.registry.is_delisted(dex, name):
+                    dex_delisted.append(coin)
+                    if explicit:
+                        logger.warning(f"[coin-skip] {coin} reason=delisted — excluded from trading")
+                else:
+                    coins.append(coin)
+            if dex_delisted and not explicit:
+                logger.info(f"Skipped {len(dex_delisted)} delisted coins discovered on '{dex}': {dex_delisted}")
+            delisted.extend(dex_delisted)
+        return coins, delisted
 
     @staticmethod
     def _deduplicate_coins(coins: List[str]) -> tuple:
@@ -1140,16 +1167,12 @@ class HyperliquidBot:
                 return False
 
             # Get current prices for position size calculation
-            current_prices = {}
-            for coin in self.trading_coins:
-                market_data = self.market_data.get_market_data(coin)
-                if market_data:
-                    current_prices[coin] = market_data.mid_price
-                else:
-                    logger.error(f"Could not get market price for {coin}")
-                    logger.error("Unable to validate configuration without current market prices")
-                    logger.error("Please check your internet connection and try again")
-                    return False
+            resolved = self._resolve_startup_prices()
+            if resolved is None:
+                return False
+            current_prices, unavailable = resolved
+            if unavailable:
+                self._exclude_coins(unavailable)
 
             # Validate strategy-specific configuration
             validation_result = validator.validate_strategy_config(
@@ -1201,6 +1224,98 @@ class HyperliquidBot:
             logger.error(f"Error during configuration validation: {e}", exc_info=True)
             logger.warning("Proceeding with caution — validation could not complete")
             return True
+
+    def _fetch_startup_price(self, coin: str) -> Optional[float]:
+        """Mid price for *coin*, retried STARTUP_PRICE_RETRIES times before giving up."""
+        attempts = 1 + Config.STARTUP_PRICE_RETRIES
+        for attempt in range(attempts):
+            market_data = self.market_data.get_market_data(coin)
+            if market_data:
+                return market_data.mid_price
+            if attempt < attempts - 1:
+                time.sleep(Config.STARTUP_PRICE_RETRY_INTERVAL)
+        return None
+
+    def _resolve_startup_prices(self) -> Optional[Tuple[Dict[str, float], List[str]]]:
+        """Fetch a mid price for every trading coin.
+
+        Returns (prices, unavailable) where *unavailable* lists coins to drop
+        for this session, or None when startup must abort.  Coins are only
+        dropped when SKIP_UNAVAILABLE_COINS is set, at least one coin remains,
+        and the dropped coin is confirmed to have no open position.
+        """
+        if not self.trading_coins:
+            logger.error("No tradable coins left after excluding delisted markets")
+            return None
+
+        prices: Dict[str, float] = {}
+        unavailable: List[str] = []
+        for coin in self.trading_coins:
+            price = self._fetch_startup_price(coin)
+            if price is None:
+                unavailable.append(coin)
+            else:
+                prices[coin] = price
+
+        if not unavailable:
+            return prices, []
+
+        if not Config.SKIP_UNAVAILABLE_COINS:
+            logger.error(f"Could not get market price for {unavailable[0]}")
+            logger.error("Unable to validate configuration without current market prices")
+            logger.error("Please check your internet connection and try again")
+            return None
+
+        if len(unavailable) == len(self.trading_coins):
+            logger.error(f"Could not get market price for any coin {unavailable} — "
+                         f"likely a connectivity problem, not skipping")
+            return None
+
+        for coin in unavailable:
+            has_position = self._has_open_position(coin)
+            if has_position is None:
+                logger.error(f"Could not get market price for {coin} and could not confirm "
+                             f"it has no open position — refusing to skip it")
+                return None
+            if has_position:
+                logger.error(f"Could not get market price for {coin}, which has an open position — "
+                             f"refusing to skip it (the position would be left unmanaged)")
+                return None
+
+        for coin in unavailable:
+            logger.error(f"[coin-skip] {coin} reason=no_price retries={Config.STARTUP_PRICE_RETRIES} — "
+                         f"excluded for this session")
+        return prices, unavailable
+
+    def _has_open_position(self, coin: str) -> Optional[bool]:
+        """Whether *coin* has a non-zero position; None if that cannot be confirmed.
+
+        Queries the clearinghouse directly because the order manager's
+        position helpers return an empty list on API errors, which would be
+        indistinguishable from "no position".
+        """
+        from rate_limiter import api_wrapper
+        dex, coin_name = parse_coin(coin)
+        try:
+            state = api_wrapper.call(self.info.user_state, self.account_address, dex=dex or "")
+        except API_ERRORS as e:
+            logger.error(f"Error fetching user state for {coin}: {e}")
+            return None
+        if not isinstance(state, dict) or 'assetPositions' not in state:
+            return None
+        for entry in state['assetPositions']:
+            position = entry.get('position', {})
+            if position.get('coin') in (coin_name, coin) and float(position.get('szi', 0) or 0) != 0:
+                return True
+        return False
+
+    def _exclude_coins(self, excluded: List[str]) -> None:
+        """Drop *excluded* from the trading list used by the WS feed and strategy loop."""
+        dropped = set(excluded)
+        self.trading_coins = [c for c in self.trading_coins if c not in dropped]
+        # self.coins aliases trading_coins; rebind both so neither keeps the old list.
+        self.coins = self.trading_coins
+        logger.warning(f"Trading coins after startup exclusions: {self.trading_coins}")
 
     def _reset_connections(self) -> None:
         """Reset connections when encountering persistent errors"""
