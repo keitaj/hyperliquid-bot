@@ -24,6 +24,7 @@ from strategies.mm_config import (
     parse_coin_overrides,
     parse_spread_schedule,
 )
+from strategies.market_calendar import MARKETS, phase_of
 from strategies.coin_health_tracker import CoinHealthTracker
 from strategies.mm_order_tracker import OrderTracker
 from strategies.mm_position_closer import PositionCloser
@@ -104,6 +105,33 @@ class MarketMakingStrategy(BaseStrategy):
         self._spread_schedule: Dict[int, float] = self.cfg.schedule.spread_schedule
         if self._spread_schedule:
             logger.info(f"[mm] Spread schedule: {dict(sorted(self._spread_schedule.items()))}")
+
+        # ---- Market-calendar phase schedule (per-coin, tz-aware) ---- #
+        self._phase_multipliers: Dict[str, float] = self.cfg.schedule.phase_spread_multipliers
+        self._phase_open_window_min: float = self.cfg.schedule.phase_open_window_minutes
+        self._phase_close_window_min: float = self.cfg.schedule.phase_close_window_minutes
+        self._coin_markets: Dict[str, str] = {}
+        for key, market in self.cfg.schedule.coin_markets.items():
+            if market in MARKETS:
+                self._coin_markets[key] = market
+            else:
+                logger.warning(
+                    f"[mm] Unknown market '{market}' for {key}; "
+                    f"coin falls back to the global schedule"
+                )
+        if self._coin_markets:
+            if not self._phase_multipliers:
+                logger.warning(
+                    "[mm] coin_market_overrides set but phase_spread_multipliers "
+                    "empty; every phase defaults to x1.0"
+                )
+            logger.info(
+                f"[mm] Market calendar: {self._coin_markets} "
+                f"phases={self._phase_multipliers} "
+                f"windows=({self._phase_open_window_min:g},{self._phase_close_window_min:g})min"
+            )
+        self._phase_state: Dict[str, str] = {}
+        self._suppressed_coins: Set[str] = set()
 
         # ---- Dynamic offset auto-adjustment (aliases of self.cfg.dynamic_offset) ---- #
         self._dynamic_offset_enabled: bool = self.cfg.dynamic_offset.enabled
@@ -439,7 +467,10 @@ class MarketMakingStrategy(BaseStrategy):
 
         # ---- Quiet hours: full-stop mode ---- #
         is_quiet = self._is_quiet_hour()
-        if is_quiet and self._quiet_spread_multiplier <= 0:
+        # With market-calendar assignments the full-stop path runs per coin
+        # inside the main loop instead (assigned coins follow their own
+        # phases and must not be stopped by the global UTC quiet hours).
+        if is_quiet and self._quiet_spread_multiplier <= 0 and not self._coin_markets:
             if not self._was_quiet:
                 utc_hour = datetime.now(timezone.utc).hour
                 logger.info(f"[mm] Entering quiet hours (UTC {utc_hour}), cancelling all orders")
@@ -475,6 +506,24 @@ class MarketMakingStrategy(BaseStrategy):
 
         for coin in coins:
             try:
+                # ---- Per-coin quote suppression (phase / mixed quiet) ---- #
+                # getattr: partially-initialised test instances (built via
+                # __new__) behave like a deployment without assignments.
+                suppressed = getattr(self, '_suppressed_coins', None)
+                if suppressed is None:
+                    suppressed = self._suppressed_coins = set()
+                suppress_reason = self._quote_suppression_reason(coin)
+                if suppress_reason is not None and coin not in suppressed:
+                    logger.info(
+                        f"[mm] Suppressing quotes for {coin} ({suppress_reason}), "
+                        f"cancelling orders"
+                    )
+                    self._tracker.cancel_all_orders_for_coin(coin, reason=suppress_reason)
+                    suppressed.add(coin)
+                elif suppress_reason is None and coin in suppressed:
+                    logger.info(f"[mm] Resuming quotes for {coin}")
+                    suppressed.discard(coin)
+
                 has_position = coin in self.positions and abs(self.positions[coin]['size']) > 0
 
                 if has_position:
@@ -494,6 +543,10 @@ class MarketMakingStrategy(BaseStrategy):
                 else:
                     # Position was closed — clean up tracking
                     self._closer.cleanup_closed(coin)
+
+                if suppress_reason is not None:
+                    # Positions above were still managed; just no new quotes.
+                    continue
 
                 # No position — normal MM flow
                 close_oid = self._closer.get_close_oid(coin)
@@ -782,11 +835,16 @@ class MarketMakingStrategy(BaseStrategy):
                 effective_offset_bps = self._get_volatility_adjusted_offset(coin, base_offset)
             else:
                 effective_offset_bps = base_offset
-            if self._quiet_spread_multiplier > 0 and self._is_quiet_hour():
-                effective_offset_bps *= self._quiet_spread_multiplier
-            hourly_mult = self._get_hourly_spread_multiplier()
-            if hourly_mult != 1.0:
-                effective_offset_bps *= hourly_mult
+            phase_mult = self._phase_spread_multiplier(coin)
+            if phase_mult is not None:
+                if phase_mult > 0 and phase_mult != 1.0:
+                    effective_offset_bps *= phase_mult
+            else:
+                if self._quiet_spread_multiplier > 0 and self._is_quiet_hour():
+                    effective_offset_bps *= self._quiet_spread_multiplier
+                hourly_mult = self._get_hourly_spread_multiplier()
+                if hourly_mult != 1.0:
+                    effective_offset_bps *= hourly_mult
             buy_offset_bps, sell_offset_bps = self._calculate_microprice_offsets(
                 coin, effective_offset_bps
             )
@@ -797,15 +855,22 @@ class MarketMakingStrategy(BaseStrategy):
             spread_offset = mid_price * (coin_spread / 10_000)
             raw_buy = mid_price - spread_offset
             raw_sell = mid_price + spread_offset
-            if self._quiet_spread_multiplier > 0 and self._is_quiet_hour():
-                extra = spread_offset * (self._quiet_spread_multiplier - 1)
-                raw_buy -= extra
-                raw_sell += extra
-            hourly_mult = self._get_hourly_spread_multiplier()
-            if hourly_mult != 1.0 and hourly_mult > 0:
-                extra = spread_offset * (hourly_mult - 1)
-                raw_buy -= extra
-                raw_sell += extra
+            phase_mult = self._phase_spread_multiplier(coin)
+            if phase_mult is not None:
+                if phase_mult > 0 and phase_mult != 1.0:
+                    extra = spread_offset * (phase_mult - 1)
+                    raw_buy -= extra
+                    raw_sell += extra
+            else:
+                if self._quiet_spread_multiplier > 0 and self._is_quiet_hour():
+                    extra = spread_offset * (self._quiet_spread_multiplier - 1)
+                    raw_buy -= extra
+                    raw_sell += extra
+                hourly_mult = self._get_hourly_spread_multiplier()
+                if hourly_mult != 1.0 and hourly_mult > 0:
+                    extra = spread_offset * (hourly_mult - 1)
+                    raw_buy -= extra
+                    raw_sell += extra
             buy_price = round_price(raw_buy, *rp)
             sell_price = round_price(raw_sell, *rp)
             if self.maker_only and market_data.bid > 0 and market_data.ask > 0:
@@ -1269,6 +1334,69 @@ class MarketMakingStrategy(BaseStrategy):
         if self._spread_schedule and self._spread_schedule.get(hour, 1.0) == 0:
             return True
         return False
+
+    def _market_for(self, coin: str) -> Optional[str]:
+        """Market id assigned to ``coin`` (full name → bare name), or ``None``.
+
+        Uses ``getattr`` so partially-initialised instances in tests (built
+        via ``__new__``) behave like a deployment without assignments —
+        same pattern as ``_publish_vol_for_logging``.
+        """
+        markets = getattr(self, '_coin_markets', None)
+        if not markets:
+            return None
+        if coin in markets:
+            return markets[coin]
+        _, bare = parse_coin(coin)
+        return markets.get(bare)
+
+    def _phase_for(self, coin: str) -> Optional[str]:
+        """Current session phase for an assigned coin, or ``None`` if unassigned.
+
+        Logs phase transitions once per coin so deploy annotations and
+        incident forensics can line up behaviour changes with the calendar.
+        """
+        market = self._market_for(coin)
+        if market is None:
+            return None
+        phase = phase_of(
+            market, datetime.now(timezone.utc),
+            self._phase_open_window_min, self._phase_close_window_min,
+        )
+        prev = self._phase_state.get(coin)
+        if prev != phase:
+            logger.info(f"[mm] phase {coin} {prev or '-'} -> {phase} ({market})")
+            self._phase_state[coin] = phase
+        return phase
+
+    def _phase_spread_multiplier(self, coin: str) -> Optional[float]:
+        """Phase multiplier for an assigned coin, ``None`` for legacy coins.
+
+        An unlisted phase defaults to 1.0; 0 means "stop quoting" and is
+        enforced by :meth:`_quote_suppression_reason`.
+        """
+        phase = self._phase_for(coin)
+        if phase is None:
+            return None
+        return self._phase_multipliers.get(phase, 1.0)
+
+    def _quote_suppression_reason(self, coin: str) -> Optional[str]:
+        """Why quoting is suppressed for ``coin`` this cycle, or ``None``.
+
+        Assigned coins: their phase multiplier is 0. Legacy coins in a
+        mixed deployment: the global quiet hours full-stop, which is
+        handled here because the early-return block is skipped once any
+        coin has a market assignment.
+        """
+        mult = self._phase_spread_multiplier(coin)
+        if mult is not None:
+            if mult <= 0:
+                return f"phase_{self._phase_state.get(coin, 'closed')}"
+            return None
+        if (getattr(self, '_coin_markets', None)
+                and self._quiet_spread_multiplier <= 0 and self._is_quiet_hour()):
+            return "quiet_hour"
+        return None
 
     def _is_drain_mode(self) -> bool:
         """Check if drain mode is active via the configured flag file."""

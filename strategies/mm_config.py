@@ -15,6 +15,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Set, Tuple
 
+from strategies.market_calendar import MARKETS, VALID_PHASES
+
 logger = logging.getLogger(__name__)
 
 
@@ -124,6 +126,65 @@ def parse_coin_overrides(value: object) -> Dict[str, float]:
             result[coin_key] = float(bps_str)
         except ValueError:
             logger.warning(f"[mm] Invalid BPS value in coin override: '{pair}'")
+    return result
+
+
+def parse_coin_str_overrides(value: object) -> Dict[str, str]:
+    """Parse a ``"COIN:NAME,COIN:NAME,..."`` string into ``{coin: name}``.
+
+    String-valued sibling of :func:`parse_coin_overrides`, used for the
+    per-coin market assignment (``"NVDA:NYSE,xyz:SP500:CME_INDEX"``).
+    Supports bare and DEX-prefixed coin names; the value is upper-cased.
+    Pairs with missing colons or empty values are skipped after a warning.
+    """
+    result: Dict[str, str] = {}
+    if not value or not str(value).strip():
+        return result
+    for pair in str(value).split(','):
+        pair = pair.strip()
+        if not pair:
+            continue
+        parts = pair.rsplit(':', 1)
+        if len(parts) != 2 or not parts[0].strip() or not parts[1].strip():
+            logger.warning(f"[mm] Invalid coin string override: '{pair}', expected 'COIN:NAME'")
+            continue
+        result[parts[0].strip()] = parts[1].strip().upper()
+    return result
+
+
+def parse_phase_multipliers(value: object) -> Dict[str, float]:
+    """Parse ``"regular:1.0,closed:2.0,lunch:0"`` into ``{phase: multiplier}``.
+
+    Phase names must be members of :data:`market_calendar.VALID_PHASES`
+    and multipliers must be ``>= 0`` (0 = stop quoting, mirroring
+    ``quiet_hours_spread_multiplier``). Invalid entries are skipped after
+    a warning so a typo cannot take the bot down.
+    """
+    result: Dict[str, float] = {}
+    if not value or not str(value).strip():
+        return result
+    for pair in str(value).split(','):
+        pair = pair.strip()
+        if not pair:
+            continue
+        parts = pair.rsplit(':', 1)
+        if len(parts) != 2:
+            logger.warning(f"[mm] Invalid phase multiplier: '{pair}', expected 'PHASE:MULT'")
+            continue
+        name = parts[0].strip().lower()
+        if name not in VALID_PHASES:
+            logger.warning(f"[mm] Unknown phase '{name}' in phase multipliers "
+                           f"(valid: {sorted(VALID_PHASES)}), skipping")
+            continue
+        try:
+            mult = float(parts[1])
+        except ValueError:
+            logger.warning(f"[mm] Invalid multiplier value in phase override: '{pair}'")
+            continue
+        if mult < 0:
+            logger.warning(f"[mm] Phase multiplier must be >= 0, got '{pair}', skipping")
+            continue
+        result[name] = mult
     return result
 
 
@@ -365,11 +426,39 @@ class CloseTierToxicityConfig:
 
 @dataclass
 class ScheduleConfig:
-    """Hourly spread schedule and quiet-hours behaviour."""
+    """Hourly spread schedule, quiet hours and market-calendar phases.
+
+    ``coin_markets`` assigns a per-coin market calendar; for assigned
+    coins the phase multipliers replace the UTC-anchored
+    ``spread_schedule`` / ``quiet_hours_utc``. Unassigned coins keep the
+    legacy behaviour unchanged.
+    """
 
     spread_schedule: Dict[int, float] = field(default_factory=dict)
     quiet_hours_utc: Set[int] = field(default_factory=set)
     quiet_hours_spread_multiplier: float = 0.0
+    coin_markets: Dict[str, str] = field(default_factory=dict)
+    phase_spread_multipliers: Dict[str, float] = field(default_factory=dict)
+    phase_open_window_minutes: float = 30.0
+    phase_close_window_minutes: float = 30.0
+
+    def __post_init__(self) -> None:
+        if self.phase_open_window_minutes < 0:
+            raise ValueError(
+                f"phase_open_window_minutes must be >= 0, got {self.phase_open_window_minutes}"
+            )
+        if self.phase_close_window_minutes < 0:
+            raise ValueError(
+                f"phase_close_window_minutes must be >= 0, got {self.phase_close_window_minutes}"
+            )
+        unknown = {m for m in self.coin_markets.values() if m not in MARKETS}
+        if unknown:
+            # Warn only — the strategy drops unknown assignments per coin
+            # and keeps the bot running (startup must survive a typo).
+            logger.warning(
+                f"[mm] Unknown market ids in coin_markets: {sorted(unknown)} "
+                f"(valid: {sorted(MARKETS)}); affected coins fall back to the global schedule"
+            )
 
 
 @dataclass
@@ -642,6 +731,12 @@ class MMConfig:
                 spread_schedule=parse_spread_schedule(d.get('spread_schedule', '')),
                 quiet_hours_utc=parse_quiet_hours(d.get('quiet_hours_utc', '')),
                 quiet_hours_spread_multiplier=float(d.get('quiet_hours_spread_multiplier', 0.0)),
+                coin_markets=parse_coin_str_overrides(d.get('coin_market_overrides', '')),
+                phase_spread_multipliers=parse_phase_multipliers(
+                    d.get('phase_spread_multipliers', '')
+                ),
+                phase_open_window_minutes=float(d.get('phase_open_window_minutes', 30.0)),
+                phase_close_window_minutes=float(d.get('phase_close_window_minutes', 30.0)),
             ),
             dynamic_offset=DynamicOffsetConfig(
                 enabled=bool(d.get('dynamic_offset_enabled', False)),
