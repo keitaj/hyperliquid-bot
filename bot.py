@@ -210,6 +210,10 @@ _STRATEGY_PARAMS = {
         'spread_schedule',
         'quiet_hours_utc',
         'quiet_hours_spread_multiplier',
+        'coin_market_overrides',
+        'phase_spread_multipliers',
+        'phase_open_window_minutes',
+        'phase_close_window_minutes',
         'microprice_skew_enabled',
         'microprice_skew_multiplier',
         'microprice_max_skew_bps',
@@ -1520,6 +1524,21 @@ if __name__ == "__main__":
                         help='UTC hours to reduce/stop quoting, comma-separated (e.g. "17" or "17,18")')
     parser.add_argument('--quiet-hours-spread-multiplier', type=float, default=0.0,
                         help='Spread multiplier during quiet hours (0=stop quoting, >0=widen spread)')
+    parser.add_argument('--coin-market-overrides', type=str, default='',
+                        help='Per-coin market calendar: "COIN:MARKET,..." '
+                             '(e.g. "NVDA:NYSE,SP500:CME_INDEX"); ids: '
+                             'NYSE/CME_INDEX/KRX/TSE/HKEX/FX/NONE (market_making)')
+    parser.add_argument('--phase-spread-multipliers', type=str, default='',
+                        help='Per-phase spread multiplier for market-assigned '
+                             'coins: "PHASE:MULT,..." (e.g. '
+                             '"open_window:0,close_window:3.0,closed:2.5,'
+                             'regular:2.0,lunch:0"; 0=stop quoting) (market_making)')
+    parser.add_argument('--phase-open-window-minutes', type=float, default=None,
+                        help='Minutes after any market open counted as the '
+                             'open_window phase (default: 30) (market_making)')
+    parser.add_argument('--phase-close-window-minutes', type=float, default=None,
+                        help='Minutes before any market close counted as the '
+                             'close_window phase (default: 30) (market_making)')
     parser.add_argument('--microprice-skew', dest='microprice_skew_enabled',
                         action='store_true', default=False,
                         help='Enable micro-price asymmetric offset for taker fill prevention (market_making)')
