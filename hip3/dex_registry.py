@@ -81,6 +81,8 @@ class DEXRegistry:
                         "asset_id": asset_id,
                         "sz_decimals": sz_decimals,
                         "meta_idx": j,
+                        # Live assets omit the key entirely; only delisted ones carry it.
+                        "is_delisted": bool(asset.get("isDelisted", False)),
                     }
 
                 self._dexes[dex_name] = {
@@ -112,6 +114,10 @@ class DEXRegistry:
     def get_sz_decimals(self, dex: str, coin: str) -> int:
         """Size decimal precision for a HIP-3 asset."""
         return self._dexes.get(dex, {}).get("assets", {}).get(coin, {}).get("sz_decimals", 3)
+
+    def is_delisted(self, dex: str, coin: str) -> bool:
+        """True if the DEX meta marks the asset as delisted (no book, no new orders)."""
+        return bool(self._dexes.get(dex, {}).get("assets", {}).get(coin, {}).get("is_delisted", False))
 
     def get_meta(self, dex: str) -> Dict:
         """Cached meta dict for a registered DEX."""

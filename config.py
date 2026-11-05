@@ -156,6 +156,15 @@ class Config:
     MIN_ORDER_VALUE_BTC: float = float(os.getenv("MIN_ORDER_VALUE_BTC", "100"))
     MIN_ORDER_VALUE_ETH: float = float(os.getenv("MIN_ORDER_VALUE_ETH", "100"))
 
+    # Startup price check.  Coins whose mid price cannot be fetched are retried
+    # STARTUP_PRICE_RETRIES times, STARTUP_PRICE_RETRY_INTERVAL seconds apart.
+    # With SKIP_UNAVAILABLE_COINS=true a coin that still has no price (and no
+    # open position) is dropped for the session instead of aborting startup.
+    # Delisted HIP-3 coins are always dropped regardless of this flag.
+    SKIP_UNAVAILABLE_COINS: bool = os.getenv("SKIP_UNAVAILABLE_COINS", "false").lower() == "true"
+    STARTUP_PRICE_RETRIES: int = max(int(os.getenv("STARTUP_PRICE_RETRIES", "3")), 0)
+    STARTUP_PRICE_RETRY_INTERVAL: float = max(float(os.getenv("STARTUP_PRICE_RETRY_INTERVAL", "2.0")), 0.0)
+
     # Margin multiplier Hyperliquid applies to initial orders.
     INITIAL_MARGIN_MULTIPLIER: float = float(os.getenv("INITIAL_MARGIN_MULTIPLIER", "3.0"))
 
