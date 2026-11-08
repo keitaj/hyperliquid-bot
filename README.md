@@ -208,7 +208,6 @@ TOTAL        |       |                |                 | PnL: 🟢$   2.50
 |---|---|---|
 | Standard Hyperliquid | (none) | Crypto perps (BTC, ETH, SOL...) |
 | [trade.xyz](https://trade.xyz) | `xyz` | Equity & commodity perps (AAPL, GOLD, CL...) |
-| [Based](https://basedapp.xyz) | (none) | Standard HL frontend — use `ENABLE_STANDARD_HL=true` |
 
 > **Note**: DEX names are assigned on-chain. Run `{"type": "perpDexs"}` against the Hyperliquid API to see the current full list — new DEXes appear there as deployers launch them.
 
