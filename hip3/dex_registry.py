@@ -21,8 +21,8 @@ class DEXRegistry:
 
     Usage:
         registry = DEXRegistry(api_url)
-        registry.discover(["xyz", "flx"])
-        asset_id = registry.get_asset_id("xyz", "XYZ100")  # → e.g. 110000
+        registry.discover(["xyz", "mkts"])
+        asset_id = registry.get_asset_id("xyz", "AAPL")  # → e.g. 110000
     """
 
     def __init__(self, api_url: str):

@@ -2,7 +2,7 @@
 
 [English](README.md) | **日本語**
 
-Hyperliquid DEX用の自動取引ボットです。**HIP-3マルチDEX対応**（trade.xyz、Felix、Markets by Kinetiq、Basedなど）。
+Hyperliquid DEX用の自動取引ボットです。**HIP-3マルチDEX対応**（trade.xyz、Markets by Kinetiqなどのビルダー・デプロイ型DEX）。
 
 ## ⚠️ 重要な免責事項
 
@@ -204,14 +204,12 @@ TOTAL        |       |                |                 | PnL: 🟢$   2.50
 |---|---|---|
 | 標準 Hyperliquid | (なし) | 暗号資産Perps（BTC、ETH、SOLなど） |
 | [trade.xyz](https://trade.xyz) | `xyz` | 株式・コモディティPerps（AAPL、GOLD、CLなど） |
-| [Felix](https://trade.usefelix.xyz) | `flx` | 株式・コモディティPerps |
-| [Markets by Kinetiq](https://markets.xyz) | `km` | 各種（担保: USDH） |
+| [Markets by Kinetiq](https://markets.xyz) | `mkts` | 各種（担保: USDH） |
 | [Based](https://basedapp.xyz) | (なし) | 標準HLのフロントエンド — `ENABLE_STANDARD_HL=true` で対応 |
-| [Ventuals](https://app.ventuals.com) | `vntl` | — |
-| [HyENA](https://app.hyena.trade) | `hyna` | — |
-| [dreamcash](https://trade.dreamcash.xyz) | `cash` | — |
 
-> **注意**: DEX名はオンチェーンで割り当てられます。現在の完全なリストはHyperliquid APIの `{"type": "perpDexs"}` で確認できます。
+> **注意**: DEX名はオンチェーンで割り当てられます。現在の完全なリストはHyperliquid APIの `{"type": "perpDexs"}` で確認できます。新しいDEXはデプロイヤーのローンチに伴いこのリストに追加されます。
+
+> **⚠️ 撤退済みDEX**: 2026年中に複数の初期HIP-3デプロイヤーが撤退しました: Felix（`flx`）、Ventuals（`vntl`）、HyENA（`hyna`）、dreamcash（`cash`）、およびKinetiqの旧 `km` DEX（`mkts` に移行）。これらは `TRADING_DEXES` から削除してください — オンチェーンに存在しないDEX名は起動時に `DEXes not found on-chain` と警告ログが出てスキップされます。
 
 ### 設定
 
@@ -219,14 +217,13 @@ TOTAL        |       |                |                 | PnL: 🟢$   2.50
 
 ```bash
 # 取引対象のHIP-3 DEX名（カンマ区切り）
-TRADING_DEXES=xyz,flx
+TRADING_DEXES=xyz
 
 # falseにするとHIP-3 DEXのみで取引（標準HL Perpsを無効化）
 ENABLE_STANDARD_HL=true
 
 # DEXごとの取引通貨リスト（省略時はそのDEXの全通貨）
-XYZ_COINS=XYZ100,XYZ200
-FLX_COINS=NVDA,AAPL,WTI
+XYZ_COINS=AAPL,NVDA,SP500
 ```
 
 ### HIP-3 コマンドラインオプション
@@ -235,8 +232,8 @@ FLX_COINS=NVDA,AAPL,WTI
 # trade.xyzのみでRSI戦略を実行
 python3 bot.py --strategy rsi --dex xyz --no-hl
 
-# Felix株式Perps（NVDA、AAPL）と標準HL（BTC/ETH）を同時に取引
-FLX_COINS=NVDA,AAPL python3 bot.py --strategy simple_ma --coins BTC ETH --dex flx
+# trade.xyz株式Perps（NVDA、AAPL）と標準HL（BTC/ETH）を同時に取引
+XYZ_COINS=NVDA,AAPL python3 bot.py --strategy simple_ma --coins BTC ETH --dex xyz
 
 # .envに設定した全DEXで取引
 python3 bot.py --strategy macd
@@ -264,7 +261,7 @@ asset_id = 100000 + (1 × 10000) + 0 = 110000
 1. `perpDexs` APIで全登録DEXとそのインデックスを取得
 2. 設定された各DEXの `meta` を取得して資産リストを把握
 3. アセットIDを計算しSDKのルックアップテーブルに注入
-4. HIP-3コインを `"dex:coin"` 形式（例：`"xyz:XYZ100"`、`"flx:NVDA"`）で統一管理
+4. HIP-3コインを `"dex:coin"` 形式（例：`"xyz:AAPL"`、`"xyz:NVDA"`）で統一管理
 
 ---
 
@@ -275,7 +272,7 @@ asset_id = 100000 + (1 × 10000) + 0 = 110000
 - **Risk Management**: レバレッジ制限、最大ドローダウン、日次損失制限
 - **Multiple Strategies**: 7つの異なる取引戦略から選択可能
 - **Risk Guardrails**: マージン制限、日次損失制限、トレードごとのストップロス、動的リスクレベルの設定
-- **HIP-3 Multi-DEX**: Hyperliquid、trade.xyz、Felix等のHIP-3 DEXを横断して同時取引
+- **HIP-3 Multi-DEX**: 標準Hyperliquidとtrade.xyz等のHIP-3 DEXを横断して同時取引
 
 ## 取引戦略
 
