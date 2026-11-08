@@ -209,6 +209,7 @@ TOTAL        |       |                |                 | PnL: 🟢$   2.50
 | Standard Hyperliquid | (none) | Crypto perps (BTC, ETH, SOL...) |
 | [trade.xyz](https://trade.xyz) | `xyz` | Equity & commodity perps (AAPL, GOLD, CL...) |
 | [Entropy](https://entropy.io) | `io` | Pre-IPO & equity perps (ANTH, OAI, IONQ...) |
+| [Paragon](https://paragon.trade) | `para` | Index, rates & equity perps (BTCD, 10Y, AVGO...) |
 
 > **Note**: DEX names are assigned on-chain. Run `{"type": "perpDexs"}` against the Hyperliquid API to see the current full list — new DEXes appear there as deployers launch them.
 

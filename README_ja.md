@@ -209,6 +209,7 @@ TOTAL        |       |                |                 | PnL: 🟢$   2.50
 | 標準 Hyperliquid | (なし) | 暗号資産Perps（BTC、ETH、SOLなど） |
 | [trade.xyz](https://trade.xyz) | `xyz` | 株式・コモディティPerps（AAPL、GOLD、CLなど） |
 | [Entropy](https://entropy.io) | `io` | プレIPO・株式Perps（ANTH、OAI、IONQなど） |
+| [Paragon](https://paragon.trade) | `para` | 指標・金利・株式Perps（BTCD、10Y、AVGOなど） |
 
 > **注意**: DEX名はオンチェーンで割り当てられます。現在の完全なリストはHyperliquid APIの `{"type": "perpDexs"}` で確認できます。新しいDEXはデプロイヤーのローンチに伴いこのリストに追加されます。
 
