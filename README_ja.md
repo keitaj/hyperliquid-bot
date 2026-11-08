@@ -2,7 +2,7 @@
 
 [English](README.md) | **日本語**
 
-Hyperliquid DEX用の自動取引ボットです。**HIP-3マルチDEX対応**（trade.xyz、Markets by Kinetiqなどのビルダー・デプロイ型DEX）。
+Hyperliquid DEX用の自動取引ボットです。**HIP-3マルチDEX対応**（trade.xyzなどのビルダー・デプロイ型DEX）。
 
 ## ⚠️ 重要な免責事項
 
@@ -204,12 +204,11 @@ TOTAL        |       |                |                 | PnL: 🟢$   2.50
 |---|---|---|
 | 標準 Hyperliquid | (なし) | 暗号資産Perps（BTC、ETH、SOLなど） |
 | [trade.xyz](https://trade.xyz) | `xyz` | 株式・コモディティPerps（AAPL、GOLD、CLなど） |
-| [Markets by Kinetiq](https://markets.xyz) | `mkts` | 各種（担保: USDH） |
 | [Based](https://basedapp.xyz) | (なし) | 標準HLのフロントエンド — `ENABLE_STANDARD_HL=true` で対応 |
 
 > **注意**: DEX名はオンチェーンで割り当てられます。現在の完全なリストはHyperliquid APIの `{"type": "perpDexs"}` で確認できます。新しいDEXはデプロイヤーのローンチに伴いこのリストに追加されます。
 
-> **⚠️ 撤退済みDEX**: 2026年中に複数の初期HIP-3デプロイヤーが撤退しました: Felix（`flx`）、Ventuals（`vntl`）、HyENA（`hyna`）、dreamcash（`cash`）、およびKinetiqの旧 `km` DEX（`mkts` に移行）。これらは `TRADING_DEXES` から削除してください — オンチェーンに存在しないDEX名は起動時に `DEXes not found on-chain` と警告ログが出てスキップされます。
+> **⚠️ 撤退済みDEX**: 2026年中に複数の初期HIP-3デプロイヤーが撤退しました: Felix（`flx`）、Ventuals（`vntl`）、HyENA（`hyna`）、dreamcash（`cash`）、Markets by Kinetiq（`km` と後継の `mkts`）。これらは `TRADING_DEXES` から削除してください — DEX登録自体はオンチェーンに残っていますが、マーケットは実質すべて上場廃止（delisted）のため、起動時に各コインが除外され（`[coin-skip] <coin> reason=delisted`）、そのDEXからは何も取引されません（`DEXes not found on-chain` 警告は未登録の名前、つまりタイポの場合にのみ出ます）。
 
 ### 設定
 

@@ -7,7 +7,7 @@
 
 **English** | [日本語](README_ja.md)
 
-Automated trading bot for Hyperliquid DEX with **HIP-3 multi-DEX support** (trade.xyz, Markets by Kinetiq, and other builder-deployed DEXes).
+Automated trading bot for Hyperliquid DEX with **HIP-3 multi-DEX support** (trade.xyz and other builder-deployed DEXes).
 
 ## ⚠️ Important Disclaimer
 
@@ -208,12 +208,11 @@ TOTAL        |       |                |                 | PnL: 🟢$   2.50
 |---|---|---|
 | Standard Hyperliquid | (none) | Crypto perps (BTC, ETH, SOL...) |
 | [trade.xyz](https://trade.xyz) | `xyz` | Equity & commodity perps (AAPL, GOLD, CL...) |
-| [Markets by Kinetiq](https://markets.xyz) | `mkts` | Various (collateral: USDH) |
 | [Based](https://basedapp.xyz) | (none) | Standard HL frontend — use `ENABLE_STANDARD_HL=true` |
 
 > **Note**: DEX names are assigned on-chain. Run `{"type": "perpDexs"}` against the Hyperliquid API to see the current full list — new DEXes appear there as deployers launch them.
 
-> **⚠️ Shut-down DEXes**: Several early HIP-3 deployers wound down during 2026: Felix (`flx`), Ventuals (`vntl`), HyENA (`hyna`), dreamcash (`cash`), and Kinetiq's legacy `km` DEX (superseded by `mkts`). Remove them from `TRADING_DEXES` — a name that no longer exists on-chain is logged as `DEXes not found on-chain` at startup and skipped.
+> **⚠️ Shut-down DEXes**: Several early HIP-3 deployers wound down during 2026: Felix (`flx`), Ventuals (`vntl`), HyENA (`hyna`), dreamcash (`cash`), and Markets by Kinetiq (`km` and its successor `mkts`). Remove them from `TRADING_DEXES` — their DEX registrations remain on-chain, but effectively all of their markets are delisted, so the bot drops every coin at startup (`[coin-skip] <coin> reason=delisted`) and the DEX contributes nothing. (`DEXes not found on-chain` is only logged for names that were never registered, e.g. typos.)
 
 ### Configuration
 
@@ -718,7 +717,7 @@ logging:
 
 hip3:
   env:
-    TRADING_DEXES: ""             # Comma-separated DEX names (e.g. "xyz,mkts")
+    TRADING_DEXES: ""             # Comma-separated DEX names (e.g. "xyz")
     ENABLE_STANDARD_HL: "true"    # Trade standard HL perps alongside HIP-3
     "{DEX}_COINS": ""             # Per-DEX coin list (e.g. XYZ_COINS=AAPL,NVDA)
   cli:
