@@ -208,6 +208,7 @@ TOTAL        |       |                |                 | PnL: 🟢$   2.50
 |---|---|---|
 | Standard Hyperliquid | (none) | Crypto perps (BTC, ETH, SOL...) |
 | [trade.xyz](https://trade.xyz) | `xyz` | Equity & commodity perps (AAPL, GOLD, CL...) |
+| [Entropy](https://entropy.io) | `io` | Pre-IPO & equity perps (ANTH, OAI, IONQ...) |
 
 > **Note**: DEX names are assigned on-chain. Run `{"type": "perpDexs"}` against the Hyperliquid API to see the current full list — new DEXes appear there as deployers launch them.
 
@@ -717,7 +718,7 @@ logging:
 
 hip3:
   env:
-    TRADING_DEXES: ""             # Comma-separated DEX names (e.g. "xyz")
+    TRADING_DEXES: ""             # Comma-separated DEX names (e.g. "xyz,io")
     ENABLE_STANDARD_HL: "true"    # Trade standard HL perps alongside HIP-3
     "{DEX}_COINS": ""             # Per-DEX coin list (e.g. XYZ_COINS=AAPL,NVDA)
   cli:
