@@ -7,7 +7,7 @@
 
 **English** | [日本語](README_ja.md)
 
-Automated trading bot for Hyperliquid DEX with **HIP-3 multi-DEX support** (trade.xyz, Felix, Markets by Kinetiq, Based, and more).
+Automated trading bot for Hyperliquid DEX with **HIP-3 multi-DEX support** (trade.xyz and other builder-deployed DEXes).
 
 ## ⚠️ Important Disclaimer
 
@@ -208,14 +208,11 @@ TOTAL        |       |                |                 | PnL: 🟢$   2.50
 |---|---|---|
 | Standard Hyperliquid | (none) | Crypto perps (BTC, ETH, SOL...) |
 | [trade.xyz](https://trade.xyz) | `xyz` | Equity & commodity perps (AAPL, GOLD, CL...) |
-| [Felix](https://trade.usefelix.xyz) | `flx` | Equity & commodity perps |
-| [Markets by Kinetiq](https://markets.xyz) | `km` | Various (collateral: USDH) |
 | [Based](https://basedapp.xyz) | (none) | Standard HL frontend — use `ENABLE_STANDARD_HL=true` |
-| [Ventuals](https://app.ventuals.com) | `vntl` | — |
-| [HyENA](https://app.hyena.trade) | `hyna` | — |
-| [dreamcash](https://trade.dreamcash.xyz) | `cash` | — |
 
-> **Note**: DEX names are assigned on-chain. Run `{"type": "perpDexs"}` against the Hyperliquid API to see the current full list.
+> **Note**: DEX names are assigned on-chain. Run `{"type": "perpDexs"}` against the Hyperliquid API to see the current full list — new DEXes appear there as deployers launch them.
+
+> **⚠️ Shut-down DEXes**: Several early HIP-3 deployers wound down during 2026: Felix (`flx`), Ventuals (`vntl`), HyENA (`hyna`), dreamcash (`cash`), and Markets by Kinetiq (`km` and its successor `mkts`). Remove them from `TRADING_DEXES` — their DEX registrations remain on-chain, but effectively all of their markets are delisted, so the bot drops every coin at startup (`[coin-skip] <coin> reason=delisted`) and the DEX contributes nothing. (`DEXes not found on-chain` is only logged for names that were never registered, e.g. typos.)
 
 ### Configuration
 
@@ -223,14 +220,13 @@ Add the following to your `.env` file:
 
 ```bash
 # Comma-separated HIP-3 DEX names to trade on
-TRADING_DEXES=xyz,flx
+TRADING_DEXES=xyz
 
 # Set to false to trade only on HIP-3 DEXes (disable standard HL perps)
 ENABLE_STANDARD_HL=true
 
 # Per-DEX coin lists (optional — defaults to all available coins on that DEX)
-XYZ_COINS=XYZ100,XYZ200
-FLX_COINS=NVDA,AAPL,WTI
+XYZ_COINS=AAPL,NVDA,SP500
 
 # Per-DEX builder fee (optional — required by some HIP-3 deployers'
 # rewards programs).  Setting BUILDER_FEES_<DEX>_ADDRESS attaches the
@@ -253,8 +249,8 @@ FLX_COINS=NVDA,AAPL,WTI
 # Trade only on trade.xyz with RSI strategy
 python3 bot.py --strategy rsi --dex xyz --no-hl
 
-# Trade Felix equity perps (NVDA, AAPL) + standard HL BTC/ETH simultaneously
-FLX_COINS=NVDA,AAPL python3 bot.py --strategy simple_ma --coins BTC ETH --dex flx
+# Trade trade.xyz equity perps (NVDA, AAPL) + standard HL BTC/ETH simultaneously
+XYZ_COINS=NVDA,AAPL python3 bot.py --strategy simple_ma --coins BTC ETH --dex xyz
 
 # Trade across all configured DEXes (set TRADING_DEXES in .env)
 python3 bot.py --strategy macd
@@ -283,7 +279,7 @@ The bot handles this automatically at startup:
 1. Calls `perpDexs` API to discover all registered DEXes and their indices
 2. Calls `meta` for each configured DEX to get its asset list
 3. Computes asset IDs and injects them into the SDK's lookup table
-4. Represents HIP-3 coins as `"dex:coin"` strings (e.g. `"xyz:XYZ100"`, `"flx:NVDA"`)
+4. Represents HIP-3 coins as `"dex:coin"` strings (e.g. `"xyz:AAPL"`, `"xyz:NVDA"`)
 
 ---
 
@@ -296,7 +292,7 @@ The bot handles this automatically at startup:
 - **Risk Guardrails**: Configurable margin limits, daily loss limits, per-trade stop loss, and dynamic risk levels
 - **Startup Validation**: Strategy parameters validated at startup with all errors reported at once
 - **Structured Logging**: JSON output mode for log aggregation tools (`LOG_FORMAT=json`)
-- **HIP-3 Multi-DEX**: Trade across Hyperliquid, trade.xyz, Felix, and other HIP-3 DEXes simultaneously
+- **HIP-3 Multi-DEX**: Trade across standard Hyperliquid and HIP-3 DEXes like trade.xyz simultaneously
 
 ## Trading Strategies
 
@@ -356,6 +352,8 @@ The `market_making` strategy uses **progressive close pricing**: as a position a
 
 **Market-calendar phase schedule** (`--coin-market-overrides` + `--phase-spread-multipliers`): Per-coin, timezone-aware alternative to the UTC-anchored spread schedule, for listings whose underlyings trade in different countries. Assign coins to a built-in market calendar (`"NVDA:NYSE,SP500:CME_INDEX,SKHY:KRX"`; available ids: `NYSE`, `CME_INDEX`, `KRX`, `TSE`, `HKEX`, `FX`, `NONE`) and set multipliers per session phase (`"open_window:3.0,close_window:3.0,closed:2.0,lunch:0,regular:1.0"`). Phases are `closed` / `open_window` (first `phase_open_window_minutes` after any open, default 30) / `regular` / `lunch` / `close_window` (last `phase_close_window_minutes` before any close). Session times live in each market's own time zone via `zoneinfo`, so daylight-saving shifts need no config change. For assigned coins the phase multiplier **replaces** `spread_schedule` and `quiet_hours_utc`; unassigned coins keep the legacy behaviour unchanged. Multiplier 0 stops quoting for that coin while positions are still managed (same semantics as quiet hours). Unknown market ids log a warning and fall back to the legacy schedule instead of blocking startup. Exchange holidays are out of scope — pair with the oracle staleness guard to detect real closures.
 
+**Loss streak cooldown** (`--loss-streak-limit`): Pauses a coin after this many consecutive losing closes, for `--loss-streak-cooldown` seconds (default 300), then automatically resumes. Shares the per-coin cooldown map with `--auto-exclude` and `--forager`. Default 0 (disabled).
+
 **Auto-exclude on adverse selection** (`--auto-exclude`): Automatically pauses a coin when the AdverseSelectionTracker reports moderate adverse selection (`avg_<window>` below `--auto-exclude-threshold-bps`, default `-3.0`) for `--auto-exclude-consecutive` summary windows in a row (default 3, ~15 min with the default 300s log interval). The coin is paused for `--auto-exclude-cooldown` seconds (default 1800) and then automatically resumes. Requires `--enable-adverse-selection-log`. Per-window `min_fills` filtering keeps low-volume noise from triggering. Shares the per-coin cooldown map with `--loss-streak-limit`, so the two features compose naturally.
 
 **Per-coin position cap** (`max_position_multiple`, env-only): Suppresses same-direction entries once the accumulated position value (`|position| × mid_price`) reaches `max_position_multiple × effective_order_size_usd` for that coin, to prevent the accumulated-position-then-single-large-close scenario that exposes a market-making bot to oversized adverse fills. The cap respects `coin_size_overrides`, so a per-coin order-size override tightens or loosens the cap proportionally. Default `0.0` (disabled) preserves the pre-cap behaviour. **⚠️ No-op in the current single-sided flow** — see [Inventory skew and position cap are inert](#inventory-skew-and-position-cap-are-inert) below.
@@ -369,6 +367,8 @@ They are retained (not removed) because both become meaningful under a two-sided
 **Fill feature logging** (`--fill-feature-log`): Writes one JSON line per fill to a daily-rotated file (`{dir}/YYYYMMDD.jsonl`, UTC) containing the fill's join keys (`tid`/`oid`/`hash`), fill attributes, order-book features at fill time (spread, book imbalance, micro-price skew, top-of-book sizes, recent realized volatility), and the tracker's 5s/30s/60s markout samples as labels — a ready-made supervised dataset for offline adverse-selection modelling. Observation-only: the WebSocket thread performs no file IO (records are buffered in memory and flushed from the main loop after a 65s maturity window so markout labels can be embedded), all failures are swallowed, and a daily size cap plus buffer cap protect disk and memory. Requires `--enable-ws` and `--enable-adverse-selection-log`. Feature definitions live in a single shared function (`fill_features.compute_fill_features`) so future in-bot inference uses identical inputs (no train/serve skew). Default disabled.
 
 **Forager: composite-score auto-exclude** (`--forager`): Complements `--auto-exclude` (markout-based) by scoring each coin on three independent dimensions and pausing it when the composite stays low. The dimensions are **activity** (recency of fills, catches dead markets like a coin that hasn't filled in hours), **close quality** (maker close rate, catches coins with structural taker fallback even when markout looks neutral), and **cost** (recent $/1K vol, catches gradual bleed). A weighted composite in `[0, 100]` is computed each cycle; below `--forager-threshold` (default 30) for `--forager-consecutive` checks (default 3) triggers `--forager-cooldown` seconds (default 1800) on the shared cooldown map. Weights are configurable via `--forager-w-activity`, `--forager-w-quality`, `--forager-w-cost`. Internal formula constants (window length, idle grace, cost scale, min-closes gate) can be overridden via env vars (`FORAGER_WINDOW_SECONDS`, `FORAGER_ACTIVITY_IDLE_MIN_SECONDS`, `FORAGER_COST_MAX_PER_1K`, `FORAGER_MIN_CLOSES_FOR_QUALITY`, `FORAGER_CHECK_INTERVAL_SECONDS`). Default disabled; both Forager and `--auto-exclude` may run side-by-side and either may set the cooldown.
+
+**Order book imbalance filter** (`--imbalance-threshold`): Skips quoting one side at placement time when the L2 book imbalance exceeds the threshold (0–1; e.g. 0.4 skips when the book is ~70%/30%). Distinct from `--imbalance-guard-threshold` below, which cancels already-resting orders via the WebSocket feed. Default 0 (disabled).
 
 **WebSocket guards** (require `--enable-ws`):
 - `--bbo-guard-threshold-bps`: Cancel stale entry orders when BBO moves (default: 2.0)
@@ -399,6 +399,7 @@ Configurable risk management via environment variables or CLI flags (CLI takes p
 | `MAX_POSITION_PCT` | `--max-position-pct` | 0.2 | Max single position as % of account |
 | `MAX_MARGIN_USAGE` | `--max-margin-usage` | 0.8 | Stop new orders above this margin ratio |
 | `FORCE_CLOSE_MARGIN` | `--force-close-margin` | — | Force close ALL positions above this ratio |
+| `FORCE_CLOSE_LEVERAGE` | `--force-close-leverage` | — | Force close ALL positions above this leverage |
 | `DAILY_LOSS_LIMIT` | `--daily-loss-limit` | — | Absolute $ daily loss to auto-stop bot |
 | `PER_TRADE_STOP_LOSS` | `--per-trade-stop-loss` | — | Cut losing trades at this % (e.g., 0.05 = 5%) |
 | `MAX_OPEN_POSITIONS` | `--max-open-positions` | 5 | Max concurrent open positions |
@@ -627,6 +628,7 @@ strategies:
     track_max_adverse_excursion: true  # (no CLI flag; JSON config only) log mae_bps/mae_age on the close-event line; observation only, no extra API calls
     bbo_mode: false                    # --bbo-mode  (place orders at best bid/ask instead of mid ± spread)
     bbo_offset_bps: 0                  # --bbo-offset-bps  (bps behind BBO; 0 = at BBO)
+    imbalance_threshold: 0.0           # --imbalance-threshold  (skip quoting one side when L2 imbalance exceeds this, 0-1; 0 = disabled; placement-time filter, distinct from ws imbalance_guard_threshold)
     inventory_skew_bps: 0              # --inventory-skew-bps (NO-OP in the current single-sided flow: a coin holding a position does not re-quote, so the skew never reaches an order; warns at startup if non-zero)
     coin_offset_overrides: ""          # --coin-offset-overrides  (per-coin BBO offset: "SP500:0.5,MSFT:3")
     coin_spread_overrides: ""          # --coin-spread-overrides  (per-coin spread: "SP500:8,XYZ100:15")
@@ -652,11 +654,14 @@ strategies:
     drain_flag_file: ""                # --drain-flag-file  (path to flag file; presence triggers graceful drain mode)
     vol_adjust_enabled: false          # --vol-adjust  (enable volatility-adjusted BBO offset)
     vol_adjust_multiplier: 2.0         # --vol-adjust-multiplier  (offset += multiplier × avg_move_bps)
+    vol_lookback: 30                   # --vol-lookback  (recent mid prices used for volatility calc; shared with --dynamic-age)
     vol_adjust_max_offset: 50          # --vol-adjust-max-offset  (max offset bps after vol adjustment)
     dynamic_age_enabled: false         # --dynamic-age  (volatility-adjusted MAX_POSITION_AGE)
     dynamic_age_baseline_vol: 1.0      # --dynamic-age-baseline-vol  (bps reference for "normal" volatility)
     dynamic_age_min: 60                # --dynamic-age-min  (minimum position age in seconds)
     dynamic_age_max: 300               # --dynamic-age-max  (maximum position age in seconds)
+    loss_streak_limit: 0               # --loss-streak-limit  (pause a coin after N consecutive losing closes; 0 = disabled)
+    loss_streak_cooldown: 300          # --loss-streak-cooldown  (pause seconds after hitting the loss-streak limit)
     auto_exclude_enabled: false        # --auto-exclude  (auto-pause coin on consecutive adverse-selection windows; requires --enable-adverse-selection-log)
     auto_exclude_threshold_bps: -3.0   # --auto-exclude-threshold-bps  (avg_<window> at or below this is "bad")
     auto_exclude_consecutive: 3        # --auto-exclude-consecutive  (consecutive bad windows required to trigger)
@@ -685,6 +690,7 @@ risk_guardrails:
   max_position_pct: 0.2           # --max-position-pct  / env MAX_POSITION_PCT
   max_margin_usage: 0.8           # --max-margin-usage  / env MAX_MARGIN_USAGE
   force_close_margin: null        # --force-close-margin  / env FORCE_CLOSE_MARGIN
+  force_close_leverage: null      # --force-close-leverage  / env FORCE_CLOSE_LEVERAGE
   daily_loss_limit: null          # --daily-loss-limit  / env DAILY_LOSS_LIMIT
   per_trade_stop_loss: null       # --per-trade-stop-loss  / env PER_TRADE_STOP_LOSS
   max_open_positions: 5           # --max-open-positions  / env MAX_OPEN_POSITIONS
@@ -711,9 +717,9 @@ logging:
 
 hip3:
   env:
-    TRADING_DEXES: ""             # Comma-separated DEX names (e.g. "xyz,flx")
+    TRADING_DEXES: ""             # Comma-separated DEX names (e.g. "xyz")
     ENABLE_STANDARD_HL: "true"    # Trade standard HL perps alongside HIP-3
-    "{DEX}_COINS": ""             # Per-DEX coin list (e.g. XYZ_COINS=XYZ100,XYZ200)
+    "{DEX}_COINS": ""             # Per-DEX coin list (e.g. XYZ_COINS=AAPL,NVDA)
   cli:
     --dex: []                     # HIP-3 DEX names (overrides TRADING_DEXES)
     --no-hl: false                # Disable standard HL perps
