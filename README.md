@@ -461,6 +461,7 @@ For more detailed technical information, please refer to the following documents
 ## File Structure
 
 - `bot.py`: Main bot class
+- `cli.py`: CLI flag definitions (argparse)
 - `config.py`: Configuration management
 - `market_data.py`: Market data retrieval
 - `order_manager.py`: Order management

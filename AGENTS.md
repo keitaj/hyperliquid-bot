@@ -69,7 +69,8 @@ Run lint before committing. CI enforces both lint and tests.
 
 | File / Directory | Purpose |
 |---|---|
-| `bot.py` | Entry point — argparse, strategy dispatch |
+| `bot.py` | Entry point — strategy dispatch, config assembly |
+| `cli.py` | All argparse flag definitions (`build_parser()`) |
 | `check_balance.py` | Standalone account balance / position checker |
 | `config.py` | Loads `.env`, provides `get()` with defaults |
 | `json_config_loader.py` | JSON config file layer (flat or nested; precedence CLI > env > JSON > defaults) |
@@ -105,7 +106,7 @@ Run lint before committing. CI enforces both lint and tests.
 1. Create `strategies/your_strategy.py` extending `BaseStrategy`
 2. Implement `generate_signals()` and `calculate_position_size()`
 3. Read all parameters from `config.get('key', default)` — no hardcoded values
-4. Register in `strategies/__init__.py` and `bot.py` (strategy_map + default_configs + argparse)
+4. Register in `strategies/__init__.py` and `bot.py` (strategy_map + default_configs), and add its CLI flags (including the `--strategy` choice) in `cli.py`
 5. Add tests in `tests/`
 6. Document in `README.md`
 

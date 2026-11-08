@@ -14,9 +14,9 @@ These tests verify both halves of the wiring:
    market calendar.
 """
 import argparse
-from pathlib import Path
 
 import bot
+from cli import build_parser
 from strategies.mm_config import MMConfig
 
 PHASE_KEYS = [
@@ -25,8 +25,6 @@ PHASE_KEYS = [
     "phase_open_window_minutes",
     "phase_close_window_minutes",
 ]
-
-_BOT_SRC = Path(bot.__file__).read_text()
 
 
 def test_config_keys_registered_in_strategy_params():
@@ -39,14 +37,14 @@ def test_cli_flags_exist_with_matching_dest():
     # argparse maps --coin-market-overrides -> dest coin_market_overrides.
     # A flag whose dest does not match its config key would silently fail
     # to populate strategy_config, which is exactly the shipped bug.
+    # Exercises the real parser from cli.build_parser(), so a missing flag
+    # or a mismatched dest fails here directly.
+    parser = build_parser()
     for key in PHASE_KEYS:
         flag = "--" + key.replace("_", "-")
-        assert f"add_argument('{flag}'" in _BOT_SRC, f"missing argparse flag {flag}"
-        # confirm the auto-derived dest equals the config key
-        parser = argparse.ArgumentParser()
-        parser.add_argument(flag)
-        ns = parser.parse_args([flag, "x"])
-        assert hasattr(ns, key), f"{flag} dest does not resolve to {key}"
+        ns = parser.parse_args([flag, "30"])
+        val = getattr(ns, key, None)
+        assert val in ("30", 30.0), f"{flag} dest does not resolve to {key}"
 
 
 def _collect_like_bot(namespace, params):

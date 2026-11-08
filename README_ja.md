@@ -463,6 +463,7 @@ LOG_FORMAT=json LOG_LEVEL=DEBUG python3 bot.py --strategy rsi
 ## ファイル構成
 
 - `bot.py`: メインのボットクラス
+- `cli.py`: CLIフラグ定義（argparse）
 - `config.py`: 設定管理
 - `market_data.py`: マーケットデータの取得
 - `order_manager.py`: 注文管理
