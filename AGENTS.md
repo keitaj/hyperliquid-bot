@@ -70,23 +70,35 @@ Run lint before committing. CI enforces both lint and tests.
 | File / Directory | Purpose |
 |---|---|
 | `bot.py` | Entry point — argparse, strategy dispatch |
+| `check_balance.py` | Standalone account balance / position checker |
 | `config.py` | Loads `.env`, provides `get()` with defaults |
+| `json_config_loader.py` | JSON config file layer (flat or nested; precedence CLI > env > JSON > defaults) |
+| `log_config.py` | Logging setup — text or JSON output via `LOG_FORMAT` |
 | `market_data.py` | REST/WS wrappers for Hyperliquid market data |
 | `order_manager.py` | Order placement, cancellation, bulk operations |
+| `order_rejection_tracker.py` | Classifies and aggregates order rejections for log hygiene |
 | `position_closer.py` | Graceful position unwinding |
 | `risk_manager.py` | Per-trade and portfolio risk checks |
 | `circuit_breaker.py` | Halts trading on anomalous conditions |
 | `rate_limiter.py` | API rate-limit management with retry |
+| `ttl_cache.py` | TTL caches to cut redundant API calls within a cycle |
+| `coin_utils.py` | Shared HIP-3 `"dex:coin"` notation helpers |
+| `account_utils.py` | Shared account-value helpers (perp + spot stablecoin collateral) |
+| `fill_features.py` | Fill-time order-book feature definitions, shared by logging and future inference |
 | `exceptions.py` | Custom exception hierarchy |
 | `strategies/base_strategy.py` | Abstract base — `generate_signals()`, `calculate_position_size()` |
 | `strategies/market_making_strategy.py` | Market making with BBO tracking |
 | `strategies/mm_config.py` | MM strategy config dataclasses (grouped sub-configs) |
 | `strategies/mm_position_closer.py` | MM-specific position closer |
 | `strategies/mm_order_tracker.py` | MM order fill tracking |
+| `strategies/market_calendar.py` | Built-in market calendars + session-phase resolution (phase spread schedule) |
+| `strategies/coin_health_tracker.py` | Per-coin composite health score for the Forager auto-exclude |
 | `strategies/*_strategy.py` | RSI, MACD, Bollinger, Breakout, Grid, Simple MA |
 | `hip3/` | HIP-3 multi-DEX support (registry, orders, market data) |
+| `ws/` | WebSocket layer — market-data/fill feeds, BBO/imbalance/velocity/oracle guards, adverse-selection tracker, fill-feature writer, auto-reconnect |
 | `validation/` | Strategy and margin validators |
 | `tests/` | Unit tests (pytest, all mocked) |
+| `examples/` | Example JSON config (`config.example.json`) |
 
 ## Adding a New Strategy
 
