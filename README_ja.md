@@ -208,7 +208,6 @@ TOTAL        |       |                |                 | PnL: 🟢$   2.50
 |---|---|---|
 | 標準 Hyperliquid | (なし) | 暗号資産Perps（BTC、ETH、SOLなど） |
 | [trade.xyz](https://trade.xyz) | `xyz` | 株式・コモディティPerps（AAPL、GOLD、CLなど） |
-| [Based](https://basedapp.xyz) | (なし) | 標準HLのフロントエンド — `ENABLE_STANDARD_HL=true` で対応 |
 
 > **注意**: DEX名はオンチェーンで割り当てられます。現在の完全なリストはHyperliquid APIの `{"type": "perpDexs"}` で確認できます。新しいDEXはデプロイヤーのローンチに伴いこのリストに追加されます。
 
