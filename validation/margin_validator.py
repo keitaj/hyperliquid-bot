@@ -85,8 +85,26 @@ class MarginValidator:
             position_size = strategy_config.get('position_size_per_grid', 50)
             max_positions = min(grid_levels, strategy_config.get('max_positions', 5))
         else:
-            position_size = strategy_config.get('position_size_usd', 100)
+            # Mirror what the strategy will actually send: market_making sizes
+            # orders with order_size_usd, so fall back to it before the generic
+            # default (otherwise MM configs are validated against a size they
+            # never use).
+            position_size = strategy_config.get(
+                'position_size_usd', strategy_config.get('order_size_usd', 100))
             max_positions = strategy_config.get('max_positions', 3)
+            # Runtime caps every order at account_cap_pct x account value
+            # (BaseStrategy._apply_account_cap), so validate the capped size the
+            # bot will actually use. Validating the raw configured size blocks
+            # startup on exactly the low balances where the cap is already
+            # shrinking orders to fit. No cap configured -> old behavior.
+            account_cap_pct = strategy_config.get('account_cap_pct', 0.0) or 0.0
+            capped_size = account_value * account_cap_pct
+            if account_cap_pct > 0 and position_size > capped_size:
+                logger.info(
+                    f"Validating with capped position size ${capped_size:.2f} "
+                    f"(account_cap_pct {account_cap_pct:.2f} x account value ${account_value:.2f}; "
+                    f"configured ${position_size:.2f})")
+                position_size = capped_size
 
         # Get strategy risk multiplier
         risk_multiplier = self.STRATEGY_RISK_MULTIPLIERS.get(strategy_name, 1.0)
