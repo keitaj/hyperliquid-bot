@@ -224,6 +224,10 @@ class MarketMakingStrategy(BaseStrategy):
         self._coin_offset_overrides: Dict[str, float] = self.cfg.per_coin.offset
         self._coin_spread_overrides: Dict[str, float] = self.cfg.per_coin.spread
         self._coin_size_overrides: Dict[str, float] = self.cfg.per_coin.size
+        # Date-keyed event size multipliers, already resolved for today by
+        # the process owner (empty on a normal day).
+        self._event_size_multipliers: Dict[str, float] = dict(
+            self.cfg.event_size_multipliers)
         self._coin_unrealized_loss_overrides: Dict[str, float] = self.cfg.per_coin.unrealized_loss
         if self._coin_offset_overrides:
             logger.info(f"[mm] Per-coin offset overrides: {self._coin_offset_overrides}")
@@ -231,6 +235,13 @@ class MarketMakingStrategy(BaseStrategy):
             logger.info(f"[mm] Per-coin spread overrides: {self._coin_spread_overrides}")
         if self._coin_size_overrides:
             logger.info(f"[mm] Per-coin size overrides: {self._coin_size_overrides}")
+        if self._event_size_multipliers:
+            # WARNING level on purpose: an active event override changes
+            # sizing for the whole session and should stand out in the log.
+            logger.warning(
+                f"[mm] [event-override] size multipliers active today: "
+                f"{self._event_size_multipliers}"
+            )
         if self._coin_unrealized_loss_overrides:
             logger.info(
                 f"[mm] Per-coin unrealized-loss overrides: {self._coin_unrealized_loss_overrides}"
@@ -1287,10 +1298,21 @@ class MarketMakingStrategy(BaseStrategy):
         )
 
     def _get_coin_size(self, coin: str) -> float:
-        """Get ORDER_SIZE_USD for a specific coin, checking overrides first."""
-        return self._lookup_coin_override(
+        """Get ORDER_SIZE_USD for a specific coin, checking overrides first.
+
+        An active date-keyed event multiplier (<= 1.0) scales the resolved
+        size; the account cap in ``BaseStrategy._apply_account_cap`` still
+        applies afterwards as the final clamp.
+        """
+        size = self._lookup_coin_override(
             coin, self._coin_size_overrides, self.order_size_usd
         )
+        # getattr: tolerate partially-initialised instances (several test
+        # harnesses bypass __init__ and set only the attributes they need).
+        multipliers = getattr(self, "_event_size_multipliers", None)
+        if multipliers:
+            size *= self._lookup_coin_override(coin, multipliers, 1.0)
+        return size
 
     def _calculate_microprice_offsets(
         self, coin: str, base_offset_bps: float

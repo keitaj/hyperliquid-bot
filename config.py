@@ -1,14 +1,100 @@
+import logging
 import os
-from typing import Dict, Optional
+from datetime import date, datetime, timezone
+from typing import Dict, Optional, Set, Tuple
 from dotenv import load_dotenv
 from hyperliquid.utils import constants
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
 
 def _parse_list(env_val: str) -> list:
     """Parse comma-separated env var into a list, filtering empty strings."""
     return [x.strip() for x in env_val.split(",") if x.strip()]
+
+
+def _parse_event_overrides(
+    raw: str, today: date
+) -> Tuple[Set[str], Dict[str, float], int]:
+    """Parse ``COIN_EVENT_OVERRIDES`` into today's event actions.
+
+    Format: comma-separated ``COIN:YYYY-MM-DD:ACTION`` entries where ACTION
+    is ``exclude`` (drop the coin from trading for that UTC date) or
+    ``size<multiplier>`` (scale the coin's effective order size; the
+    multiplier must satisfy ``0 < m <= 1.0`` — event overrides may only
+    reduce exposure, never raise it).
+
+    Returns ``(excluded_today, size_multipliers_today, past_entry_count)``.
+    Entries dated in the future are inert today; past-dated entries are
+    counted so startup logging can suggest cleanup. For duplicate
+    ``(coin, date)`` entries the last one wins.
+
+    A malformed entry is skipped with a warning instead of aborting
+    startup: refusing to start would turn a typo into an outage loop,
+    while a silently-skipped protection is still visible in the logs.
+    """
+    excluded: Set[str] = set()
+    multipliers: Dict[str, float] = {}
+    past = 0
+    for entry in (e.strip() for e in raw.split(",")):
+        if not entry:
+            continue
+        parts = [p.strip() for p in entry.split(":")]
+        if len(parts) != 3 or not all(parts):
+            logger.warning(
+                f"COIN_EVENT_OVERRIDES: malformed entry '{entry}' ignored "
+                f"(expected COIN:YYYY-MM-DD:ACTION)")
+            continue
+        coin, date_str, action = parts
+        try:
+            event_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        except ValueError:
+            logger.warning(
+                f"COIN_EVENT_OVERRIDES: bad date in '{entry}' ignored "
+                f"(expected YYYY-MM-DD)")
+            continue
+        # Validate the action even for non-today dates so typos surface
+        # at the next restart rather than on the event day itself.
+        multiplier: Optional[float] = None
+        if action != "exclude":
+            if action.startswith("size"):
+                try:
+                    multiplier = float(action[len("size"):])
+                except ValueError:
+                    multiplier = None
+            if multiplier is None or not 0.0 < multiplier <= 1.0:
+                logger.warning(
+                    f"COIN_EVENT_OVERRIDES: bad action in '{entry}' ignored "
+                    f"(expected 'exclude' or 'size<m>' with 0 < m <= 1.0)")
+                continue
+        if event_date < today:
+            past += 1
+            continue
+        if event_date != today:
+            continue
+        if action == "exclude":
+            excluded.add(coin)
+            multipliers.pop(coin, None)
+        else:
+            multipliers[coin] = multiplier
+            excluded.discard(coin)
+    return excluded, multipliers, past
+
+
+def _split_event_excluded(
+    coins: list, excluded: Set[str]
+) -> Tuple[list, list]:
+    """Split *coins* into (kept, removed) by the event-exclusion set.
+
+    Module-level on purpose: a comprehension inside the ``Config`` class
+    body cannot see class attributes (class scope is skipped inside
+    comprehension scopes).
+    """
+    kept = [c for c in coins if c not in excluded]
+    removed = [c for c in coins if c in excluded]
+    return kept, removed
 
 
 class Config:
@@ -34,6 +120,23 @@ class Config:
     # Whether to also trade standard Hyperliquid perps (non-HIP-3).
     ENABLE_STANDARD_HL: bool = os.getenv("ENABLE_STANDARD_HL", "true").lower() == "true"
 
+    # ------------------------------------------------------------------ #
+    # Date-keyed event overrides (earnings days, scheduled macro events)
+    # ------------------------------------------------------------------ #
+    # Format: COIN_EVENT_OVERRIDES=NVDA:2026-11-17:exclude,NVDA:2026-11-18:size0.5
+    # Evaluated ONCE at process start against the current UTC date, so an
+    # entry covers the sessions *started* on the listed date. Stateless and
+    # idempotent: past dates simply never match again, so there is nothing
+    # to revert. Coin names are bare (no "dex:" prefix), matching *_COINS.
+    _ev = _parse_event_overrides(
+        os.getenv("COIN_EVENT_OVERRIDES", ""),
+        datetime.now(timezone.utc).date(),
+    )
+    EVENT_EXCLUDED_COINS: Set[str] = _ev[0]
+    EVENT_SIZE_MULTIPLIERS: Dict[str, float] = _ev[1]
+    EVENT_PAST_ENTRIES: int = _ev[2]
+    del _ev
+
     # Per-DEX coin overrides.  If not set, the bot uses coins passed via CLI.
     # Format: comma-separated coin names WITHOUT the "dex:" prefix.
     # Example: XYZ_COINS=XYZ100,XYZ200
@@ -42,7 +145,17 @@ class Config:
         _env_key = f"{_dex.upper()}_COINS"
         _val = os.getenv(_env_key, "")
         if _val:
-            DEX_COINS[_dex] = _parse_list(_val)
+            _coins, _removed = _split_event_excluded(
+                _parse_list(_val), EVENT_EXCLUDED_COINS)
+            if _removed:
+                logger.warning(
+                    f"[event-override] {_env_key}: {_removed} excluded for "
+                    f"today (UTC); remaining: {_coins or 'NONE'}")
+            # Keep the key even when the filter empties the list: a missing
+            # key means "discover all coins on the DEX" (_build_hip3_coins
+            # checks key presence), which would invert an exclude into
+            # trade-everything.
+            DEX_COINS[_dex] = _coins
 
     # ------------------------------------------------------------------ #
     # Builder fee configuration (per-DEX)

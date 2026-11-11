@@ -489,6 +489,22 @@ class HyperliquidBot:
             **(strategy_config or {}),
         }
 
+        # Date-keyed event overrides (COIN_EVENT_OVERRIDES) are env-only and
+        # resolved for today at Config import time. Exclusions were already
+        # applied to Config.DEX_COINS; size multipliers are injected here so
+        # the strategy reads them from its config instead of the environment.
+        if strategy_name == 'market_making' and Config.EVENT_SIZE_MULTIPLIERS:
+            config.setdefault(
+                'event_size_multipliers', dict(Config.EVENT_SIZE_MULTIPLIERS))
+            logger.warning(
+                f"[event-override] size multipliers active today: "
+                f"{Config.EVENT_SIZE_MULTIPLIERS}")
+        if Config.EVENT_PAST_ENTRIES:
+            logger.info(
+                f"[event-override] COIN_EVENT_OVERRIDES contains "
+                f"{Config.EVENT_PAST_ENTRIES} past-dated entries (inert; "
+                f"safe to clean up)")
+
         # Validate strategy parameters early
         validation_error = validate_strategy_config(strategy_name, config)
         if validation_error:

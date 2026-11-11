@@ -229,6 +229,16 @@ ENABLE_STANDARD_HL=true
 # Per-DEX coin lists (optional — defaults to all available coins on that DEX)
 XYZ_COINS=AAPL,NVDA,SP500
 
+# Date-keyed event overrides (optional). On the listed UTC date a coin can
+# be excluded from trading or have its order size scaled down — useful for
+# scheduled high-volatility events (earnings, FOMC, elections) where resting
+# quotes face informed flow. Actions: "exclude" or "size<m>" (0 < m <= 1.0;
+# event overrides can only reduce exposure). Evaluated once at process start
+# against the current UTC date, so an entry covers the sessions STARTED on
+# that date; list the previous date too if the event spans a session that
+# started the day before. Past dates are inert — no cleanup required.
+# COIN_EVENT_OVERRIDES=NVDA:2026-11-17:exclude,NVDA:2026-11-18:size0.5
+
 # Per-DEX builder fee (optional — required by some HIP-3 deployers'
 # rewards programs).  Setting BUILDER_FEES_<DEX>_ADDRESS attaches the
 # given builder code to every order on that DEX and pre-approves it on
@@ -722,6 +732,12 @@ hip3:
     TRADING_DEXES: ""             # Comma-separated DEX names (e.g. "xyz,io")
     ENABLE_STANDARD_HL: "true"    # Trade standard HL perps alongside HIP-3
     "{DEX}_COINS": ""             # Per-DEX coin list (e.g. XYZ_COINS=AAPL,NVDA)
+    COIN_EVENT_OVERRIDES: ""      # Date-keyed event actions, evaluated at process
+                                  # start vs current UTC date. "COIN:YYYY-MM-DD:exclude"
+                                  # drops the coin for sessions started that date;
+                                  # "COIN:YYYY-MM-DD:size<m>" (0 < m <= 1.0) scales its
+                                  # order size (applied after coin_size_overrides,
+                                  # before the account cap). Past dates are inert.
   cli:
     --dex: []                     # HIP-3 DEX names (overrides TRADING_DEXES)
     --no-hl: false                # Disable standard HL perps
