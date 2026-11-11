@@ -6,7 +6,7 @@ import signal
 import types
 import warnings
 from importlib.metadata import PackageNotFoundError, version as _pkg_version
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from log_config import setup_logging
 setup_logging()
@@ -489,6 +489,21 @@ class HyperliquidBot:
             **(strategy_config or {}),
         }
 
+        # Date-keyed event overrides (COIN_EVENT_OVERRIDES) are env-only and
+        # resolved for today at Config import time. Exclusions were already
+        # applied to Config.DEX_COINS; size multipliers are injected here so
+        # the strategy reads them from its config instead of the environment.
+        if strategy_name == 'market_making' and Config.EVENT_SIZE_MULTIPLIERS:
+            # The strategy logs the active multipliers itself, next to the
+            # other per-coin override logs.
+            config.setdefault(
+                'event_size_multipliers', dict(Config.EVENT_SIZE_MULTIPLIERS))
+        if Config.EVENT_PAST_ENTRIES:
+            logger.info(
+                f"[event-override] COIN_EVENT_OVERRIDES contains "
+                f"{Config.EVENT_PAST_ENTRIES} past-dated entries (inert; "
+                f"safe to clean up)")
+
         # Validate strategy parameters early
         validation_error = validate_strategy_config(strategy_name, config)
         if validation_error:
@@ -500,6 +515,9 @@ class HyperliquidBot:
 
         # Build full coin list: standard HL coins + HIP-3 "dex:coin" coins
         hl_coins = coins or ['BTC', 'ETH'] if Config.ENABLE_STANDARD_HL else []
+        # Date-keyed event exclusions apply to standard-HL coins here; the
+        # HIP-3 lists were already filtered in Config.DEX_COINS.
+        hl_coins = self._apply_event_exclusions(hl_coins, Config.EVENT_EXCLUDED_COINS)
         hip3_coins, delisted = self._build_hip3_coins()
 
         all_coins = (hl_coins if Config.ENABLE_STANDARD_HL else []) + hip3_coins
@@ -508,11 +526,8 @@ class HyperliquidBot:
         if duplicates:
             logger.warning(f"Duplicate coins removed from trading list: {duplicates}")
 
-        # The BTC/ETH fallback is for an empty configuration.  When the list is
-        # empty only because every configured coin was delisted, falling back
-        # would trade markets nobody asked for; leave it empty so startup
-        # validation aborts instead.
-        self.trading_coins = unique_coins or ([] if delisted else ['BTC', 'ETH'])
+        self.trading_coins = self._resolve_trading_coins(
+            unique_coins, delisted, bool(Config.EVENT_EXCLUDED_COINS))
 
         if hip3_coins:
             logger.info(f"HIP-3 coins: {hip3_coins}")
@@ -570,6 +585,40 @@ class HyperliquidBot:
                 logger.info(f"Skipped {len(dex_delisted)} delisted coins discovered on '{dex}': {dex_delisted}")
             delisted.extend(dex_delisted)
         return coins, delisted
+
+    @staticmethod
+    def _apply_event_exclusions(coins: List[str], excluded: Set[str]) -> List[str]:
+        """Drop coins listed in today's event exclusions (bare names)."""
+        if not excluded:
+            return list(coins)
+        removed = [c for c in coins if c in excluded]
+        if removed:
+            logger.warning(
+                f"[event-override] standard HL coins {removed} excluded for today (UTC)")
+        return [c for c in coins if c not in excluded]
+
+    @staticmethod
+    def _resolve_trading_coins(
+        unique_coins: List[str], delisted: List[str], event_excluded: bool
+    ) -> List[str]:
+        """Pick the final trading list, guarding the BTC/ETH default.
+
+        The BTC/ETH fallback exists for an *empty configuration*. When the
+        list is empty only because every configured coin was delisted or
+        excluded by a date-keyed event override, falling back would trade
+        markets nobody asked for — and an event exclusion is meant to
+        *reduce* exposure, so silently opening BTC/ETH instead would invert
+        the operator's intent. Leave the list empty so startup validation
+        aborts instead.
+        """
+        if unique_coins:
+            return unique_coins
+        if delisted or event_excluded:
+            logger.error(
+                "No tradable coins left after delisting/event exclusions; "
+                "not falling back to BTC/ETH — startup validation will abort")
+            return []
+        return ['BTC', 'ETH']
 
     @staticmethod
     def _deduplicate_coins(coins: List[str]) -> tuple:

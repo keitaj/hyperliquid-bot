@@ -649,6 +649,10 @@ class MMConfig:
     velocity: VelocityGuardConfig = field(default_factory=VelocityGuardConfig)
     oracle_guard: OracleGuardConfig = field(default_factory=OracleGuardConfig)
     per_coin: PerCoinOverrides = field(default_factory=PerCoinOverrides)
+    # Date-keyed event size multipliers (already resolved for *today* by the
+    # process owner, e.g. bot.py injecting Config.EVENT_SIZE_MULTIPLIERS).
+    # Applied on top of the per-coin size override at order sizing time.
+    event_size_multipliers: Dict[str, float] = field(default_factory=dict)
     imbalance: ImbalanceConfig = field(default_factory=ImbalanceConfig)
     close: CloseConfig = field(default_factory=CloseConfig)
     close_tier_toxicity: CloseTierToxicityConfig = field(
@@ -670,6 +674,15 @@ class MMConfig:
         """
         close_spread_bps_raw = d.get('close_spread_bps', None)
         close_spread_bps = float(close_spread_bps_raw) if close_spread_bps_raw is not None else None
+        # event_size_multipliers normally arrives as a dict injected by
+        # bot.py (resolved for today from the environment); a JSON-provided
+        # "COIN:MULT,..." string is accepted for symmetry with the other
+        # per-coin override keys.
+        _ev_raw = d.get('event_size_multipliers') or {}
+        if isinstance(_ev_raw, dict):
+            event_size_multipliers = {str(k): float(v) for k, v in _ev_raw.items()}
+        else:
+            event_size_multipliers = parse_coin_overrides(_ev_raw)
         return cls(
             loss_streak=LossStreakConfig(
                 limit=int(d.get('loss_streak_limit', 0)),
@@ -702,6 +715,7 @@ class MMConfig:
                 unrealized_loss=parse_coin_overrides(d.get('coin_unrealized_loss_overrides', '')),
                 close_tier=parse_coin_tier_overrides(d.get('coin_close_tier_overrides', '')),
             ),
+            event_size_multipliers=event_size_multipliers,
             imbalance=ImbalanceConfig(
                 placement_threshold=float(d.get('imbalance_threshold', 0.0)),
                 reactive_threshold=float(d.get('imbalance_guard_threshold', 0.0)),
