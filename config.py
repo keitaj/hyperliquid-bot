@@ -41,13 +41,20 @@ def _parse_event_overrides(
     for entry in (e.strip() for e in raw.split(",")):
         if not entry:
             continue
-        parts = [p.strip() for p in entry.split(":")]
+        # rsplit so a dex-prefixed coin ("xyz:NVDA:...") lands in `coin`
+        # and gets a specific message instead of a generic "malformed".
+        parts = [p.strip() for p in entry.rsplit(":", 2)]
         if len(parts) != 3 or not all(parts):
             logger.warning(
                 f"COIN_EVENT_OVERRIDES: malformed entry '{entry}' ignored "
                 f"(expected COIN:YYYY-MM-DD:ACTION)")
             continue
         coin, date_str, action = parts
+        if ":" in coin:
+            logger.warning(
+                f"COIN_EVENT_OVERRIDES: dex-prefixed coin in '{entry}' ignored "
+                f"(use the bare coin name, as in the *_COINS lists)")
+            continue
         try:
             event_date = datetime.strptime(date_str, "%Y-%m-%d").date()
         except ValueError:

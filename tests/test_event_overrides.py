@@ -73,6 +73,15 @@ class TestParseEventOverrides:
             "NVDA:2099-01-01:size2.0", TODAY)
         assert excluded == set() and mult == {} and past == 0
 
+    def test_dex_prefixed_coin_is_skipped(self):
+        """Bare names only (matching *_COINS); a prefixed entry is ignored
+        without disturbing its neighbours."""
+        excluded, mult, past = _parse_event_overrides(
+            "xyz:NVDA:2026-11-17:exclude,SP500:2026-11-17:size0.5", TODAY)
+        assert excluded == set()
+        assert mult == {"SP500": 0.5}
+        assert past == 0
+
 
 class TestConfigDexCoinsFiltering:
     """Reload the config module with a controlled environment."""
@@ -96,12 +105,19 @@ class TestConfigDexCoinsFiltering:
         import config as config_module
         importlib.reload(config_module)
 
+    @staticmethod
+    def _today_and_tomorrow(coin: str, action: str) -> str:
+        """Entries for both today and tomorrow (UTC) so a run that straddles
+        00:00 UTC between building the env and reloading still matches."""
+        today = datetime.now(timezone.utc).date()
+        tomorrow = date.fromordinal(today.toordinal() + 1)
+        return f"{coin}:{today.isoformat()}:{action},{coin}:{tomorrow.isoformat()}:{action}"
+
     def test_excluded_coin_removed_from_dex_coins(self):
-        today = datetime.now(timezone.utc).date().isoformat()
         mod = self._reload_with(
             TRADING_DEXES="xyz",
             XYZ_COINS="NVDA,SP500,GOOGL",
-            COIN_EVENT_OVERRIDES=f"NVDA:{today}:exclude",
+            COIN_EVENT_OVERRIDES=self._today_and_tomorrow("NVDA", "exclude"),
         )
         assert mod.Config.DEX_COINS["xyz"] == ["SP500", "GOOGL"]
         assert mod.Config.EVENT_EXCLUDED_COINS == {"NVDA"}
@@ -109,11 +125,10 @@ class TestConfigDexCoinsFiltering:
     def test_exclude_all_keeps_key_with_empty_list(self):
         """Empty-after-filter must NOT look like 'key missing' (which would
         mean 'discover all coins on the DEX')."""
-        today = datetime.now(timezone.utc).date().isoformat()
         mod = self._reload_with(
             TRADING_DEXES="xyz",
             XYZ_COINS="NVDA",
-            COIN_EVENT_OVERRIDES=f"NVDA:{today}:exclude",
+            COIN_EVENT_OVERRIDES=self._today_and_tomorrow("NVDA", "exclude"),
         )
         assert "xyz" in mod.Config.DEX_COINS
         assert mod.Config.DEX_COINS["xyz"] == []
@@ -137,6 +152,38 @@ class TestConfigDexCoinsFiltering:
         assert mod.Config.EVENT_EXCLUDED_COINS == set()
         assert mod.Config.EVENT_SIZE_MULTIPLIERS == {}
         assert mod.Config.EVENT_PAST_ENTRIES == 0
+
+
+class TestBotCoinListGuards:
+    """bot.py helpers that stand between an event exclusion and the
+    BTC/ETH default."""
+
+    def test_resolve_keeps_configured_coins(self):
+        from bot import HyperliquidBot
+        assert HyperliquidBot._resolve_trading_coins(["xyz:NVDA"], [], False) == ["xyz:NVDA"]
+
+    def test_resolve_empty_config_falls_back_to_majors(self):
+        from bot import HyperliquidBot
+        assert HyperliquidBot._resolve_trading_coins([], [], False) == ["BTC", "ETH"]
+
+    def test_resolve_all_delisted_stays_empty(self):
+        from bot import HyperliquidBot
+        assert HyperliquidBot._resolve_trading_coins([], ["xyz:OLD"], False) == []
+
+    def test_resolve_all_event_excluded_stays_empty(self):
+        """Excluding every configured coin for the day must not open BTC/ETH."""
+        from bot import HyperliquidBot
+        assert HyperliquidBot._resolve_trading_coins([], [], True) == []
+
+    def test_hl_coins_filtered_by_event_exclusions(self):
+        from bot import HyperliquidBot
+        assert HyperliquidBot._apply_event_exclusions(
+            ["BTC", "ETH", "SOL"], {"ETH"}) == ["BTC", "SOL"]
+
+    def test_hl_coins_untouched_without_exclusions(self):
+        from bot import HyperliquidBot
+        coins = ["BTC", "ETH"]
+        assert HyperliquidBot._apply_event_exclusions(coins, set()) == ["BTC", "ETH"]
 
 
 class TestMMConfigParsing:
