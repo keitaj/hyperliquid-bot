@@ -225,6 +225,9 @@ TRADING_DEXES=xyz
 
 # Set to false to trade only on HIP-3 DEXes (disable standard HL perps)
 ENABLE_STANDARD_HL=true
+# Standard abstraction only: add each HIP-3 DEX clearinghouse to the account
+# snapshot (position caps / margin guards). Leave false under unified account.
+INCLUDE_HIP3_DEX_EQUITY=false
 
 # Per-DEX coin lists (optional — defaults to all available coins on that DEX)
 XYZ_COINS=AAPL,NVDA,SP500
@@ -731,6 +734,7 @@ hip3:
   env:
     TRADING_DEXES: ""             # Comma-separated DEX names (e.g. "xyz,io")
     ENABLE_STANDARD_HL: "true"    # Trade standard HL perps alongside HIP-3
+    INCLUDE_HIP3_DEX_EQUITY: "false"  # Sum HIP-3 DEX clearinghouses into the account snapshot (standard abstraction only; double counts under unified account)
     "{DEX}_COINS": ""             # Per-DEX coin list (e.g. XYZ_COINS=AAPL,NVDA)
     COIN_EVENT_OVERRIDES: ""      # Date-keyed event actions, evaluated at process
                                   # start vs current UTC date. "COIN:YYYY-MM-DD:exclude"
