@@ -77,7 +77,9 @@ def _assert_sdk_version() -> None:
 
 _assert_sdk_version()
 
-from hyperliquid.exchange import Exchange  # noqa: E402
+# Imported under the SDK's name so the ``bot.Exchange`` seam used by tests is
+# preserved; the runtime class sends cancels with the ``fast`` flag.
+from fast_cancel_exchange import FastCancelExchange as Exchange  # noqa: E402
 from config import Config  # noqa: E402
 from market_data import MarketDataManager  # noqa: E402
 from order_manager import OrderManager  # noqa: E402
