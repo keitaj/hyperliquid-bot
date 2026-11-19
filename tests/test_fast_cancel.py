@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fast_cancel_exchange import FastCancelExchange
+from hyperliquid.exchange import Exchange
 from hyperliquid.utils.constants import MAINNET_API_URL
 
 
@@ -80,6 +81,32 @@ def test_single_cancel_routes_through_fast_bulk_cancel(mock_sign):
     signed_action = mock_sign.call_args.args[1]
     assert signed_action["cancels"] == [{"a": 110001, "o": 42}]
     assert signed_action["f"] is True
+
+
+@pytest.mark.parametrize("method", ["bulk_cancel", "bulk_cancel_by_cloid"])
+@patch("hyperliquid.exchange.sign_l1_action", return_value="sig")
+@patch("fast_cancel_exchange.sign_l1_action", return_value="sig")
+def test_action_is_sdk_action_plus_flag(mock_sign_ours, mock_sign_sdk, method):
+    """Drift guard: our action must equal the pinned SDK's action plus ``f``.
+
+    The overrides copy the SDK method bodies. If an SDK bump changes the cancel
+    action shape, this fails instead of silently shipping a stale copy.
+    """
+    ex = _make_exchange()
+    if method == "bulk_cancel":
+        reqs = [{"coin": "xyz:SP500", "oid": 1}, {"coin": "xyz:XYZ100", "oid": 2}]
+    else:
+        cloid = MagicMock()
+        cloid.to_raw.return_value = "0x" + "ef" * 16
+        reqs = [{"coin": "xyz:SP500", "cloid": cloid}]
+
+    getattr(Exchange, method)(ex, reqs)          # parent (SDK) implementation
+    sdk_action = mock_sign_sdk.call_args.args[1]
+    getattr(ex, method)(reqs)                    # our override
+    our_action = mock_sign_ours.call_args.args[1]
+
+    assert "f" not in sdk_action
+    assert our_action == {**sdk_action, "f": True}
 
 
 @patch("fast_cancel_exchange.sign_l1_action", return_value="sig")

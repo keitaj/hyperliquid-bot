@@ -1,10 +1,13 @@
 """Exchange subclass that sends cancels with the Hyperliquid ``fast`` flag.
 
 Hyperliquid's ``cancel`` and ``cancelByCloid`` actions accept an optional
-top-level ``"f": true`` ("fast") field. Per the exchange-endpoint docs, fast
-cancels are prioritized in the mempool (``fast = true`` only), carry no other
-disadvantage, and are rejected only when they target trigger orders. The field
-MUST be omitted when false: an action hashed with ``"f": false`` is rejected.
+top-level ``"f": true`` ("fast") field. The optimizing-latency docs recommend
+sending every cancel with it: "There is no disadvantage to the fast flag,
+except that fast cancels cannot be used to cancel trigger orders." Per the
+exchange-endpoint docs, in a future network upgrade cancel actions will be
+prioritized in the mempool if and only if ``fast = true``; today the flag has
+no other effect. The field MUST be omitted when false: an action hashed with
+``"f": false`` is rejected.
 
 ``hyperliquid-python-sdk`` (through 0.24.0) builds the cancel action without
 ``f``. Because the action is signed before posting, the flag has to be injected
