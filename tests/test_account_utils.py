@@ -283,7 +283,8 @@ class TestHip3DexEquity:
         assert snap.account_value == 777.0
         assert snap.margin_used == 100.0
 
-    def test_dex_api_failure_without_fallback_keeps_partial_sum(self):
+    def test_dex_api_failure_without_fallback_adds_nothing(self):
+        """All-or-nothing: a failing DEX never yields a partial DEX sum."""
         from rate_limiter import API_ERRORS
         set_hip3_dexes(['xyz', 'km'])
         info = _make_info(
@@ -292,9 +293,50 @@ class TestHip3DexEquity:
         )
         snap = get_account_snapshot(info, '0xabc')
 
-        # xyz skipped, km still counted
-        assert snap.account_value == 540.0
-        assert snap.margin_used == 110.0
+        assert snap.account_value == 500.0
+        assert snap.margin_used == 100.0
+
+    def test_spot_fallback_does_not_double_count_dex_equity(self):
+        """Blocker from review: last_known_balance is a complete prior snapshot
+        (DEX equity included), so DEX equity must not be added on top of it."""
+        from rate_limiter import API_ERRORS
+        set_hip3_dexes(['xyz'])
+        info = _make_info(
+            account_value=500.0, margin_used=100.0,
+            spot_raises=API_ERRORS[0]('spot down'),
+            dex_states={'xyz': _dex_state(300.0, 50.0)},
+        )
+        snap = get_account_snapshot(info, '0xabc', last_known_balance=1000.0)
+
+        assert snap.account_value == 1000.0           # not 1300
+        # DEX was not even queried once the fallback value was substituted
+        assert all(len(c.args) == 1 for c in info.user_state.call_args_list)
+
+    def test_dex_totals_cached_on_prefetched_user_state_path(self):
+        """risk_manager passes a pre-fetched user_state (bypassing the snapshot
+        cache); the DEX calls must still be shared within the TTL."""
+        set_hip3_dexes(['xyz'])
+        info = _make_info(account_value=500.0, margin_used=100.0, dex_states={'xyz': _dex_state(300.0, 50.0)})
+        pre = {'marginSummary': {'accountValue': '500.0', 'totalMarginUsed': '100.0'}}
+
+        for _ in range(3):
+            snap = get_account_snapshot(info, '0xabc', user_state=pre)
+            assert snap.account_value == 800.0
+            assert snap.margin_used == 150.0
+
+        dex_calls = [c for c in info.user_state.call_args_list if len(c.args) > 1]
+        assert len(dex_calls) == 1
+
+    def test_invalidate_cache_also_drops_dex_totals(self):
+        set_hip3_dexes(['xyz'])
+        info = _make_info(account_value=500.0, dex_states={'xyz': _dex_state(300.0, 0.0)})
+        pre = {'marginSummary': {'accountValue': '500.0', 'totalMarginUsed': '0'}}
+        get_account_snapshot(info, '0xabc', user_state=pre)
+        invalidate_snapshot_cache('0xabc')
+        get_account_snapshot(info, '0xabc', user_state=pre)
+
+        dex_calls = [c for c in info.user_state.call_args_list if len(c.args) > 1]
+        assert len(dex_calls) == 2
 
     def test_dex_state_missing_margin_summary_counts_zero(self):
         set_hip3_dexes(['xyz'])

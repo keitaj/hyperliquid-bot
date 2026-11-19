@@ -49,6 +49,10 @@ class AccountSnapshot:
 _snapshot_cache: Dict[str, AccountSnapshot] = {}
 _snapshot_cache_time: Dict[str, float] = {}
 _snapshot_cache_ttl: float = _DEFAULT_CACHE_TTL
+# address -> (monotonic time, summed DEX accountValue, summed DEX totalMarginUsed).
+# Separate from the snapshot cache because callers that pass a pre-fetched
+# ``user_state`` bypass that cache but must still not re-query every DEX.
+_dex_cache: Dict[str, Tuple[float, float, float]] = {}
 
 
 def set_snapshot_cache_ttl(ttl: float) -> None:
@@ -113,9 +117,33 @@ def invalidate_snapshot_cache(account_address: Optional[str] = None) -> None:
     if account_address is None:
         _snapshot_cache.clear()
         _snapshot_cache_time.clear()
+        _dex_cache.clear()
     else:
         _snapshot_cache.pop(account_address, None)
         _snapshot_cache_time.pop(account_address, None)
+        _dex_cache.pop(account_address, None)
+
+
+def _fetch_dex_totals(info: Any, account_address: str, now: float) -> Tuple[float, float]:
+    """Sum ``accountValue`` / ``totalMarginUsed`` over the configured HIP-3 DEXes.
+
+    Cached per address for ``_snapshot_cache_ttl`` seconds so that both the
+    cached and the pre-fetched ``user_state`` paths share one set of DEX
+    calls per cycle. All-or-nothing: any ``API_ERRORS`` propagates and nothing
+    is cached, so the caller never sees a partial sum.
+    """
+    cached = _dex_cache.get(account_address)
+    if cached is not None and now - cached[0] < _snapshot_cache_ttl:
+        return cached[1], cached[2]
+    value = 0.0
+    margin = 0.0
+    for dex in _hip3_dexes:
+        dex_state = api_wrapper.call(info.user_state, account_address, dex)
+        summary = (dex_state or {}).get('marginSummary', {})
+        value += float(summary.get('accountValue', 0))
+        margin += float(summary.get('totalMarginUsed', 0))
+    _dex_cache[account_address] = (now, value, margin)
+    return value, margin
 
 
 def get_account_snapshot(
@@ -176,6 +204,9 @@ def get_account_snapshot(
     margin_used = float(margin_summary.get('totalMarginUsed', 0))
 
     # Portfolio Margin: spot stablecoin balances count as collateral.
+    # ``last_known_balance`` is a previous *complete* snapshot value (DEX equity
+    # included when enabled), so once it is substituted nothing may be added.
+    used_last_known = False
     try:
         spot_state = api_wrapper.call(info.spot_user_state, account_address)
         for bal in spot_state.get('balances', []):
@@ -184,6 +215,7 @@ def get_account_snapshot(
     except API_ERRORS as e:
         if last_known_balance is not None:
             account_value = last_known_balance
+            used_last_known = True
             logger.debug(
                 "Spot API failed, using last known balance: $%.2f", account_value
             )
@@ -193,20 +225,19 @@ def get_account_snapshot(
     # Standard abstraction: each HIP-3 DEX has its own clearinghouse. Mirror the
     # spot fallback so a transient DEX API failure does not shrink the account
     # value (and with it every cap) for one cycle.
-    for dex in _hip3_dexes:
+    if _hip3_dexes and not used_last_known:
         try:
-            dex_state = api_wrapper.call(info.user_state, account_address, dex)
-            dex_summary = (dex_state or {}).get('marginSummary', {})
-            account_value += float(dex_summary.get('accountValue', 0))
-            margin_used += float(dex_summary.get('totalMarginUsed', 0))
+            dex_value, dex_margin = _fetch_dex_totals(info, account_address, now)
+            account_value += dex_value
+            margin_used += dex_margin
         except API_ERRORS as e:
             if last_known_balance is not None:
                 account_value = last_known_balance
                 logger.debug(
-                    "DEX %s state failed, using last known balance: $%.2f", dex, account_value
+                    "HIP-3 DEX state failed, using last known balance: $%.2f", account_value
                 )
-                break
-            logger.debug("Could not fetch DEX %s state: %s", dex, e)
+            else:
+                logger.debug("Could not fetch HIP-3 DEX state: %s", e)
 
     snapshot = AccountSnapshot(account_value=account_value, margin_used=margin_used)
 
