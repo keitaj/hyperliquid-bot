@@ -6,7 +6,8 @@ import pytest
 
 from account_utils import (
     get_account_snapshot, AccountSnapshot, _COLLATERAL_COINS,
-    invalidate_snapshot_cache,
+    invalidate_snapshot_cache, set_hip3_dexes, get_hip3_dexes,
+    abstraction_mismatch_warning, ABSTRACTION_STANDARD,
 )
 
 
@@ -20,19 +21,37 @@ def _make_info(
     spot_balances: Optional[List] = None,
     spot_raises: Optional[Exception] = None,
     user_state_override: Optional[dict] = None,
+    dex_states: Optional[dict] = None,
 ):
-    """Build a mock ``info`` object with controllable API responses."""
+    """Build a mock ``info`` object with controllable API responses.
+
+    ``dex_states`` maps a DEX name to the ``user_state`` dict (or an exception
+    to raise) returned for ``info.user_state(address, dex)``; the default
+    clearinghouse (``dex=""``) keeps the standard response.
+    """
     info = MagicMock()
 
     if user_state_override is not None:
-        info.user_state.return_value = user_state_override
+        standard_state = user_state_override
     else:
-        info.user_state.return_value = {
+        standard_state = {
             'marginSummary': {
                 'accountValue': str(account_value),
                 'totalMarginUsed': str(margin_used),
             },
         }
+
+    if dex_states is None:
+        info.user_state.return_value = standard_state
+    else:
+        def _user_state(address, dex=""):
+            if not dex:
+                return standard_state
+            resp = dex_states[dex]
+            if isinstance(resp, Exception):
+                raise resp
+            return resp
+        info.user_state.side_effect = _user_state
 
     if spot_raises is not None:
         info.spot_user_state.side_effect = spot_raises
@@ -49,10 +68,16 @@ def _make_info(
 @pytest.fixture(autouse=True)
 def _bypass_api_wrapper():
     invalidate_snapshot_cache()
+    set_hip3_dexes(())
     with patch('account_utils.api_wrapper') as mock_wrapper:
         mock_wrapper.call.side_effect = lambda fn, *a, **kw: fn(*a, **kw)
         yield mock_wrapper
+    set_hip3_dexes(())
     invalidate_snapshot_cache()
+
+
+def _dex_state(account_value: float, margin_used: float) -> dict:
+    return {'marginSummary': {'accountValue': str(account_value), 'totalMarginUsed': str(margin_used)}}
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +229,152 @@ class TestSnapshotCache:
         get_account_snapshot(info, '0xdef')
 
         assert info.user_state.call_count == 2
+
+
+class TestHip3DexEquity:
+    """DEX clearinghouses are summed only when ``set_hip3_dexes`` was called."""
+
+    def test_default_excludes_dex_clearinghouses(self):
+        """Legacy behaviour: no DEX calls, DEX equity not counted."""
+        info = _make_info(
+            account_value=500.0, margin_used=100.0,
+            dex_states={'xyz': _dex_state(300.0, 50.0)},
+        )
+        snap = get_account_snapshot(info, '0xabc')
+
+        assert get_hip3_dexes() == ()
+        assert snap.account_value == 500.0
+        assert snap.margin_used == 100.0
+        # only the standard clearinghouse was queried
+        assert [c.args[1:] for c in info.user_state.call_args_list] == [()]
+
+    def test_dex_equity_and_margin_summed(self):
+        set_hip3_dexes(['xyz', 'km'])
+        info = _make_info(
+            account_value=500.0, margin_used=100.0,
+            spot_balances=[{'coin': 'USDC', 'total': '200.0'}],
+            dex_states={'xyz': _dex_state(300.0, 50.0), 'km': _dex_state(40.0, 10.0)},
+        )
+        snap = get_account_snapshot(info, '0xabc')
+
+        assert snap.account_value == 1040.0   # 500 + 200 spot + 300 + 40
+        assert snap.margin_used == 160.0      # 100 + 50 + 10
+        dex_calls = [c.args[1] for c in info.user_state.call_args_list if len(c.args) > 1]
+        assert dex_calls == ['xyz', 'km']
+
+    def test_set_hip3_dexes_drops_empty_names_and_invalidates_cache(self):
+        info = _make_info(account_value=500.0, dex_states={'xyz': _dex_state(300.0, 0.0)})
+        assert get_account_snapshot(info, '0xabc').account_value == 500.0  # cached legacy value
+
+        set_hip3_dexes(['', 'xyz'])
+        assert get_hip3_dexes() == ('xyz',)
+        # cache was invalidated: the next call re-fetches and includes xyz
+        assert get_account_snapshot(info, '0xabc').account_value == 800.0
+
+    def test_dex_api_failure_uses_last_known_balance(self):
+        from rate_limiter import API_ERRORS
+        set_hip3_dexes(['xyz'])
+        info = _make_info(
+            account_value=500.0, margin_used=100.0,
+            dex_states={'xyz': API_ERRORS[0]('boom')},
+        )
+        snap = get_account_snapshot(info, '0xabc', last_known_balance=777.0)
+
+        assert snap.account_value == 777.0
+        assert snap.margin_used == 100.0
+
+    def test_dex_api_failure_without_fallback_adds_nothing(self):
+        """All-or-nothing: a failing DEX never yields a partial DEX sum."""
+        from rate_limiter import API_ERRORS
+        set_hip3_dexes(['xyz', 'km'])
+        info = _make_info(
+            account_value=500.0, margin_used=100.0,
+            dex_states={'xyz': API_ERRORS[0]('boom'), 'km': _dex_state(40.0, 10.0)},
+        )
+        snap = get_account_snapshot(info, '0xabc')
+
+        assert snap.account_value == 500.0
+        assert snap.margin_used == 100.0
+
+    def test_spot_fallback_does_not_double_count_dex_equity(self):
+        """Blocker from review: last_known_balance is a complete prior snapshot
+        (DEX equity included), so DEX equity must not be added on top of it."""
+        from rate_limiter import API_ERRORS
+        set_hip3_dexes(['xyz'])
+        info = _make_info(
+            account_value=500.0, margin_used=100.0,
+            spot_raises=API_ERRORS[0]('spot down'),
+            dex_states={'xyz': _dex_state(300.0, 50.0)},
+        )
+        snap = get_account_snapshot(info, '0xabc', last_known_balance=1000.0)
+
+        assert snap.account_value == 1000.0           # not 1300
+        # DEX was not even queried once the fallback value was substituted
+        assert all(len(c.args) == 1 for c in info.user_state.call_args_list)
+
+    def test_dex_totals_cached_on_prefetched_user_state_path(self):
+        """risk_manager passes a pre-fetched user_state (bypassing the snapshot
+        cache); the DEX calls must still be shared within the TTL."""
+        set_hip3_dexes(['xyz'])
+        info = _make_info(account_value=500.0, margin_used=100.0, dex_states={'xyz': _dex_state(300.0, 50.0)})
+        pre = {'marginSummary': {'accountValue': '500.0', 'totalMarginUsed': '100.0'}}
+
+        for _ in range(3):
+            snap = get_account_snapshot(info, '0xabc', user_state=pre)
+            assert snap.account_value == 800.0
+            assert snap.margin_used == 150.0
+
+        dex_calls = [c for c in info.user_state.call_args_list if len(c.args) > 1]
+        assert len(dex_calls) == 1
+
+    def test_invalidate_cache_also_drops_dex_totals(self):
+        set_hip3_dexes(['xyz'])
+        info = _make_info(account_value=500.0, dex_states={'xyz': _dex_state(300.0, 0.0)})
+        pre = {'marginSummary': {'accountValue': '500.0', 'totalMarginUsed': '0'}}
+        get_account_snapshot(info, '0xabc', user_state=pre)
+        invalidate_snapshot_cache('0xabc')
+        get_account_snapshot(info, '0xabc', user_state=pre)
+
+        dex_calls = [c for c in info.user_state.call_args_list if len(c.args) > 1]
+        assert len(dex_calls) == 2
+
+    def test_dex_state_missing_margin_summary_counts_zero(self):
+        set_hip3_dexes(['xyz'])
+        info = _make_info(account_value=500.0, margin_used=100.0, dex_states={'xyz': {}})
+        snap = get_account_snapshot(info, '0xabc')
+
+        assert snap.account_value == 500.0
+        assert snap.margin_used == 100.0
+
+
+class TestAbstractionMismatchWarning:
+    """The flag must agree with the account's abstraction mode."""
+
+    @pytest.mark.parametrize("mode", ["unifiedAccount", "portfolioMargin"])
+    def test_flag_on_under_shared_collateral_warns_double_count(self, mode):
+        msg = abstraction_mismatch_warning(mode, True, ['xyz'])
+        assert msg is not None and 'double count' in msg
+
+    def test_flag_off_under_standard_warns_understated(self):
+        msg = abstraction_mismatch_warning(ABSTRACTION_STANDARD, False, ['xyz'])
+        assert msg is not None and 'understated' in msg
+
+    @pytest.mark.parametrize("mode,flag", [
+        (ABSTRACTION_STANDARD, True),       # standard + flag on: consistent
+        ("unifiedAccount", False),          # unified + flag off: consistent (legacy)
+        ("portfolioMargin", False),
+    ])
+    def test_consistent_combinations_return_none(self, mode, flag):
+        assert abstraction_mismatch_warning(mode, flag, ['xyz']) is None
+
+    @pytest.mark.parametrize("mode", [None, "default", "dexAbstraction"])
+    def test_unknown_or_undocumented_modes_do_not_warn(self, mode):
+        assert abstraction_mismatch_warning(mode, True, ['xyz']) is None
+        assert abstraction_mismatch_warning(mode, False, ['xyz']) is None
+
+    def test_no_dexes_never_warns(self):
+        assert abstraction_mismatch_warning("unifiedAccount", True, []) is None
+        assert abstraction_mismatch_warning(ABSTRACTION_STANDARD, False, []) is None
 
 
 class TestCollateralCoins:

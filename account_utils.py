@@ -1,14 +1,20 @@
-"""Shared account-value helpers for Portfolio Margin.
+"""Shared account-value helpers.
 
 Consolidates the logic for fetching perp account value + spot stablecoin
 collateral, which was previously duplicated across base_strategy,
 risk_manager, and margin_validator.
+
+Optionally (``set_hip3_dexes``) the snapshot also sums the clearinghouse of
+each HIP-3 DEX. That is only correct under *standard* abstraction, where every
+DEX holds its own margin balance; under unified account / portfolio margin the
+DEX margin is a hold on the spot balance that is already counted, so adding it
+would double count. ``abstraction_mismatch_warning`` encodes that rule.
 """
 
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterable, Optional, Sequence, Tuple
 
 from rate_limiter import api_wrapper, API_ERRORS
 
@@ -19,6 +25,15 @@ _COLLATERAL_COINS = frozenset(('USDC', 'USDH', 'USDT0'))
 
 # Default TTL for the snapshot cache (seconds).
 _DEFAULT_CACHE_TTL = 2.0
+
+# ``userAbstraction`` value for standard (manual) mode: abstraction disabled,
+# separate balances per DEX. The other documented values are "unifiedAccount",
+# "portfolioMargin", "dexAbstraction" and "default".
+ABSTRACTION_STANDARD = 'disabled'
+_ABSTRACTION_SHARED_COLLATERAL = frozenset(('unifiedAccount', 'portfolioMargin'))
+
+# HIP-3 DEXes whose clearinghouse is included in the snapshot (empty = legacy).
+_hip3_dexes: Tuple[str, ...] = ()
 
 
 @dataclass
@@ -34,6 +49,10 @@ class AccountSnapshot:
 _snapshot_cache: Dict[str, AccountSnapshot] = {}
 _snapshot_cache_time: Dict[str, float] = {}
 _snapshot_cache_ttl: float = _DEFAULT_CACHE_TTL
+# address -> (monotonic time, summed DEX accountValue, summed DEX totalMarginUsed).
+# Separate from the snapshot cache because callers that pass a pre-fetched
+# ``user_state`` bypass that cache but must still not re-query every DEX.
+_dex_cache: Dict[str, Tuple[float, float, float]] = {}
 
 
 def set_snapshot_cache_ttl(ttl: float) -> None:
@@ -42,14 +61,89 @@ def set_snapshot_cache_ttl(ttl: float) -> None:
     _snapshot_cache_ttl = ttl
 
 
+def set_hip3_dexes(dexes: Iterable[str]) -> None:
+    """Include these HIP-3 DEX clearinghouses in every snapshot.
+
+    Called once at startup, and only when the account runs under standard
+    abstraction (see module docstring). Pass an empty iterable to restore the
+    legacy perp + spot behaviour. Drops cached snapshots so the change applies
+    immediately.
+    """
+    global _hip3_dexes
+    _hip3_dexes = tuple(d for d in dexes if d)
+    invalidate_snapshot_cache()
+
+
+def get_hip3_dexes() -> Tuple[str, ...]:
+    """DEXes currently included in the snapshot (empty tuple = legacy)."""
+    return _hip3_dexes
+
+
+def abstraction_mismatch_warning(
+    abstraction: Optional[str],
+    include_dex_equity: bool,
+    hip3_dexes: Sequence[str],
+) -> Optional[str]:
+    """Return a warning when the DEX-equity flag disagrees with the account mode.
+
+    * flag on + shared-collateral mode (unified / portfolio margin): the DEX
+      margin is already in the spot balance, so the snapshot double counts.
+    * flag off + standard mode while trading HIP-3 DEXes: the DEX margin is
+      invisible to the snapshot, so caps and margin guards run on an
+      understated account value.
+
+    Returns ``None`` when consistent, when no DEXes are traded, or when the
+    mode is unknown (``None`` / undocumented value).
+    """
+    if not hip3_dexes or abstraction is None:
+        return None
+    if include_dex_equity and abstraction in _ABSTRACTION_SHARED_COLLATERAL:
+        return (
+            f"INCLUDE_HIP3_DEX_EQUITY is on but userAbstraction={abstraction!r}: "
+            f"HIP-3 DEX margin is already counted via the spot balance, so the "
+            f"account snapshot double counts. Turn the flag off."
+        )
+    if not include_dex_equity and abstraction == ABSTRACTION_STANDARD:
+        return (
+            f"userAbstraction={abstraction!r} (standard) while trading {list(hip3_dexes)} "
+            f"with INCLUDE_HIP3_DEX_EQUITY off: DEX margin is excluded from the account "
+            f"snapshot, so position caps and margin guards use an understated value."
+        )
+    return None
+
+
 def invalidate_snapshot_cache(account_address: Optional[str] = None) -> None:
     """Drop cached snapshots.  If *account_address* is ``None``, drop all."""
     if account_address is None:
         _snapshot_cache.clear()
         _snapshot_cache_time.clear()
+        _dex_cache.clear()
     else:
         _snapshot_cache.pop(account_address, None)
         _snapshot_cache_time.pop(account_address, None)
+        _dex_cache.pop(account_address, None)
+
+
+def _fetch_dex_totals(info: Any, account_address: str, now: float) -> Tuple[float, float]:
+    """Sum ``accountValue`` / ``totalMarginUsed`` over the configured HIP-3 DEXes.
+
+    Cached per address for ``_snapshot_cache_ttl`` seconds so that both the
+    cached and the pre-fetched ``user_state`` paths share one set of DEX
+    calls per cycle. All-or-nothing: any ``API_ERRORS`` propagates and nothing
+    is cached, so the caller never sees a partial sum.
+    """
+    cached = _dex_cache.get(account_address)
+    if cached is not None and now - cached[0] < _snapshot_cache_ttl:
+        return cached[1], cached[2]
+    value = 0.0
+    margin = 0.0
+    for dex in _hip3_dexes:
+        dex_state = api_wrapper.call(info.user_state, account_address, dex)
+        summary = (dex_state or {}).get('marginSummary', {})
+        value += float(summary.get('accountValue', 0))
+        margin += float(summary.get('totalMarginUsed', 0))
+    _dex_cache[account_address] = (now, value, margin)
+    return value, margin
 
 
 def get_account_snapshot(
@@ -82,8 +176,10 @@ def get_account_snapshot(
     Returns
     -------
     AccountSnapshot
-        ``account_value`` includes spot stablecoin balances (Portfolio Margin).
-        ``margin_used`` comes from ``marginSummary.totalMarginUsed``.
+        ``account_value`` includes spot stablecoin balances (Portfolio Margin)
+        and, when ``set_hip3_dexes`` was called, each HIP-3 DEX clearinghouse's
+        ``accountValue``. ``margin_used`` comes from
+        ``marginSummary.totalMarginUsed`` (summed across those DEXes likewise).
 
     Raises
     ------
@@ -108,6 +204,9 @@ def get_account_snapshot(
     margin_used = float(margin_summary.get('totalMarginUsed', 0))
 
     # Portfolio Margin: spot stablecoin balances count as collateral.
+    # ``last_known_balance`` is a previous *complete* snapshot value (DEX equity
+    # included when enabled), so once it is substituted nothing may be added.
+    used_last_known = False
     try:
         spot_state = api_wrapper.call(info.spot_user_state, account_address)
         for bal in spot_state.get('balances', []):
@@ -116,11 +215,29 @@ def get_account_snapshot(
     except API_ERRORS as e:
         if last_known_balance is not None:
             account_value = last_known_balance
+            used_last_known = True
             logger.debug(
                 "Spot API failed, using last known balance: $%.2f", account_value
             )
         else:
             logger.debug("Could not fetch spot state: %s", e)
+
+    # Standard abstraction: each HIP-3 DEX has its own clearinghouse. Mirror the
+    # spot fallback so a transient DEX API failure does not shrink the account
+    # value (and with it every cap) for one cycle.
+    if _hip3_dexes and not used_last_known:
+        try:
+            dex_value, dex_margin = _fetch_dex_totals(info, account_address, now)
+            account_value += dex_value
+            margin_used += dex_margin
+        except API_ERRORS as e:
+            if last_known_balance is not None:
+                account_value = last_known_balance
+                logger.debug(
+                    "HIP-3 DEX state failed, using last known balance: $%.2f", account_value
+                )
+            else:
+                logger.debug("Could not fetch HIP-3 DEX state: %s", e)
 
     snapshot = AccountSnapshot(account_value=account_value, margin_used=margin_used)
 
