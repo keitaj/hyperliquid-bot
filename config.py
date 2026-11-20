@@ -127,6 +127,17 @@ class Config:
     # Whether to also trade standard Hyperliquid perps (non-HIP-3).
     ENABLE_STANDARD_HL: bool = os.getenv("ENABLE_STANDARD_HL", "true").lower() == "true"
 
+    # Include each HIP-3 DEX clearinghouse (accountValue / totalMarginUsed) in
+    # the account snapshot used for position caps and margin guards.
+    #
+    # Only correct under *standard* abstraction (``userAbstraction`` ==
+    # "disabled"), where each DEX holds its own margin balance. Under unified
+    # account / portfolio margin the DEX margin is a hold on the spot balance
+    # that the snapshot already counts, so enabling this would double count.
+    # Default off = legacy behaviour. The bot logs a warning at startup when
+    # this flag disagrees with the account's abstraction mode.
+    INCLUDE_HIP3_DEX_EQUITY: bool = os.getenv("INCLUDE_HIP3_DEX_EQUITY", "false").lower() == "true"
+
     # ------------------------------------------------------------------ #
     # Date-keyed event overrides (earnings days, scheduled macro events)
     # ------------------------------------------------------------------ #

@@ -81,6 +81,7 @@ _assert_sdk_version()
 # preserved; the runtime class sends cancels with the ``fast`` flag.
 from fast_cancel_exchange import FastCancelExchange as Exchange  # noqa: E402
 from config import Config  # noqa: E402
+import account_utils  # noqa: E402
 from market_data import MarketDataManager  # noqa: E402
 from order_manager import OrderManager  # noqa: E402
 from risk_manager import RiskManager  # noqa: E402
@@ -337,6 +338,13 @@ class HyperliquidBot:
         # ------------------------------------------------------------------ #
         self.hip3_dexes: List[str] = Config.TRADING_DEXES
         self._init_connections()
+
+        # Standard abstraction keeps a separate margin balance per HIP-3 DEX;
+        # include them in the shared account snapshot when configured, and
+        # warn if the flag disagrees with the account's actual mode.
+        if Config.INCLUDE_HIP3_DEX_EQUITY and self.hip3_dexes:
+            account_utils.set_hip3_dexes(self.hip3_dexes)
+        self._check_abstraction_mode()
 
         self.risk_config = self._build_risk_config()
         self.risk_manager = RiskManager(
@@ -693,6 +701,29 @@ class HyperliquidBot:
         # whose rewards programs require attaching a builder to each
         # order).  Idempotent — safe to re-run on every startup.
         self.order_manager.approve_configured_builders()
+
+    def _check_abstraction_mode(self) -> None:
+        """Log the account's abstraction mode; warn if it contradicts the DEX-equity flag.
+
+        Never raises: a failed lookup only skips the check.
+        """
+        try:
+            from rate_limiter import api_wrapper
+            mode = api_wrapper.call(self.info.query_user_abstraction_state, self.account_address)
+        except Exception as e:  # noqa: BLE001 — diagnostics only, must not block startup
+            logger.debug("Could not query userAbstraction: %s", e)
+            return
+        logger.info(
+            "Account abstraction: %s (INCLUDE_HIP3_DEX_EQUITY=%s, HIP-3 DEXes=%s)",
+            mode, Config.INCLUDE_HIP3_DEX_EQUITY, self.hip3_dexes,
+        )
+        warning = account_utils.abstraction_mismatch_warning(
+            mode if isinstance(mode, str) else None,
+            Config.INCLUDE_HIP3_DEX_EQUITY,
+            self.hip3_dexes,
+        )
+        if warning:
+            logger.warning(warning)
 
     @staticmethod
     def _build_risk_config() -> Dict:
